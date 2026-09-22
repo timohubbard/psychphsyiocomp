@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sessions</title>
+<style>
+  :root {
+    --bg: #101216; --fg: #e8eaed; --muted: #9aa0a6; --accent: #4c8dff;
+    --ok: #5cb85c; --warn: #e0a800; --bad: #d9534f;
+    --panel: #181b21; --border: #262a31; --panel2: #1e222a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+    font: 14px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  body { display: flex; flex-direction: column; }
+
+  header { padding: 14px 20px; border-bottom: 1px solid var(--border);
+           display: flex; align-items: baseline; gap: 14px; flex: 0 0 auto; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header .sub { color: var(--muted); font-size: 12px; }
+
+  main { flex: 1; display: grid; grid-template-columns: 340px 1fr; min-height: 0; }
+  #list { border-right: 1px solid var(--border); overflow-y: auto; }
+  #detail { overflow-y: auto; padding: 20px 24px; }
+
+  .sess { padding: 12px 16px; border-bottom: 1px solid var(--border); cursor: pointer; }
+  .sess:hover { background: var(--panel); }
+  .sess.active { background: var(--panel2); box-shadow: inset 3px 0 0 var(--accent); }
+  .sess .id { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+  .sess .meta { color: var(--muted); font-size: 12px; margin-top: 3px; }
+  .sess .pills { margin-top: 7px; display: flex; gap: 5px; flex-wrap: wrap; }
+
+  .pill { font-size: 11px; padding: 2px 7px; border-radius: 10px;
+          border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+  .pill.ok   { color: var(--ok);   border-color: #2f5130; }
+  .pill.warn { color: var(--warn); border-color: #5a4a10; }
+  .pill.bad  { color: var(--bad);  border-color: #5c2f2e; }
+
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .07em;
+       color: var(--muted); margin: 26px 0 10px; font-weight: 600; }
+  h2:first-child { margin-top: 0; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .card { background: var(--panel); border: 1px solid var(--border);
+          border-radius: 8px; padding: 12px 14px; }
+  .card .k { color: var(--muted); font-size: 11px; text-transform: uppercase;
+             letter-spacing: .05em; }
+  .card .v { font-size: 19px; margin-top: 4px;
+             font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .card .n { color: var(--muted); font-size: 11px; margin-top: 3px; }
+  .card.ok .v { color: var(--ok); } .card.warn .v { color: var(--warn); }
+  .card.bad .v { color: var(--bad); }
+
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  th { text-align: left; color: var(--muted); font-weight: 600; padding: 6px 10px;
+       border-bottom: 1px solid var(--border); position: sticky; top: 0;
+       background: var(--bg); font-size: 11px; text-transform: uppercase;
+       letter-spacing: .05em; }
+  td { padding: 5px 10px; border-bottom: 1px solid #1c2027;
+       font-family: ui-monospace, Menlo, Consolas, monospace; }
+  td.txt { font-family: inherit; }
+  tr.clickable { cursor: pointer; }
+  tr.clickable:hover td { background: var(--panel); }
+
+  .scroll { max-height: 340px; overflow-y: auto; border: 1px solid var(--border);
+            border-radius: 8px; }
+  .note { font-size: 12.5px; color: var(--muted); border-left: 2px solid var(--border);
+          padding: 2px 0 2px 12px; margin: 10px 0; }
+  .empty { color: var(--muted); padding: 40px 0; text-align: center; }
+  code { background: #22262d; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+  button { background: transparent; border: 1px solid var(--border); color: var(--fg);
+           padding: 5px 11px; border-radius: 6px; font-size: 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  svg { display: block; }
+  .tier-low { color: var(--warn); } .tier-high { color: var(--ok); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Sessions</h1>
+  <span class="sub" id="sub">loading…</span>
+</header>
+
+<main>
+  <div id="list"></div>
+  <div id="detail"><div class="empty">Select a session</div></div>
+</main>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

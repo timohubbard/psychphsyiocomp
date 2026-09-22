@@ -36,6 +36,8 @@ from engine_contract.media import mean_luma  # noqa: E402
 # engine was added.
 _face = load_engine_module("face.mediapipe_blendshapes")
 MediaPipeBlendshapesBatch = _face.MediaPipeBlendshapesBatch
+
+_gaze = load_engine_module("gaze.mediapipe_features")
 from pipeline import SessionBundle, process_session  # noqa: E402
 from tables import read_session  # noqa: E402
 
@@ -72,12 +74,22 @@ def scan_luma(video_path: Path, max_frames: int | None = None) -> list[tuple[flo
     return out
 
 
+def _gaze_stage(writer, bundle, solution):
+    """Feature engine plus estimator, as one pipeline stage."""
+    from gaze_pipeline import run_gaze
+    engine = _gaze.MediaPipeGazeFeatures(str(MODEL_PATH))
+    return run_gaze(writer, bundle, engine, solution,
+                    feature_channels=_gaze.FEATURE_CHANNELS)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("bundle", type=Path, help="directory holding session.json")
     ap.add_argument("--out", type=Path, default=Path("out"))
     ap.add_argument("--max-frames", type=int, default=None,
                     help="cap the decode for a quick smoke run")
+    ap.add_argument("--no-gaze", action="store_true",
+                    help="skip the gaze engine and estimator")
     args = ap.parse_args()
 
     bundle = SessionBundle.from_dir(args.bundle)
@@ -107,7 +119,9 @@ def main() -> int:
               f"(median {float(np.median(vals)):.1f})")
 
     engines = [(MediaPipeBlendshapesBatch(str(MODEL_PATH)), {})]
-    summary = process_session(bundle, engines, args.out, video_luma=luma)
+    summary = process_session(bundle, engines, args.out, video_luma=luma,
+                              extra_stages=None if args.no_gaze else [_gaze_stage])
+
 
     print("\n  " + "-" * 72)
     print(f"  sources written  {sorted(summary['sources'])}")
@@ -125,6 +139,21 @@ def main() -> int:
 
     aligned = pc.sum(pc.invert(pc.is_null(sig.column("master_ts")))).as_py() or 0
     print(f"  aligned rows     {aligned} / {sig.num_rows}")
+
+    g = summary.get("gaze")
+    if g:
+        print(f"\n  gaze           status={g['status']}")
+        if g["status"] == "ok":
+            deg = (f"{g['average_offset_deg']:.2f} deg"
+                   if g.get("average_offset_deg") else "no geometry, px only")
+            print(f"    offset       {g['average_offset_px']:.0f} px  =  {deg}")
+            print(f"    in ROI       {g['percent_in_roi']:.0%}"
+                  f"   rate {g['samples_per_sec']:.1f} Hz")
+            print(f"    fitted on    {g['n_calibration_targets']} targets, "
+                  f"scored on {g['n_validation_targets']} held-out")
+            print(f"    gate         {'PASS' if g['passed'] else 'FAIL'} {g['reasons']}")
+        else:
+            print(f"    {g.get('refusal') or g.get('reasons')}")
 
     print("\n  M0 criterion on REAL data: "
           f"{'PASS' if len(srcs) >= 2 else 'FAIL'} "

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Open-source webcam-based behavioral research platform — an iMotions-equivalent built from open components. Academic / non-profit build.",
+  "description": "Open-source webcam-based behavioral research platform \u2014 an iMotions-equivalent built from open components. Academic / non-profit build.",
   "license": "MIT",
   "engines": {
     "node": ">=22"
@@ -22,6 +22,8 @@
     "models": "node tools/py.mjs tools/fetch_models.py",
     "py": "node tools/py.mjs",
     "verify:m0": "node tools/py.mjs server/verify_m0.py",
-    "serve": "node tools/serve.mjs"
+    "serve": "node tools/serve.mjs",
+    "app": "node tools/py.mjs server/app.py --data out",
+    "process": "node tools/py.mjs server/process_bundle.py"
   }
 }

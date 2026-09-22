@@ -177,6 +177,7 @@ def process_session(
     out_root: str | Path,
     *,
     video_luma: list[tuple[float, float]] | None = None,
+    extra_stages: list[Any] | None = None,
 ) -> dict[str, Any]:
     """Run engines over a session bundle and write the canonical tables.
 
@@ -245,9 +246,11 @@ def process_session(
         if bundle.video_path is None:
             continue
 
-        from importlib import import_module
+        # From the contract, not from whichever module happens to be named
+        # `engine` on sys.path — media probing is shared infrastructure and
+        # every engine must be handed an identically-built descriptor.
+        from engine_contract.media import describe_video
 
-        describe_video = import_module("engine").describe_video
         media: MediaDescriptor = describe_video(bundle.video_path)
 
         started = datetime.now(timezone.utc)
@@ -279,6 +282,11 @@ def process_session(
             "rows": n, "aligned": solution.aligned,
             "unaligned_reason": solution.unaligned_reason,
         })
+
+    # Stages that are not engines: they need the master clock, which engines
+    # are forbidden to know about. The gaze estimator is the first of these.
+    for stage in (extra_stages or []):
+        summary["gaze"] = stage(writer, bundle, registry.solve("video_pts"))
 
     paths = writer.close()
     summary["sources"] = sorted(summary["sources"])

@@ -143,14 +143,47 @@ The ±33ms on the server rows is the clapper anchor uncertainty — one frame at
 30fps. That is an honest error bar, not a rounding artefact: §3.3 is explicit
 that AV sync is a ceiling rather than a bug to fix.
 
+## The app
+
+Three commands, end to end:
+
+```bash
+npm run serve      # capture page      -> participant records a session
+npm run process -- tempdata --out out/ # bundle -> canonical Parquet + gaze fit
+npm run app        # researcher app    -> http://localhost:5174/
+```
+
+`process` runs the facial engine in both placements, the gaze feature engine,
+and the ridge estimator, and writes one append-only Parquet store. On a real
+session that is four `source` values over ~790,000 rows, every one carrying a
+master timestamp.
+
+The researcher app is read-only and stdlib-only. Read-only because the
+canonical tables are append-only and the thing that appends is the pipeline — a
+UI that could edit a measurement could quietly un-record a refusal.
+Stdlib-only because a research instrument's dependency list is part of its
+reproducibility story, and a session browser does not justify adding to it.
+
+It shows, per session: alignment fraction, recovered geometry with its error
+bar, capture rate against §5.3's 5 Hz exclusion threshold, gaze error against
+§4.2's AOI budget, luminance against §2.5's fairness floor, per-engine licence,
+windowed quality traces, every channel with its reliability tier, and CSV export
+per channel.
+
+**Gaze accuracy is deliberately not colour-coded.** §5.3 records that no
+pass/fail cutoff is published for it, so the figure is shown beside its context
+rather than graded — a green badge here would silently become the project's
+inclusion criterion without anyone preregistering it.
+
 ### M1 — gaze
 
 - [x] Virtual chinrest — screen geometry per participant (`web/src/chinrest.js`)
 - [x] `sessions` canonical table — geometry queryable beside the signals
 - [x] Capture page verified in a real browser (first time — see below)
 - [x] **Real capture run** — full session on live hardware, through the pipeline
-- [ ] Validation metrics (`percent_in_roi`, `average_offset`, `samples_per_sec`)
-- [ ] MediaPipe eye normalisation + per-participant ridge baseline (the floor)
+- [x] MediaPipe eye features engine + per-participant ridge baseline (the floor)
+- [x] Validation metrics (`percent_in_roi`, `average_offset`, `samples_per_sec`)
+- [x] **1.65° on held-out targets** from a real session — see below
 - [ ] Eval harness, including the human-annotation arm
 - [ ] L2CS-Net fine-tune, ONNX export
 - [ ] HMM fixation classifier (**not** I-VT/I-DT — §4.1)
@@ -237,6 +270,35 @@ interval, and a ramp cannot.
 Measured end to end: the camera sees the flash **~54ms** after the browser draws
 it. That latency also truncated the closing clapper, which is why
 `TIMINGS.clapperPostrollMs` now exists.
+
+### The trap that cost 3.4 degrees
+
+The first honest gaze number was 5.04°. The fix got it to 1.65°, and the reason
+is worth more than the number. Feature sets, scored on held-out targets:
+
+| feature set | held-out error |
+|---|---|
+| iris, linear | 2.17° |
+| iris, quadratic | **1.30°** |
+| iris quadratic + head pose | 1.65° |
+| every channel, linear | 5.04° ← *chosen by leave-one-out CV* |
+
+**Leave-one-out cross-validation picked the worst model, confidently.**
+
+Calibration points were presented in a fixed spatial order, so target y
+correlated with presentation index at r = +0.56. Head pitch drifted at r = +0.86
+with order while carrying almost no genuine vertical-gaze signal (r = +0.19 with
+target y) — so the model predicted *y from elapsed time*. LOOCV cannot detect
+this: the held-out point's temporal neighbours stay in the training set.
+
+Fixed in two places. The stimulus order is now randomised with a recorded seed,
+which removes the confound at source and is what §5.1 means when it notes
+jsPsych presents its grid in fixed order "unless randomized". And the design
+matrix carries only iris terms plus head pose — eyelid aperture and inter-ocular
+distance are quality gates, not gaze signals, and handing a drifting quantity to
+a regression is an invitation.
+
+Held-out n=5. That is an estimate with wide error bars, not a validated figure.
 
 ### A note on verification
 
