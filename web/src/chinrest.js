@@ -242,6 +242,23 @@ export const MIN_USABLE_REPS = 3;
  */
 export const VIEWING_DISTANCE_BOUNDS_MM = { min: 150, max: 1000 };
 
+/**
+ * How close to the end of the dot's travel a mark may fall and still count.
+ *
+ * A dot marked at the very edge of its travel is not a measurement. It is
+ * indistinguishable from "the dot never disappeared and I pressed space as it
+ * was about to leave the screen" — and the two have completely different
+ * meanings, because only one of them located a blind spot.
+ *
+ * This is the same trap as VIEWING_DISTANCE_BOUNDS_MM, one level up. There, five
+ * agreeing repetitions produced an impossible 2.4cm. Here, four agreeing
+ * repetitions produced 96.6cm on a screen whose geometry caps it at ~97cm —
+ * they agreed *because* they were all saturated against the same wall, and a
+ * fifth ran clean off the edge and was rejected. Agreement between measurements
+ * that all hit the same limit is not evidence; it is the limit.
+ */
+export const EDGE_SATURATION_FRACTION = 0.93;
+
 // ---------------------------------------------------------------------------
 // combined geometry
 // ---------------------------------------------------------------------------
@@ -256,7 +273,8 @@ export const VIEWING_DISTANCE_BOUNDS_MM = { min: 150, max: 1000 };
  * `errorInDegrees` already returns null on null geometry, so a refusal here
  * propagates instead of being swallowed at the boundary.
  *
- * @param {{cardWidthPx:number|null, blindSpotDistancesPx:number[]}} raw
+ * @param {{cardWidthPx:number|null, blindSpotDistancesPx:number[],
+ *          blindSpotMaxTravelPx?:number|null}} raw
  * @returns geometry record matching the `sessions` columns in canonical_tables.sql
  */
 export function deriveGeometry(raw) {
@@ -284,7 +302,33 @@ export function deriveGeometry(raw) {
       : NaN),
   );
 
+  // Reject marks that saturated against the end of the dot's travel BEFORE
+  // pooling them, so a saturated run fails for the right reason rather than
+  // surviving as a tight, confident, meaningless median.
+  const maxTravel = raw.blindSpotMaxTravelPx;
+  let edgeSaturated = 0;
+  if (Number.isFinite(maxTravel) && maxTravel > 0) {
+    const limit = maxTravel * EDGE_SATURATION_FRACTION;
+    for (let i = 0; i < distances.length; i += 1) {
+      const px = raw.blindSpotDistancesPx[i];
+      if (Number.isFinite(px) && px >= limit) {
+        distances[i] = NaN;
+        edgeSaturated += 1;
+      }
+    }
+  }
+
   const reps = summariseBlindSpotReps(distances);
+  if (edgeSaturated > 0 && reps.n < MIN_USABLE_REPS) {
+    return refuse('blind_spot_never_vanished',
+      `${edgeSaturated} of ${distances.length} marks landed at the end of the dot's `
+      + 'travel, so the dot most likely never disappeared. Usual causes, in order: '
+      + 'the other eye was not fully covered, the dot was tracked with the eye '
+      + 'rather than holding fixation, or the participant is sitting further back '
+      + 'than this screen is wide enough to measure — moving closer both fixes '
+      + 'that and improves every other signal the webcam has to work with.');
+  }
+
   if (reps.n < MIN_USABLE_REPS) {
     return refuse('blind_spot_insufficient_reps',
       `${reps.n} usable repetitions, need ${MIN_USABLE_REPS}`);

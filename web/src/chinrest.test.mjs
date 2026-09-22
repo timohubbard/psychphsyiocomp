@@ -10,6 +10,7 @@ import {
   MAX_REP_SPREAD_FRACTION,
   MIN_USABLE_REPS,
   VIEWING_DISTANCE_BOUNDS_MM,
+  EDGE_SATURATION_FRACTION,
   pxPerMmFromCard,
   checkCardPlausible,
   viewingDistanceMmFromBlindSpot,
@@ -370,4 +371,73 @@ test('the bounds reject the impossible without policing the merely unusual', () 
     'lower bound must sit below the smallest distance actually observed');
   assert.ok(VIEWING_DISTANCE_BOUNDS_MM.max > 683,
     'upper bound must sit above the largest distance actually observed');
+});
+
+
+// ---------------------------------------------------------------------------
+// edge saturation — the dot running out of screen is not a blind spot
+// ---------------------------------------------------------------------------
+
+test('marks at the end of the dot travel are refused, not averaged', () => {
+  // The exact second real capture. Screen 1707px wide, cross at 75% = 1280px of
+  // available travel; four marks landed at 1271px — NINE pixels of headroom —
+  // and a fifth ran clean off the edge. They agreed with each other beautifully
+  // and produced a confident 96.6cm, which is simply the largest distance this
+  // screen geometry can express (1280px / tan(13.5) / 5.48 px-per-mm).
+  //
+  // They agreed because they were all pressed against the same wall. That is
+  // the limit, not a measurement.
+  const g = deriveGeometry({
+    cardWidthPx: 469,
+    blindSpotDistancesPx: [1271, 1268, 1273, 1270, NaN],
+    blindSpotMaxTravelPx: 1280,
+  });
+
+  assert.equal(g.ok, false);
+  assert.equal(g.reason, 'blind_spot_never_vanished');
+  assert.equal(g.viewing_distance_mm, null);
+});
+
+test('the same marks are silently accepted without a travel limit', () => {
+  // Documents precisely what the extra parameter buys. Identical input, minus
+  // the one fact that makes it interpretable, yields a confident wrong answer.
+  const g = deriveGeometry({
+    cardWidthPx: 469,
+    blindSpotDistancesPx: [1271, 1268, 1273, 1270, NaN],
+  });
+
+  assert.equal(g.ok, true, 'without the limit this cannot be caught');
+  assert.ok(g.viewing_distance_mm > 900);
+});
+
+test('a genuine blind spot well short of the edge still passes', () => {
+  // 50cm at 5.48 px/mm needs ~658px of travel, half the available 1280.
+  const px = 500 * Math.tan((BLIND_SPOT_DEGREES * Math.PI) / 180) * (469 / CARD_WIDTH_MM);
+  const g = deriveGeometry({
+    cardWidthPx: 469,
+    blindSpotDistancesPx: Array(5).fill(px),
+    blindSpotMaxTravelPx: 1280,
+  });
+
+  assert.equal(g.ok, true);
+  assert.ok(Math.abs(g.viewing_distance_mm - 500) < 2);
+});
+
+test('one saturated repetition among good ones is dropped, not fatal', () => {
+  // A single mistimed press should cost that repetition and nothing more.
+  const good = 500 * Math.tan((BLIND_SPOT_DEGREES * Math.PI) / 180) * (469 / CARD_WIDTH_MM);
+  const g = deriveGeometry({
+    cardWidthPx: 469,
+    blindSpotDistancesPx: [good, good, good, good, 1275],
+    blindSpotMaxTravelPx: 1280,
+  });
+
+  assert.equal(g.ok, true);
+  assert.equal(g.reps_used, 4);
+  assert.ok(Math.abs(g.viewing_distance_mm - 500) < 2);
+});
+
+test('the saturation threshold leaves usable headroom', () => {
+  // Must not clip legitimate far-but-real marks, nor admit edge presses.
+  assert.ok(EDGE_SATURATION_FRACTION > 0.85 && EDGE_SATURATION_FRACTION < 0.98);
 });
