@@ -75,6 +75,26 @@ const server = createServer(async (req, res) => {
   }
 });
 
+// A port already in use used to end in a raw EADDRINUSE stack trace. The
+// likely cause is an earlier capture server still running — and that one is
+// NOT equivalent to a fresh start: it re-reads the page files on every request,
+// but its own routing (this file) is whatever was loaded when it started. That
+// is how a server started before the `?study=` redirect fix kept dropping the
+// query string after the fix was committed.
+server.on('error', (err) => {
+  if (err.code !== 'EADDRINUSE') throw err;
+  console.error(`
+  Port ${PORT} is already in use — probably an earlier capture server.
+
+  If tools/serve.mjs has changed since it started, it is still running the OLD
+  server code. Stop it and start again:
+    Windows:  Get-NetTCPConnection -LocalPort ${PORT} -State Listen | % { Stop-Process -Id $_.OwningProcess }
+    macOS:    lsof -ti tcp:${PORT} | xargs kill
+  Or run this one elsewhere:  PORT=5180 npm run serve
+`);
+  process.exit(1);
+});
+
 server.listen(PORT, () => {
   console.log(`\n  capture page:  http://localhost:${PORT}/\n`);
   console.log('  Camera access needs a secure context; localhost counts as one.\n');
