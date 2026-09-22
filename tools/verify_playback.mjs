@@ -45,9 +45,8 @@ async function main() {
     // exactly what annotate.js would issue.
     await page.send('Page.navigate', { url: `http://localhost:${PORT}/` });
     // Wait for the NEW document, not just a complete one: about:blank is
-    // already "complete", and a probe created there resolves a relative src
-    // against nothing — which Chrome reports as "URL safety check" and which
-    // made the first negative control fail for the wrong reason.
+    // already "complete", and a probe created there would resolve its
+    // relative src against the wrong document.
     await page.until(`location.origin === 'http://localhost:${PORT}' && document.readyState === 'complete'`,
       'the app to load');
 
