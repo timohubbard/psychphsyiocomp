@@ -487,3 +487,29 @@ def test_session_row_survives_a_malformed_timestamp(tmp_path, ctx):
     row = _sessions(tmp_path)[0]
     assert row["started_utc"] is None
     assert row["viewing_distance_mm"] == pytest.approx(473.0)
+
+
+# ---------------------------------------------------------------------------
+# consent
+# ---------------------------------------------------------------------------
+
+def test_consent_tier_is_persisted(tmp_path, ctx):
+    w = CanonicalWriter(tmp_path, ctx)
+    w.set_session_metadata({**GOOD_MANIFEST, "consent": {
+        "tier": "media_retained", "retentionDays": 365}})
+    w.close()
+
+    row = _sessions(tmp_path)[0]
+    assert row["consent_tier"] == "media_retained"
+    assert row["consent_retention_days"] == 365
+
+
+def test_a_missing_consent_record_is_null_not_the_safest_tier(tmp_path, ctx):
+    """NULL means 'no decision was recorded', which is a different thing from
+    the most restrictive tier. Treating one as the other would quietly
+    manufacture a consent decision nobody made."""
+    w = CanonicalWriter(tmp_path, ctx)
+    w.set_session_metadata(GOOD_MANIFEST)
+    w.close()
+
+    assert _sessions(tmp_path)[0]["consent_tier"] is None

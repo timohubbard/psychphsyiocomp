@@ -131,6 +131,11 @@ SESSIONS_SCHEMA = pa.schema([
     pa.field("geometry_precision_mm", pa.float64(), nullable=True),
     pa.field("geometry_refusal_reason", pa.string(), nullable=True),
     pa.field("applied_audio_constraints", pa.string(), nullable=True),  # JSON
+    # What the participant agreed to keep. Nullable, and a NULL means "no
+    # decision was recorded" — which is a different thing from the most
+    # restrictive tier, and must not be silently treated as one.
+    pa.field("consent_tier", pa.string(), nullable=True),
+    pa.field("consent_retention_days", pa.int32(), nullable=True),
     pa.field("achieved_fps", pa.float64(), nullable=True),
     pa.field("clock_id", pa.string(), nullable=True),
     pa.field("clock_resolution_ms", pa.float64(), nullable=True),
@@ -220,6 +225,9 @@ class CanonicalWriter:
             "geometry_precision_mm": geometry.get("precision_mm"),
             "geometry_refusal_reason": geometry.get("reason"),
             "applied_audio_constraints": json.dumps(audio) if audio else None,
+            "consent_tier": (manifest.get("consent") or {}).get("tier"),
+            "consent_retention_days": _opt_int(
+                (manifest.get("consent") or {}).get("retentionDays")),
             "achieved_fps": manifest.get("achieved_fps"),
             "clock_id": clock.get("master_clock_id"),
             "clock_resolution_ms": clock.get("measured_resolution_ms"),

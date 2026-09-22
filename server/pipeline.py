@@ -190,6 +190,47 @@ def build_registry(
     return reg
 
 
+def enforce_consent(bundle, summary: dict[str, Any]) -> dict[str, Any]:
+    """Act on the participant's retention decision, after processing.
+
+    This is what makes a consent tier a control rather than a recorded
+    preference. §6.5 describes the shape: raw video processed and discarded
+    within the session by default, with retention as an explicit,
+    separately-consented opt-in. A tier that is written to a column and never
+    acted on is not consent, it is a note about consent.
+
+    Deletion happens AFTER the engines run, not before, because the whole point
+    of `features_only` is that the derived measurements survive — the recording
+    is a means, not the product.
+
+    Refuses to guess. A session with no recorded tier keeps its media and is
+    flagged, because deleting a participant's recording on the strength of a
+    missing field is not a recoverable mistake.
+    """
+    tier = (bundle.metadata.get("consent") or {}).get("tier")
+    retains = tier in ("media_retained", "media_plus_transcript")
+
+    result: dict[str, Any] = {"tier": tier, "media_deleted": False}
+
+    if tier is None:
+        result["action"] = "kept_no_tier_recorded"
+        return result
+    if retains:
+        result["action"] = "kept_per_consent"
+        return result
+
+    deleted = []
+    for path in (bundle.video_path, bundle.audio_path):
+        if path and Path(path).exists():
+            Path(path).unlink()
+            deleted.append(Path(path).name)
+
+    result["action"] = "deleted_per_consent"
+    result["media_deleted"] = bool(deleted)
+    result["deleted"] = deleted
+    return result
+
+
 def process_session(
     bundle: SessionBundle,
     engines: list[tuple[Engine, dict[str, Any]]],
@@ -306,6 +347,10 @@ def process_session(
     # are forbidden to know about. The gaze estimator is the first of these.
     for name, stage in (extra_stages or []):
         summary[name] = stage(writer, bundle, registry.solve("video_pts"))
+
+    # After the engines, never before: `features_only` means the measurements
+    # survive and the recording does not.
+    summary["consent"] = enforce_consent(bundle, summary)
 
     paths = writer.close()
     summary["sources"] = sorted(summary["sources"])

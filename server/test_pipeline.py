@@ -274,3 +274,67 @@ def test_unaligned_session_records_reason_in_runs(engine, clip_with_flash, tmp_p
     assert all(r["native_ts"] is not None for r in server), (
         "native_ts stays authoritative even when unaligned"
     )
+
+
+# ---------------------------------------------------------------------------
+# consent enforcement
+# ---------------------------------------------------------------------------
+
+def _bundle_with(tmp_path, tier):
+    """A bundle with a real file standing in for the recording."""
+    from pipeline import SessionBundle
+
+    video = tmp_path / "capture.webm"
+    video.write_bytes(b"not really a video")
+    audio = tmp_path / "capture.audio.wav"
+    audio.write_bytes(b"not really audio")
+
+    meta = {} if tier is None else {"consent": {"tier": tier}}
+    return SessionBundle(session_id="s", participant_id="p", study_id="d",
+                         video_path=video, audio_path=audio, metadata=meta)
+
+
+def test_features_only_deletes_the_recording(tmp_path):
+    """§6.5: raw video processed and discarded within the session by default.
+    A tier written to a column and never acted on is not consent, it is a note
+    about consent."""
+    from pipeline import enforce_consent
+
+    b = _bundle_with(tmp_path, "features_only")
+    r = enforce_consent(b, {})
+
+    assert r["action"] == "deleted_per_consent"
+    assert r["media_deleted"] is True
+    assert not b.video_path.exists()
+    assert not b.audio_path.exists()
+
+
+def test_media_retained_keeps_the_recording(tmp_path):
+    from pipeline import enforce_consent
+
+    b = _bundle_with(tmp_path, "media_retained")
+    r = enforce_consent(b, {})
+
+    assert r["action"] == "kept_per_consent"
+    assert b.video_path.exists()
+
+
+def test_transcript_tier_also_keeps_the_recording(tmp_path):
+    from pipeline import enforce_consent
+
+    b = _bundle_with(tmp_path, "media_plus_transcript")
+    assert enforce_consent(b, {})["action"] == "kept_per_consent"
+    assert b.video_path.exists()
+
+
+def test_a_session_with_no_tier_keeps_its_media_and_says_so(tmp_path):
+    """Deleting a participant's recording on the strength of a missing field is
+    not a recoverable mistake. Refuse to guess, keep the file, flag it."""
+    from pipeline import enforce_consent
+
+    b = _bundle_with(tmp_path, None)
+    r = enforce_consent(b, {})
+
+    assert r["action"] == "kept_no_tier_recorded"
+    assert r["media_deleted"] is False
+    assert b.video_path.exists()

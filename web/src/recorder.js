@@ -57,6 +57,7 @@ export class SessionRecorder {
     this._recordingStartedAt = null;
     this._frameStats = { frames: 0, firstTs: null, lastTs: null };
     this._geometry = null;
+    this._consent = null;
   }
 
   // -- capture ---------------------------------------------------------
@@ -188,6 +189,23 @@ export class SessionRecorder {
     return geometry;
   }
 
+  /**
+   * Record the participant's consent decision.
+   *
+   * Stored whole, not just the tier. "They consented to media retention" is not
+   * answerable later without knowing what they were told retention meant, and
+   * 45 CFR 46.116 makes retention period and secondary use required elements —
+   * so what was disclosed travels with what was agreed.
+   */
+  setConsent(record) {
+    this._consent = record;
+    this.logEvent('consent', {
+      tier: record?.tier ?? null,
+      retention_days: record?.retentionDays ?? null,
+    });
+    return record;
+  }
+
   /** Close a previously-opened event, e.g. a stimulus that has a duration. */
   closeEvent(eventType, stimulusId = null) {
     for (let i = this._events.length - 1; i >= 0; i -= 1) {
@@ -239,6 +257,8 @@ export class SessionRecorder {
       applied_audio_constraints: this._appliedAudioConstraints,
       video_settings: this._appliedVideoSettings,
       geometry: this._geometry,
+      consent: this._consent,
+      consent_tier: this._consent?.tier ?? null,
       achieved_fps: this.achievedFps(),
       // Recorded because it bounds what precision was even possible (§3.3).
       clock: {

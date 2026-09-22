@@ -18,6 +18,7 @@ import {
 import { MediaPipeBlendshapesLive } from '../../engines/face.mediapipe_blendshapes/browser/engine.js';
 import { runVirtualChinrest, CHINREST_CSS } from './chinrest-ui.js';
 import { stimulusSizeErrorFraction } from './chinrest.js';
+import { retainsMedia, runConsent } from './consent.js';
 
 const el = (id) => document.getElementById(id);
 
@@ -41,6 +42,7 @@ const state = {
   videoBlob: null,
   rafHandle: null,
   frameLoopKind: null,
+  consent: null,
   geometry: null,
   quality: { fps: null, faceRate: null, luma: null },
 };
@@ -68,15 +70,23 @@ const MIN_FPS = 5;
 
 ui.btnEnable.addEventListener('click', async () => {
   ui.btnEnable.disabled = true;
-  ui.chkStream.textContent = 'requesting…';
 
   try {
+    // Consent first, before the camera is ever requested. A permission prompt
+    // that appears before the participant has been told what happens to the
+    // recording asks them to decide with the information in the wrong order.
+    if (!state.consent) {
+      state.consent = await runConsent(document.body);
+    }
+    ui.chkStream.textContent = 'requesting…';
+
     state.recorder = new SessionRecorder({
       sessionId: `s_${Date.now().toString(36)}`,
       participantId: new URLSearchParams(location.search).get('pid') || 'anonymous',
       studyId: new URLSearchParams(location.search).get('study') || 'm0',
     });
 
+    state.recorder.setConsent(state.consent);
     const { appliedAudioConstraints } = await state.recorder.start();
     ui.preview.srcObject = state.recorder.stream;
     ui.chkStream.textContent = 'ok';
@@ -552,6 +562,9 @@ function renderSummary() {
   const g = state.geometry;
   const rows = [
     ['Session', manifest.session_id],
+    ['Consent', state.consent
+      ? `${state.consent.tier}${retainsMedia(state.consent.tier) ? '' : ' — recording will be deleted'}`
+      : '—'],
     // Shown with its error bar or not at all. A viewing distance quoted without
     // one invites exactly the false precision the chinrest module refuses to
     // produce — the accuracy floor is ±5.5cm however steady the participant was.

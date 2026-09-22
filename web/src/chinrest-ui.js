@@ -415,6 +415,19 @@ export const CHINREST_CSS = `
 .cr-grip { position: absolute; right: -9px; bottom: -9px; width: 20px; height: 20px;
            background: var(--accent); border-radius: 50%; cursor: nwse-resize; }
 .cr-error { color: var(--bad); min-height: 1.5em; }
+.consent-panel { max-height: 92vh; overflow-y: auto; }
+.consent-tier { display: flex; gap: 10px; align-items: flex-start;
+                padding: 12px 14px; margin: 8px 0; border-radius: 8px;
+                border: 1px solid var(--border); cursor: pointer; }
+.consent-tier:hover { border-color: var(--accent); }
+.consent-tier input { margin-top: 3px; }
+.consent-tier ul { margin: 6px 0; padding-left: 18px; }
+.consent-tier li { color: var(--muted); font-size: 13px; margin-bottom: 3px; }
+.consent-summary { display: block; color: var(--fg); margin-top: 2px; }
+.consent-consequence { display: block; color: var(--muted); font-size: 13px;
+                       font-style: italic; }
+.consent-ack { margin-top: 18px; }
+.consent-ack label { display: flex; gap: 8px; align-items: center; }
 .cr-field { position: fixed; inset: 0; background: #7f7f7f; }
 .cr-cross { position: absolute; transform: translate(-50%,-50%);
             font-size: 34px; color: #111; }
