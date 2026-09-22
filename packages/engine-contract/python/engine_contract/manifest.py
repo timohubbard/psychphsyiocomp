@@ -162,7 +162,12 @@ class MediaDescriptor:
     path: str
     kind: MediaKind
     sha256: str
-    duration_s: float
+    #: None when the container does not carry a usable frame count. Optional
+    #: because a browser-produced WebM genuinely does not know its own length,
+    #: and OpenCV reports that as INT64_MIN rather than as an absence — which
+    #: divides into a confident, enormous, negative duration. A nullable field
+    #: makes "unknown" representable, so it stops being representable as -9.2e18.
+    duration_s: float | None
     fps: float | None = None
     width: int | None = None
     height: int | None = None

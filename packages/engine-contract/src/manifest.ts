@@ -178,7 +178,9 @@ export interface MediaDescriptor {
   path: string;
   kind: MediaKind;
   sha256: string;
-  duration_s: number;
+  /** Null when the container carries no usable frame count — see the Python
+   *  mirror. A browser-produced WebM genuinely does not know its own length. */
+  duration_s: number | null;
   fps?: number;
   width?: number;
   height?: number;
