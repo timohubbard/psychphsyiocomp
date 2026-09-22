@@ -361,7 +361,7 @@ export function protocolFor(study) {
     activity: {
       audio,
       devices: audio ? 'camera and microphone' : 'camera',
-      records: audio ? 'video and audio' : 'video only — no audio',
+      records: audio ? 'video and audio' : 'video (no audio)',
       doing: activitiesFor(study),
     },
   };

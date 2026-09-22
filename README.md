@@ -71,12 +71,14 @@ PASS. `npm run verify:gaze` → GAZE GATE PASS.
 | M2 — `face.pyfeat_aus`, per-AU reliability tiers | done |
 | M2 — inter-engine agreement + relative proportions | done |
 | M2 — `face.opengraphau_aus`, the second AU engine | done |
-| M2 — agreement measured on *expressive* footage | not started — needs a recording |
+| M2 — posed-expression task + per-engine scoring against it | done — needs a recording (`?study=au-expressions`) |
 | M3 — `voice.opensmile_egemaps` (88 eGeMAPSv02 functionals) | done |
 | M4 — `resp.motion_profiles`, waveform only | done |
 | M4 — respiration validation study against an RIP belt | not started |
 | Study definitions — protocol as data, content-hashed | done |
-| `speech.faster_whisper` — transcripts, consent-gated | done |
+| `speech.faster_whisper` — transcripts, consent-gated | done — 13% word error on real read-aloud |
+| Clock alignment from both clappers, placed by expected position | done |
+| End-to-end capture smoke test (headless Chrome, fake camera) | done — `npm run smoke:capture` |
 
 ### What the numbers are
 
@@ -394,6 +396,67 @@ Measured end to end: the camera sees the clapper flash 27–54ms after the brows
 draws it, consistently within a session. That latency also truncated the closing
 clapper, which is why `TIMINGS.clapperPostrollMs` exists.
 
+### The second real session, and what it broke
+
+A participant was sent to `/?study=au-expressions` to record posed facial
+movements, and recorded the whole M0 gaze pilot instead. That one session, plus
+a fake-camera run of the page, surfaced seven defects — four of them places
+where the page ignored the protocol it had been given.
+
+**The URL never reached the page.** The dev server redirects `/` to
+`/web/index.html` and dropped the query string doing it; `main.js` then fell
+back to `m0` directly under a comment saying "There is no fallback", and nothing
+on screen named the protocol. Now the redirect keeps the query, the protocol is
+named under the title before the camera can be enabled, and a URL naming no
+study gets a chooser (`studies/index.json`, kept equal to the folder by a test).
+The URL given to the participant had never been loaded once — every unit test
+passed straight over it. `npm run smoke:capture` now drives real headless Chrome
+with a fake camera through the redirect, consent, every stage and Download, and
+checks the files that come out.
+
+**The chinrest ran for every study.** `chinrest` sat in the hashed task list and
+nothing read it; `voice-only-example.json` claimed to skip it. **The consent
+screen described M0 to everyone** — "video and audio ... while you look at some
+dots and read a short passage aloud" — including a face-only study with no
+microphone and no dots, and its tier text promised to keep audio that did not
+exist. Both are now derived from the protocol, and the consent record stores
+the wording actually shown. A study offering the transcript tier without a
+microphone no longer validates.
+
+**Clock alignment trusted the strongest flash.** It paired the single brightest
+luminance pulse with the *first* clapper, always. On the fake-camera run — a
+camera that cannot see the screen — it aligned to a pulse 92 s from any flash
+the page drew, at ±47 ms. On the real session the two genuine flashes scored
+4204 and 3995: a slightly brighter closing flash would have shifted every video
+row by 204 s, reported as aligned. And the second clapper was never used, so the
+drift fit two bookend clappers exist for never ran. Each drawn flash now has an
+expected video position (`recording_start` is logged on the master clock and
+PTS starts at 0 there; measured 29 ms off on the pilot), only a detection within
+1.5 s of it is accepted, both become anchors, and their spacing must match. The
+fit on the real session: rate 0.999886 — ~114 ppm of camera-clock drift.
+
+**Transcripts were timed from segments that crossed silence.** With the VAD on,
+the answer to the free-speech prompt was stamped 217.0 s; the prompt appeared at
+236.6 s. Segment times now come from their first and last word (238.6 s).
+**And the VAD clipped the first words**: "The old harbour" became "Starver" in
+`base` and "Carver" in `small` — identical across models, which is what pointed
+at the audio path. Word error on the known 92-word passage:
+
+| | base | small |
+|---|---|---|
+| VAD at library default | 21.7% | 19.6% |
+| VAD threshold 0.35 | 20.7% | **13.0%** |
+| no VAD | 20.7% | 14.1% |
+
+No configuration produced text outside the speaking windows, so the VAD stays on
+(threshold 0.35) and the default checkpoint is now `small`. One participant and
+92 words: a justified default, not a claimed accuracy.
+
+Gaze on that session was 2.61° held-out against the pilot's 1.65°. Two-anchor
+alignment did not change it (2.58° with one anchor), so it is not a timing
+effect; the session was darker (median luma 91 vs 138), slower (19.8 fps) and
+closer (38.8 cm vs 47.5 cm). Two sessions cannot separate those.
+
 ### The trap that cost 3.4 degrees
 
 The first honest gaze number was 5.04°. Feature sets, scored on held-out
@@ -505,11 +568,26 @@ calls 2. **This control favours OpenGraphAU**: those images are likely drawn fro
 its own training data. It shows the engine responds to expressions; it does not
 show which engine is right.
 
-**Still needed:** a short *expressive* recording through the real capture path
-(posed smile, brow raise, frown, jaw drop, then spontaneous), so agreement is
-measured on behaviour that happened. And human labels on it via the annotation
-page, so each engine can be scored against people rather than against the other
-engine.
+The second session made the case from the other side. It contained speech, so
+the mouth moved while the rest of the face stayed neutral — and the engines
+agreed where there was movement and not where there was none: **AU25 (lips
+part) r = 0.61, AU17 r = 0.59**, against AU12 r = −0.26 and a median of 0.23
+over all 18. The agreement report now carries, for each engine and AU, the share
+of frames that engine itself called present (score ≥ 0.5, both engines' own
+decision boundary). On the pilot's neutral face **Py-Feat called AU06 present in
+60% of frames and AU12 in 37%; OpenGraphAU in 0%.** The researcher app shows
+those beside the r they qualify, and says when a protocol elicited no movement.
+
+**Measuring it properly:** the `au-expressions` study (`/?study=au-expressions`,
+~4.5 min, face only) asks for ten movements twice each in shuffled order, each
+as ready (neutral) → timed 4 s hold → relax, and stamps the requested AUs into
+every hold event. `server/expression_scoring.py` then scores each engine per AU
+— **sensitivity** (target holds vs the same trials' neutral phase, as an AUC),
+**specificity** (vs holds of other movements; legitimately lower where anatomy
+couples units), and **agreement on held movements only** — in the pipeline's
+output and as a "Posed movements" panel in the app. It scores against what was
+*asked for*, not what the face did; human labels via the annotation page remain
+the reference standard.
 
 #### Barely moved is not disagreed
 
@@ -655,6 +733,9 @@ silently imported the facial engine into the gaze engine's tests.
 
 ```bash
 npm run serve                     # participant capture page
+#   open localhost:5173/?study=<id>  — no ?study= shows a chooser, never a default
+npm run smoke:capture             # the whole page, headless, fake camera (needs serve)
+#   --study <id>   default au-expressions
 npm run process -- <dir> --out o/ # bundle -> canonical tables + gaze
 #   --aus    also run Action Units — BOTH engines, so §2.2's spread exists
 #   --au-engines pyfeat|opengraphau   one only (the app will say what is lost)
