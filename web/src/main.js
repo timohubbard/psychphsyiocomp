@@ -14,6 +14,7 @@ import { SessionRecorder } from './recorder.js';
 import { now, stamp } from './clock.js';
 import {
   buildSequence, TIMINGS, EXPRESSION_TIMINGS, wait, stageLabel, estimateDurationMs,
+  wantsChinrest,
 } from './sequence.js';
 import { MediaPipeBlendshapesLive } from '../../engines/face.mediapipe_blendshapes/browser/engine.js';
 import { runVirtualChinrest, CHINREST_CSS } from './chinrest-ui.js';
@@ -403,6 +404,17 @@ async function runSequence() {
  * exclusion).
  */
 async function runGeometry() {
+  if (!wantsChinrest(state.study)) {
+    // Recorded as a refusal with a reason, not left absent: downstream, "no
+    // geometry because the protocol did not ask" and "no geometry because the
+    // measurement failed" must stay distinguishable.
+    state.geometry = state.recorder.setGeometry({
+      ok: false, geometry_method: null, viewing_distance_mm: null, px_per_mm: null,
+      geometry_error_mm: null, reason: 'not_in_protocol',
+      detail: `study ${state.study.study_id} does not include the chinrest task`,
+    });
+    return;
+  }
   state.geometry = state.recorder.setGeometry(
     await runVirtualChinrest(document.body, {
       onRetry: (reason) => state.recorder.logEvent('virtual_chinrest_retry', { reason }),

@@ -319,3 +319,30 @@ test('the protocol line names the study, its version and what it will do', async
   assert.doesNotMatch(describeStudy(JSON.parse(
     await fs.readFile('studies/m0.json', 'utf8'))), /chinrest/);
 });
+
+test('the consent text describes the protocol being consented to', async () => {
+  // It was a literal about dots and a read-aloud passage, true of m0 only. The
+  // face-only expression study uses no microphone and shows no dots.
+  const fs = await import('node:fs/promises');
+  const { protocolFor } = await import('./study.js');
+  const load = async (id) => JSON.parse(await fs.readFile(`studies/${id}.json`, 'utf8'));
+
+  const expr = protocolFor(await load('au-expressions')).activity;
+  assert.equal(expr.devices, 'camera');
+  assert.match(expr.records, /no audio/);
+  assert.deepEqual(expr.doing,
+    ['rest your eyes on a cross', 'make some facial movements when asked']);
+
+  const m0 = protocolFor(await load('m0')).activity;
+  assert.equal(m0.devices, 'camera and microphone');
+  assert.ok(m0.doing.includes('follow a dot around the screen with your eyes'));
+  assert.ok(m0.doing.includes('read a short passage aloud'));
+  assert.ok(m0.doing[0].includes('bank card'), 'the chinrest is disclosed first');
+});
+
+test('joinAnd reads as a sentence', async () => {
+  const { joinAnd } = await import('./consent.js');
+  assert.equal(joinAnd(['a']), 'a');
+  assert.equal(joinAnd(['a', 'b']), 'a and b');
+  assert.equal(joinAnd(['a', 'b', 'c']), 'a, b and c');
+});

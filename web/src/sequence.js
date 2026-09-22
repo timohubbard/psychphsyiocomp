@@ -316,6 +316,24 @@ export function buildSequence(study, seed = (Date.now() >>> 0)) {
   ];
 }
 
+/**
+ * Does this protocol include the virtual chinrest?
+ *
+ * The chinrest runs in setup, outside `buildSequence`, which is how it came to
+ * run for EVERY study: `chinrest` sat in the hashed task list while the page
+ * ignored it. A face-only study would open with a credit-card-and-blind-spot
+ * procedure it never asked for, and studies/voice-only-example.json claimed to
+ * skip it while not doing so.
+ *
+ * A study that declares tasks gets the chinrest only by listing it. One that
+ * declares none gets the default protocol, which needs it exactly when gaze is
+ * on — degrees of visual angle cannot be computed without a viewing distance.
+ */
+export function wantsChinrest(study) {
+  if (study?.tasks?.length) return study.tasks.some((t) => t.type === 'chinrest');
+  return (study?.modalities ?? []).includes('gaze');
+}
+
 /** The task list a study gets when it declares none. */
 export const DEFAULT_TASKS = [
   { type: 'calibration' },
@@ -476,6 +494,29 @@ function stagesForTask(task, { calPoints, valPoints, wantsGaze, wantsVoice, seed
     default:
       return null;
   }
+}
+
+/**
+ * What the participant will do, for the consent screen.
+ *
+ * Derived from the stages this study actually builds. The consent text was a
+ * literal — "records video and audio ... while you look at some dots and read
+ * a short passage aloud" — which was true of M0 and false of every other
+ * study: the face-only expression study uses no microphone and shows no dots.
+ * A disclosure that describes a different protocol is not a disclosure of this
+ * one.
+ */
+export function activitiesFor(study) {
+  const seq = buildSequence(study, 1);
+  const has = (t) => seq.some((s) => s.type === t);
+  const doing = [];
+  if (wantsChinrest(study)) doing.push('measure how far you sit from the screen, using a bank card');
+  if (has('calibration_point')) doing.push('follow a dot around the screen with your eyes');
+  if (has('fixation')) doing.push('rest your eyes on a cross');
+  if (has('speech_read')) doing.push('read a short passage aloud');
+  if (has('speech_free')) doing.push('talk briefly about an everyday topic');
+  if (has('expression')) doing.push('make some facial movements when asked');
+  return doing;
 }
 
 /** Participant-facing one-liners, derived from the stages actually built. */

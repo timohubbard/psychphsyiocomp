@@ -29,6 +29,7 @@
  */
 
 import { CONSENT_TIERS, MAX_RETENTION_DAYS } from './consent.js';
+import { activitiesFor } from './sequence.js';
 
 /** Every modality this platform can collect, and what it costs to say yes. */
 export const MODALITIES = [
@@ -340,10 +341,18 @@ export async function loadStudy(studyId, { base = '/studies' } = {}) {
  * this module imports the tier definitions from there.
  */
 export function protocolFor(study) {
+  const audio = needsAudio(study);
   return {
     studyId: study.study_id,
     disclosure: disclosureFor(study),
     tiers: offeredTiers(study),
     defaultTier: study.default_tier ?? null,
+    // What the participant is told happens, derived from the protocol rather
+    // than written beside it — see `activitiesFor`.
+    activity: {
+      devices: audio ? 'camera and microphone' : 'camera',
+      records: audio ? 'video and audio' : 'video only — no audio',
+      doing: activitiesFor(study),
+    },
   };
 }

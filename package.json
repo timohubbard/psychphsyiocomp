@@ -25,6 +25,7 @@
     "serve": "node tools/serve.mjs",
     "app": "node tools/py.mjs server/app.py --data out",
     "process": "node tools/py.mjs server/process_bundle.py",
-    "verify:gaze": "node tools/py.mjs server/verify_gaze.py --data out"
+    "verify:gaze": "node tools/py.mjs server/verify_gaze.py --data out",
+    "smoke:capture": "node tools/smoke_capture.mjs"
   }
 }

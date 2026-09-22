@@ -14,6 +14,7 @@ import {
   seededShuffle,
   DEFAULT_EXPRESSIONS,
   EXPRESSION_TIMINGS,
+  wantsChinrest,
 } from './sequence.js';
 
 // ---------------------------------------------------------------------------
@@ -625,4 +626,17 @@ test('studies/au-expressions.json validates and builds', async () => {
   // features_only deletes.
   assert.deepEqual(s.consent_tiers, ['media_retained']);
   assert.ok(buildSequence(s, 3).some((x) => x.type === 'expression'));
+});
+
+test('the chinrest runs only when the protocol asks for it', async () => {
+  // It ran for every study: `chinrest` sat in the hashed task list while the
+  // page ignored it, so a face-only study opened with a credit-card procedure.
+  const fs = await import('node:fs/promises');
+  const load = async (id) => JSON.parse(await fs.readFile(`studies/${id}.json`, 'utf8'));
+  assert.equal(wantsChinrest(await load('m0')), true);
+  assert.equal(wantsChinrest(await load('au-expressions')), false);
+  assert.equal(wantsChinrest(await load('voice-only-example')), false);
+  // No task list: the default protocol, which needs it exactly for gaze.
+  assert.equal(wantsChinrest({ modalities: ['gaze', 'face'] }), true);
+  assert.equal(wantsChinrest({ modalities: ['face'] }), false);
 });

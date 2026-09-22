@@ -165,6 +165,12 @@ export function consentRecord({ tier, retentionDays, secondaryUse, contact,
 // to decide with the information in the wrong order.
 // ---------------------------------------------------------------------------
 
+/** "a", "a and b", "a, b and c" — for the consent sentence. */
+export function joinAnd(items) {
+  if (items.length <= 1) return items.join('');
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
 export function runConsent(host, protocol) {
   // Takes a resolved protocol rather than a study definition, and has no
   // fallback for a missing one. Two reasons. It keeps this module a renderer —
@@ -172,10 +178,14 @@ export function runConsent(host, protocol) {
   // import cycle, since `study.js` already imports the tiers from here. A
   // default would also mean this software stating a retention period on a
   // researcher's behalf, which is the thing study definitions exist to stop.
-  const { disclosure, tiers: tiersOffered, defaultTier, studyId } = protocol ?? {};
-  if (!disclosure || !Array.isArray(tiersOffered) || !tiersOffered.length) {
+  const {
+    disclosure, tiers: tiersOffered, defaultTier, studyId, activity,
+  } = protocol ?? {};
+  if (!disclosure || !Array.isArray(tiersOffered) || !tiersOffered.length || !activity) {
     throw new Error('runConsent needs a resolved protocol: see study.js');
   }
+  const doing = activity.doing.length
+    ? ` while you ${joinAnd(activity.doing)}` : '';
 
   return new Promise((resolve) => {
     const root = document.createElement('div');
@@ -197,8 +207,8 @@ export function runConsent(host, protocol) {
     root.innerHTML = `
       <div class="cr-panel consent-panel">
         <h1>Before we start</h1>
-        <p>This session records video and audio from your camera and microphone
-           while you look at some dots and read a short passage aloud.</p>
+        <p>This session records ${activity.records} from your
+           ${activity.devices}${doing}.</p>
 
         <p><strong>Your recording is identifiable.</strong> A face is
            identifiable, and so is a voice — blurring a video or shifting a
