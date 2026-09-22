@@ -62,12 +62,23 @@ class SessionBundle:
         if not video.exists():
             video = p / "capture.mp4"
 
+        # The browser-live source travels beside the manifest. Loading it here is
+        # what makes the M0 criterion reachable from a REAL capture: without it a
+        # downloaded bundle silently yields one source instead of two, and the
+        # gate only ever passed because verify_m0 builds its browser chunk in
+        # memory. The capture page has always written this file; nothing read it.
+        chunks_path = p / "browser_chunks.json"
+        browser_chunks: list[Any] = []
+        if chunks_path.exists():
+            browser_chunks = _load_browser_chunks(chunks_path)
+
         return cls(
             session_id=meta["session_id"],
             participant_id=meta["participant_id"],
             study_id=meta.get("study_id", "default"),
             video_path=video if video.exists() else None,
             events=meta.get("events", []),
+            browser_chunks=browser_chunks,
             metadata=meta,
         )
 
@@ -77,6 +88,50 @@ class SessionBundle:
             if e.get("event_type") == "sync_clapper":
                 return float(e["onset_native_ts"])
         return None
+
+
+def _load_browser_chunks(path: Path) -> list[Any]:
+    """Deserialise the capture page's live-engine output into contract types.
+
+    Rows are rebuilt as ``SignalRow``/``QualityRow`` rather than passed through
+    as dicts so that a shape change in the browser fails here, loudly, at the
+    boundary — instead of surfacing later as a missing Parquet column.
+
+    Unknown keys are ignored deliberately: the browser may add fields ahead of
+    the server learning about them, and that should not break ingestion of the
+    fields both sides already agree on.
+    """
+    from engine_contract import Chunk, QualityRow, SignalRow
+
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    chunks: list[Chunk] = []
+
+    for c in raw:
+        signals = tuple(
+            SignalRow(
+                stream=s["stream"],
+                channel=s["channel"],
+                native_clock_id=s["native_clock_id"],
+                native_ts=float(s["native_ts"]),
+                value=s["value"],
+                reliability_tier=s["reliability_tier"],
+            )
+            for s in c.get("signals", ())
+        )
+        quality = tuple(
+            QualityRow(
+                stream=q["stream"],
+                metric=q["metric"],
+                window_start_native_ts=float(q["window_start_native_ts"]),
+                window_end_native_ts=float(q["window_end_native_ts"]),
+                value=float(q["value"]),
+            )
+            for q in c.get("quality", ())
+        )
+        if signals or quality:
+            chunks.append(Chunk(signals=signals, quality=quality))
+
+    return chunks
 
 
 def build_registry(
