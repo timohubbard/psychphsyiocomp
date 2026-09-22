@@ -177,6 +177,11 @@ def load_study(root: str | Path, study_id: str) -> dict[str, Any]:
     return study
 
 
+#: studies/index.json — the list the capture page offers when a URL names no
+#: study (a static host cannot enumerate a directory).
+STUDY_INDEX = "index.json"
+
+
 def list_studies(root: str | Path) -> list[dict[str, Any]]:
     """Every study file, valid or not.
 
@@ -189,6 +194,10 @@ def list_studies(root: str | Path) -> list[dict[str, Any]]:
 
     out = []
     for path in sorted(root.glob("*.json")):
+        # The capture page's chooser list, not a study. Without this it is
+        # listed as a study that fails validation.
+        if path.name == STUDY_INDEX:
+            continue
         try:
             study = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as exc:

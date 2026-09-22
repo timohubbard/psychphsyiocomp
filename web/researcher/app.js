@@ -203,6 +203,7 @@ async function loadDetail(id) {
     <div class="scroll">${eventsTable(d.events)}</div>
 
     <div id="agreement"></div>
+    <div id="expressions"></div>
     <div id="scanpath"></div>
     <div id="aoi"></div>
     <div id="plot"></div>`;
@@ -212,6 +213,7 @@ async function loadDetail(id) {
   });
 
   showAgreement(id).catch(() => {});
+  showExpressions(id).catch(() => {});
 
   if (sm.gaze_n_fixations) {
     showScanpath(id).catch(() => {});
@@ -721,6 +723,59 @@ async function saveAoiSet(sessionId) {
 // different claims, and a blank space reads as the second.
 // ---------------------------------------------------------------------------
 
+/**
+ * Posed movements: each AU engine scored against what the session asked for.
+ *
+ * Only rendered for sessions recorded with the expression_prompts task; for
+ * the rest the endpoint returns a refusal and this panel stays empty rather
+ * than showing a table of "not applicable". See server/expression_scoring.py —
+ * target_aus is what was REQUESTED, not a label of what the face did.
+ */
+async function showExpressions(sessionId) {
+  const host = $('expressions');
+  if (!host) return;
+  const r = await api(`/api/sessions/${encodeURIComponent(sessionId)}/expressions`);
+  if (r.n_trials === 0) return;
+  if (r.refusal) {
+    host.innerHTML = `<h2>Posed movements</h2><div class="note">${r.refusal}</div>`;
+    return;
+  }
+  const short = (src) => src.split('@')[0];
+  const cards = Object.entries(r.summary).map(([src, s]) => card(short(src),
+    fmt(s.median_sensitivity_auc),
+    // Uncoloured: no published AUC floor exists for posed-AU sensitivity, and a
+    // green/red boundary invented here would become an inclusion criterion.
+    `median sensitivity AUC over ${s.n_aus_scored} AUs · specificity ${fmt(s.median_specificity_auc)}`));
+  const ok = r.scores.filter((x) => x.verdict === 'ok');
+  const aus = [...new Set(ok.map((x) => x.au))].sort();
+  const sources = [...new Set(ok.map((x) => x.source))].sort();
+  const cell = (au, src) => {
+    const x = ok.find((y) => y.au === au && y.source === src);
+    if (!x) return '<td>—</td>';
+    return `<td>${fmt(x.sensitivity_auc)} <span class="txt">/ ${fmt(x.specificity_auc)}</span></td>`;
+  };
+  const agree = Object.fromEntries(r.agreement.filter((a) => a.verdict === 'ok').map((a) => [a.au, a.r]));
+  host.innerHTML = `
+    <h2>Posed movements <span class="pill">${r.n_trials} trials</span></h2>
+    <div class="cards">${cards.join('')}</div>
+    <table style="margin-top:12px"><thead><tr><th>AU</th>
+      ${sources.map((s) => `<th>${short(s)}<br><span class="txt">sens / spec</span></th>`).join('')}
+      <th>engines agree (r)</th></tr></thead><tbody>
+      ${aus.map((au) => `<tr><td>${au}</td>${sources.map((s) => cell(au, s)).join('')}
+        <td>${fmt(agree[au])}</td></tr>`).join('')}
+    </tbody></table>
+    <div class="note"><strong>Sensitivity</strong>: how often a hold that asked for
+      this unit scored above the neutral "get ready" phase of the same trials
+      (AUC; 0.5 is chance). <strong>Specificity</strong>: the same against holds
+      of <em>other</em> movements — legitimately lower where anatomy couples
+      units (a broad smile also parts the lips). <strong>Agreement</strong> is
+      between the two engines across held movements only: the §2.2 comparison
+      on behaviour that actually happened. This scores against what was
+      <em>asked for</em>, not what the face did; human labels remain the
+      reference standard. The first ${r.hold_onset_skip_ms / 1000}s of each
+      hold is skipped as reaction time.</div>`;
+}
+
 async function showAgreement(sessionId) {
   const host = $('agreement');
   if (!host) return;
@@ -793,14 +848,28 @@ async function showAgreement(sessionId) {
       one model, the same pixels. A low value here is a placement bug, not
       measurement uncertainty.</div>` : ''}
 
+    ${s.between_engines.n > 0 && !s.movements_elicited ? `<div class="note">
+      <strong>This protocol did not ask for any facial movement.</strong> The
+      between-engine figure is measured on whatever the face happened to do —
+      on a mostly neutral face, that is noise against noise as much as
+      disagreement. On the M0 pilot it came to median r = 0.14 while the smile
+      blendshape never passed 0.015. The <em>present</em> columns show how often
+      each engine itself called the unit present (score ≥ ${s.au_present_at},
+      both engines' own decision boundary): a low r on a unit neither engine
+      saw is not a finding. Record the <code>au-expressions</code> study to
+      measure agreement on movements that happened.</div>` : ''}
+
     ${worst.length ? `
       <table style="margin-top:12px"><thead><tr>
         <th>channel</th><th>kind</th><th>r</th><th>n</th>
+        ${worst.some((c) => c.present_a != null) ? '<th>present a / b</th>' : ''}
       </tr></thead><tbody>${worst.map((c) => `<tr>
         <td>${c.channel}</td>
         <td class="txt">${c.kind}</td>
         <td class="${c.r < 0.5 ? 'tier-low' : ''}">${fmt(c.r, 3)}</td>
         <td>${c.n}</td>
+        ${worst.some((x) => x.present_a != null) ? `<td>${c.present_a == null ? '—'
+          : `${Math.round(c.present_a * 100)}% / ${Math.round((c.present_b ?? 0) * 100)}%`}</td>` : ''}
       </tr>`).join('')}</tbody></table>
       <div class="note">Weakest agreement first — the informative end. A channel
         two sources disagree about is one no single number should be quoted for.

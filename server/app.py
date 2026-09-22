@@ -41,6 +41,7 @@ from study import list_studies, load_study, verify_session_study  # noqa: E402
 from store import (  # noqa: E402
     agreement_report,
     channel_series,
+    expression_report,
     list_sessions,
     phases,
     scanpath,
@@ -235,6 +236,9 @@ class Handler(SimpleHTTPRequestHandler):
 
         if len(parts) == 4 and parts[:2] == ["api", "sessions"] and parts[3] == "agreement":
             return agreement_report(self.data_root, parts[2])
+
+        if len(parts) == 4 and parts[:2] == ["api", "sessions"] and parts[3] == "expressions":
+            return expression_report(self.data_root, parts[2])
 
         if len(parts) == 4 and parts[:2] == ["api", "sessions"] and parts[3] == "aoi":
             return self._aoi_analysis(parts[2], query)

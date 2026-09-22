@@ -11,6 +11,9 @@ from __future__ import annotations
 import json
 
 import pytest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
 
 from study import (
     MAX_RETENTION_DAYS,
@@ -280,3 +283,13 @@ def test_a_deleted_study_is_distinguished_from_an_edited_one(studies_dir):
 def test_verification_never_raises_on_a_malformed_session(studies_dir):
     for meta in ({}, {"study": None}, {"study": "reading-2026"}, {"study": {}}):
         assert verify_session_study(meta, studies_dir).ok is False
+
+
+def test_the_capture_page_index_is_not_listed_as_a_study():
+    """studies/index.json is the chooser list; globbing *.json listed it as a
+    study that fails validation."""
+    rows = list_studies(ROOT / "studies")
+    ids = {r["study_id"] for r in rows}
+    assert "index" not in ids
+    assert {"m0", "au-expressions"} <= ids
+    assert all(r["valid"] for r in rows)

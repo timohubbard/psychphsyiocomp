@@ -149,6 +149,48 @@ def _gaze_stage(writer, bundle, solution):
                     feature_channels=_gaze.FEATURE_CHANNELS)
 
 
+def _print_expression_scores(out: Path, session_id: str) -> None:
+    """Score each AU engine against the movements the session asked for.
+
+    Only sessions recorded with the expression_prompts task have anything to
+    score; for the rest this says so in one line rather than printing a table of
+    refusals.
+    """
+    import pyarrow.compute as pc
+    from expression_scoring import score_session, summarise
+    from tables import read_session
+
+    events = read_session(out, session_id, "events").to_pylist()
+    if not any(e["event_type"] == "expression_hold" for e in events):
+        print("    posed-movement scoring: not applicable (no expression_prompts task)")
+        return
+    sig = read_session(out, session_id, "signals")
+    sig = sig.filter(pc.starts_with(sig.column("channel"), "au."))
+    rep = score_session(sig.select(["source", "channel", "master_ts", "value"]).to_pylist(),
+                        events)
+    print(f"\n  posed movements   {rep.n_trials} trials   (AUC: 1.0 = always higher "
+          "when asked, 0.5 = chance)")
+    if rep.refusal:
+        print(f"    {rep.refusal}")
+        return
+    for src, s in summarise(rep).items():
+        sens, spec = s["median_sensitivity_auc"], s["median_specificity_auc"]
+        print(f"    {src}")
+        print(f"      median sensitivity {sens if sens is None else round(sens, 2)}   "
+              f"specificity {spec if spec is None else round(spec, 2)}   "
+              f"over {s['n_aus_scored']} AUs")
+    for sc in rep.scores:
+        if sc.verdict == "ok":
+            spec = "—" if sc.specificity_auc is None else f"{sc.specificity_auc:.2f}"
+            print(f"      {sc.au} {sc.source.split('@')[0]:24s} sens {sc.sensitivity_auc:.2f}  "
+                  f"spec {spec}  (n={sc.n_target} vs {sc.n_neutral} neutral)")
+    ok = [a for a in rep.agreement if a.verdict == "ok"]
+    if ok:
+        rs = sorted(a.r for a in ok)
+        print(f"    engines agree on held movements: median r {float(np.median(rs)):.2f} "
+              f"over {len(ok)} AUs (range {rs[0]:.2f} .. {rs[-1]:.2f})")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("bundle", type=Path, help="directory holding session.json")
@@ -353,6 +395,7 @@ def main() -> int:
                 by_verdict[c["verdict"]] = by_verdict.get(c["verdict"], 0) + 1
         if by_verdict:
             print(f"    not measured {by_verdict}")
+        _print_expression_scores(args.out, bundle.session_id)
 
     print("\n  M0 criterion on REAL data: "
           f"{'PASS' if len(srcs) >= 2 else 'FAIL'} "

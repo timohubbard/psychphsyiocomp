@@ -15,6 +15,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
@@ -401,8 +402,16 @@ def phases(root: str | Path, session_id: str) -> list[dict[str, Any]]:
     return out
 
 
+#: Both AU engines emit an occurrence score whose classifier decision boundary
+#: is 0.5 — Py-Feat's XGBoost `predict_proba`, and OpenGraphAU's cosine score
+#: which upstream thresholds at 0.5. This is the engines' own boundary, not one
+#: chosen here, which is why it can be used to say "this engine thought the AU
+#: was present in x% of frames".
+AU_PRESENT_AT = 0.5
+
+
 def agreement_report(root: str | Path, session_id: str,
-                     max_channels: int = 60) -> dict[str, Any]:
+                     max_channels: int = 400) -> dict[str, Any]:
     """Per-channel agreement between sources, and what kind of comparison it is.
 
     §2.2: engine choice alone swung valid-face-frame yield 43%->63% and
@@ -425,10 +434,25 @@ def agreement_report(root: str | Path, session_id: str,
     channels = sorted(pc.unique(signals.column("channel")).to_pylist())[:max_channels]
 
     results: list[Any] = []
+    present: dict[tuple[str, str], float] = {}
     for ch in channels:
         sub = signals.filter(pc.equal(signals.column("channel"), ch))
         rows = sub.select(["channel", "source", "master_ts", "value"]).to_pylist()
         results.extend(agreement_for_channel(rows, ch))
+        if ch.startswith("au."):
+            by_src: dict[str, list[float]] = {}
+            for r in rows:
+                if r["value"] is not None:
+                    by_src.setdefault(r["source"], []).append(r["value"])
+            for src, vals in by_src.items():
+                present[(ch, src)] = float(np.mean(np.asarray(vals) >= AU_PRESENT_AT))
+
+    # Whether the protocol asked for any facial movement. The pilot's AU
+    # engines "agreed" at median r = 0.14 on a face that stayed neutral
+    # throughout — a figure that reads as disagreement but measured noise.
+    events = _read_partitioned(d, "events")
+    elicited = bool(events is not None and events.num_rows and pc.any(pc.equal(
+        events.column("event_type"), "expression_hold")).as_py())
 
     return {
         "channels": [{
@@ -436,8 +460,14 @@ def agreement_report(root: str | Path, session_id: str,
             "r": a.r, "n": a.n_overlapping, "verdict": a.verdict,
             "kind": a.kind, "detail": a.detail,
             "sd_a": a.sd_a, "sd_b": a.sd_b,
+            # Share of frames each engine itself called the AU present. Shown
+            # beside r so a low correlation on a unit neither engine ever saw
+            # can be read as what it is.
+            "present_a": present.get((a.channel, a.source_a)),
+            "present_b": present.get((a.channel, a.source_b)),
         } for a in results],
-        "summary": summarise(results),
+        "summary": {**summarise(results), "movements_elicited": elicited,
+                    "au_present_at": AU_PRESENT_AT},
     }
 
 
@@ -466,3 +496,23 @@ def _engine_quality(quality) -> dict[str, dict[str, Any]]:
         # the only value and for a windowed one is the most recent window.
         entry["metrics"][r["metric"]] = r["value"]
     return out
+
+
+def expression_report(root: str | Path, session_id: str) -> dict[str, Any]:
+    """Each AU engine scored against the movements the session asked for.
+
+    See server/expression_scoring.py. A session without the expression_prompts
+    task returns a refusal with its reason, not an empty table.
+    """
+    from expression_scoring import score_session, summarise
+
+    d = Path(root) / f"session_id={session_id}"
+    events = _read_partitioned(d, "events")
+    signals = _read_partitioned(d, "signals")
+    ev = events.to_pylist() if events is not None else []
+    rows: list[dict[str, Any]] = []
+    if signals is not None and signals.num_rows:
+        au = signals.filter(pc.starts_with(signals.column("channel"), "au."))
+        rows = au.select(["source", "channel", "master_ts", "value"]).to_pylist()
+    report = score_session(rows, ev)
+    return {**report.to_dict(), "summary": summarise(report)}
