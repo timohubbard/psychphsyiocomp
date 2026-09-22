@@ -182,6 +182,9 @@ async function loadDetail(id) {
       webcam pipeline lives in. Counts and durations are algorithm-dependent, so
       the detector travels with them.</div>` : ''}
 
+    ${voicePanel(d.engine_quality)}
+    ${respirationPanel(d.engine_quality)}
+
     <h2>Engine runs</h2>
     ${runsTable(d.runs)}
 
@@ -269,18 +272,35 @@ function eventsTable(events) {
 // ---------------------------------------------------------------------------
 
 function qualityCharts(rows) {
-  const metrics = [...new Set(rows.map((r) => r.metric))];
-  if (!metrics.length) return '<div class="note">No windowed quality metrics.</div>';
+  // One chart per (metric, source), not per metric. Three engines emit
+  // `mean_luminance` over the same video, and grouping by name alone drew a
+  // single line whose consecutive points came from different engines — a trace
+  // that looks like one measurement wobbling and is actually two disagreeing.
+  // They happened to agree closely here, which is exactly why it went unnoticed.
+  const seen = new Map();
+  for (const r of rows) {
+    // Keyed on a Map rather than a joined string, so no separator has to be a
+    // character a metric or source is assumed never to contain.
+    const k = JSON.stringify([r.metric, r.source]);
+    if (!seen.has(k)) seen.set(k, [r.metric, r.source]);
+  }
+  if (!seen.size) return '<div class="note">No windowed quality metrics.</div>';
 
-  return metrics.map((metric) => {
-    const pts = rows.filter((r) => r.metric === metric && r.t != null)
+  const charts = [...seen.values()].map(([metric, source]) => {
+    const pts = rows.filter((r) => r.metric === metric && r.source === source && r.t != null)
       .map((r) => [r.t, r.value]).sort((a, b) => a[0] - b[0]);
+    // A once-per-run metric is a number, not a trace; the modality panels and
+    // the cards above already carry those.
     if (pts.length < 2) return '';
     const floor = metric === 'achieved_fps' ? MIN_HZ
       : metric === 'mean_luminance' ? MIN_LUMA : null;
     return `<div class="card" style="margin-bottom:10px">
-      <div class="k">${metric}</div>${sparkline(pts, floor)}</div>`;
-  }).join('');
+      <div class="k">${metric} <span class="src">${source}</span></div>
+      ${sparkline(pts, floor)}</div>`;
+  }).filter(Boolean);
+
+  return charts.length ? charts.join('')
+    : '<div class="note">No quality metric has more than one window.</div>';
 }
 
 /**
@@ -786,4 +806,104 @@ async function showAgreement(sessionId) {
         looks alarming until you see its sd was 0.010 and the participant never
         moved their jaw sideways. Both engines correctly reported nothing.
         Correlating noise against noise is not a disagreement.` : ''}</div>` : ''}`;
+}
+
+// ---------------------------------------------------------------------------
+// voice and respiration
+//
+// Both are summarised rather than plotted here. Their per-channel traces are
+// already reachable from the Channels table; what is not reachable from a table
+// is what each modality declines to tell you, and that is the part a researcher
+// has to see before reading anything into the numbers.
+// ---------------------------------------------------------------------------
+
+function voicePanel(eq) {
+  const v = eq?.voice;
+  if (!v) return '';
+  const m = v.metrics;
+  const voiced = m.voiced_fraction;
+  const preserved = m.speech_content_preserved;
+
+  const cards = [
+    // Deliberately uncoloured. A low voiced fraction is correct for a session
+    // that was mostly a silent calibration task, and wrong for one that was
+    // meant to be an interview — the UI cannot tell which, and guessing would
+    // flag a healthy session red.
+    card('Voiced', voiced == null ? '—' : `${(voiced * 100).toFixed(1)}%`,
+      'of analysis windows carried voicing'),
+    card('Windows', m.achieved_window_rate == null ? '—'
+      : `${(m.achieved_window_rate * 100).toFixed(0)}%`,
+      'of the expected eGeMAPS windows were produced'),
+    card('Speech content', preserved ? 'preserved' : 'ALTERED',
+      preserved ? 'no noise suppression was applied'
+        : 'noise suppression ran — spectral features are not comparable',
+      preserved ? 'ok' : 'bad'),
+  ];
+
+  return `
+    <h2>Voice</h2>
+    <div class="cards">${cards.join('')}</div>
+    <div class="note">
+      88 eGeMAPSv02 functionals, and <strong>no valence or emotion channel</strong>.
+      §2.3: the acoustic features are the open part and the mapping from them to
+      affect is the licensed, unpublished part. An open pipeline can compute the
+      features honestly; naming one of them "valence" would be inventing the
+      mapping rather than implementing it.</div>
+    ${preserved === 0 || preserved === false ? `<div class="note bad">
+      Browser noise suppression was applied to this recording. It is designed to
+      remove exactly the spectral content eGeMAPS measures, so these features are
+      not comparable with sessions captured without it.</div>` : ''}`;
+}
+
+function respirationPanel(eq) {
+  const r = eq?.resp;
+  if (!r) return '';
+  const m = r.metrics;
+  const roi = m.roi_found_rate;
+  const usable = m.usable_fraction;
+  const fps = m.analysis_fps;
+
+  const cards = [
+    card('ROI found', roi == null ? '—' : `${(roi * 100).toFixed(0)}%`,
+      'of analysed frames had a shoulder line',
+      roi == null ? '' : roi >= 0.5 ? 'ok' : 'bad'),
+    card('Usable', usable == null ? '—' : `${(usable * 100).toFixed(0)}%`,
+      'of segments passed every confidence check',
+      usable == null ? '' : usable >= 0.3 ? 'ok' : 'bad'),
+    card('Analysis rate', fps == null ? '—' : `${fmt(fps, 1)} Hz`,
+      'band tops out at 0.5 Hz',
+      fps == null ? '' : fps >= 2 ? 'ok' : 'bad'),
+    // Not a missing feature, and not a placeholder. Shown as a card so it sits
+    // where a reader looks for it rather than only in prose they may skip.
+    card('Breathing rate', 'withheld',
+      'no validation study exists — see below', 'warn'),
+  ];
+
+  return `
+    <h2>Respiration</h2>
+    <div class="cards">${cards.join('')}</div>
+    <div class="note">
+      <strong>This pipeline does not report breaths per minute.</strong> §2.4:
+      across two dedicated research passes, no bpm accuracy figure for webcam
+      chest-motion tracking against a chest belt, RIP or spirometry survived
+      adversarial checking, and one specific figure was explicitly refuted. A
+      breathing rate is a number a clinician recognises on sight, so one this
+      project cannot defend is worse than none.
+      <br><br>
+      What you get instead is the waveform and its confidence channels, which is
+      the more useful output anyway: inhale onsets, breath-holds and sighs are
+      all events on a waveform and none of them need a calibrated rate. Plot
+      <code>respiration.waveform</code> from the Channels table, and read it
+      against <code>respiration.periodicity</code> and
+      <code>respiration.gross_motion</code> — a segment where the participant
+      shifted in their seat will look like a large clean breath otherwise.
+      <br><br>
+      Unblocking the rate takes a validation study: simultaneous webcam and RIP
+      belt, Bland-Altman on 60s windows plus waveform cross-correlation, N≈30–40
+      stratified on skin tone, clothing, distance and framing.</div>
+    <div class="note">
+      Respiration output is plausibly <strong>health data under GDPR Art.
+      4(15)</strong> even with no identification purpose, because Art. 9's
+      health limb carries no identification qualifier the way the biometric limb
+      does (§6.3). Treat it as higher legal risk than gaze, face or voice.</div>`;
 }

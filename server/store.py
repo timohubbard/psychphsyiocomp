@@ -113,6 +113,7 @@ def session_detail(root: str | Path, session_id: str) -> dict[str, Any]:
         "channels": _channel_summary(signals),
         "quality": _quality_series(quality),
         "session_metrics": _session_metrics(quality),
+        "engine_quality": _engine_quality(quality),
         "events": _event_summary(events),
         "runs": _run_summary(runs),
         "duration_s": _duration_s(signals),
@@ -438,3 +439,30 @@ def agreement_report(root: str | Path, session_id: str,
         } for a in results],
         "summary": summarise(results),
     }
+
+
+def _engine_quality(quality) -> dict[str, dict[str, Any]]:
+    """Last value of every quality metric, grouped by the engine that emitted it.
+
+    `_session_metrics` flattens by metric name, which only works because the
+    gaze metrics are prefixed `gaze_`. The engines added since are not: three
+    different sources emit `mean_luminance`, and `usable_fraction` is a name any
+    engine could reasonably pick. Flattening those into one namespace would let
+    whichever engine wrote last silently win.
+
+    Keyed by modality (`voice`, `resp`, ...) taken from the engine id, because
+    that is what a researcher is asking about — not which engine implements it.
+    """
+    if quality is None or not quality.num_rows:
+        return {}
+
+    out: dict[str, dict[str, Any]] = {}
+    for r in quality.to_pylist():
+        modality = str(r["source"]).split(".", 1)[0]
+        entry = out.setdefault(modality, {"sources": [], "metrics": {}})
+        if r["source"] not in entry["sources"]:
+            entry["sources"].append(r["source"])
+        # Last write wins within one engine, which for a once-per-run metric is
+        # the only value and for a windowed one is the most recent window.
+        entry["metrics"][r["metric"]] = r["value"]
+    return out

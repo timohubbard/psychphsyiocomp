@@ -238,6 +238,24 @@ class Handler(SimpleHTTPRequestHandler):
         sys.stderr.write(f"  {self.address_string()} {fmt % args}\n")
 
 
+class _ExclusiveHTTPServer(ThreadingHTTPServer):
+    """Refuse to start when something already holds the port.
+
+    `HTTPServer` sets `allow_reuse_address = 1`, which on Windows means
+    SO_REUSEADDR — and there that flag lets a SECOND process bind a port another
+    process is already listening on. Both appear in `netstat` as LISTENING, the
+    older one keeps receiving the requests, and the new one prints its startup
+    banner and serves nothing. Restarting the app to pick up a code change then
+    silently does nothing, which is exactly how a stale `store.py` kept serving
+    an older response shape after the module had been fixed on disk.
+
+    A bind failure is the honest outcome: it names the problem instead of
+    presenting a running server that is not the one handling traffic.
+    """
+
+    allow_reuse_address = False
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--data", type=Path, default=ROOT / "out",
@@ -250,7 +268,14 @@ def main() -> int:
 
     # Localhost only. This serves participant-derived measurements, and binding
     # it to every interface would publish them to the network by default.
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), handler)
+    try:
+        server = _ExclusiveHTTPServer(("127.0.0.1", args.port), handler)
+    except OSError as exc:
+        print(f"\n  port {args.port} is already in use: {exc}")
+        print("  Another researcher app is still running and would keep serving")
+        print("  the requests — including from the code you just changed.")
+        print("  Stop it, or pass --port <n>.\n")
+        return 1
     n = len(list_sessions(data_root))
     print(f"\n  researcher app   http://localhost:{args.port}/")
     print(f"  reading          {data_root}")

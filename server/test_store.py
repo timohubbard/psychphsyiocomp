@@ -188,3 +188,66 @@ def test_series_decimates_by_stride_not_by_averaging(populated):
 def test_series_for_an_unknown_channel_is_empty_not_an_error(populated):
     s = channel_series(populated, "s001", "nope.nope")
     assert s["points"] == [] and s["n_total"] == 0
+
+
+# ---------------------------------------------------------------------------
+# quality grouped by the engine that emitted it
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def colliding(tmp_path):
+    """Two engines emitting the SAME metric name with different values.
+
+    `mean_luminance` is emitted by three of this project's engines already, and
+    `usable_fraction` is a name any engine could reasonably pick. This is the
+    case a flat metric namespace gets wrong.
+    """
+    ctx = SessionContext(session_id="s002", participant_id="p002", study_id="demo")
+    w = CanonicalWriter(tmp_path, ctx)
+    w.set_session_metadata({"created_utc": "2026-09-22T10:00:00.000Z",
+                            "clock": {"master_clock_id": MASTER}})
+
+    reg = ClockRegistry(master_clock_id=MASTER)
+    reg.add_anchor(Anchor(VIDEO, 1000.0, MASTER, 1000.0, uncertainty_ms=32.0, label="c"))
+    sol = reg.solve(VIDEO)
+
+    def chunk(stream, value):
+        return Chunk(
+            signals=(SignalRow(stream=stream, channel=f"{stream}.v",
+                               native_clock_id=VIDEO, native_ts=1000.0, value=0.0,
+                               reliability_tier="low"),),
+            quality=(QualityRow(stream=stream, metric="mean_luminance",
+                                window_start_native_ts=1000.0,
+                                window_end_native_ts=6000.0, value=value),))
+
+    w.add_chunks([chunk("face", 138.0)],
+                 source="face.mediapipe_blendshapes@0.1.0+server-batch",
+                 params={}, solution=sol)
+    w.add_chunks([chunk("resp", 42.0)],
+                 source="resp.motion_profiles@0.1.0+server-batch",
+                 params={}, solution=sol)
+    w.close()
+    return tmp_path
+
+
+def test_the_same_metric_from_two_engines_does_not_collide(colliding):
+    eq = session_detail(colliding, "s002")["engine_quality"]
+    assert eq["face"]["metrics"]["mean_luminance"] == 138.0
+    assert eq["resp"]["metrics"]["mean_luminance"] == 42.0
+
+
+def test_engine_quality_is_keyed_by_modality_not_engine_id(colliding):
+    """A researcher asks about respiration, not about which engine implements
+    it. Swapping the engine should not move where the UI looks."""
+    eq = session_detail(colliding, "s002")["engine_quality"]
+    assert set(eq) == {"face", "resp"}
+    assert eq["resp"]["sources"] == ["resp.motion_profiles@0.1.0+server-batch"]
+
+
+def test_engine_quality_is_empty_rather_than_absent_without_quality(tmp_path):
+    ctx = SessionContext(session_id="s003", participant_id="p", study_id="d")
+    w = CanonicalWriter(tmp_path, ctx)
+    w.set_session_metadata({"created_utc": "2026-09-22T10:00:00.000Z",
+                            "clock": {"master_clock_id": MASTER}})
+    w.close()
+    assert session_detail(tmp_path, "s003")["engine_quality"] == {}
