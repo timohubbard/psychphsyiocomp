@@ -434,3 +434,11 @@ On Windows, `tools/py.mjs` exists because npm scripts run via cmd.exe and cannot
 take a forward-slash venv path; use `npm run py -- <args>` for anything in the
 venv. Windows Python also needs `tzdata` (in `requirements.txt`) — it lacks the
 IANA database, and pyarrow needs it to read tz-aware timestamps.
+
+**Smart App Control blocks freshly-published Python wheels** on the machine this
+was built on, at import rather than install. `pandas<3` and `scikit-learn<1.8`
+are pinned for that reason and are policy bounds, not correctness ones. See
+[`docs/windows-app-control.md`](docs/windows-app-control.md) — the recommended
+fix is to run the Python half in WSL2, which the architecture already points at:
+the browser does the capture, and the Python side is pure batch processing that
+a real deployment would run on Linux anyway.
