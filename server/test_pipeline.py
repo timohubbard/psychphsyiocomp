@@ -13,7 +13,12 @@ import cv2
 import numpy as np
 import pytest
 
-from engine import MediaPipeBlendshapesBatch, describe_video, mean_luma
+from engine_contract.loader import load_engine_module
+from engine_contract.media import describe_video, mean_luma
+
+# By engine_id, never by sys.path order — see conftest.py.
+MediaPipeBlendshapesBatch = load_engine_module(
+    "face.mediapipe_blendshapes").MediaPipeBlendshapesBatch
 from engine_contract import Chunk, SignalRow
 from pipeline import MASTER_CLOCK, SessionBundle, build_registry, process_session
 from synthetic_face import write_face_clip

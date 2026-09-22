@@ -260,7 +260,11 @@ async function runSequence() {
 
   ui.stage.classList.add('active');
 
-  const sequence = buildM0Sequence();
+  // Seeded so the exact presentation order can be replayed, and recorded so
+  // analysis can confirm the order was randomised rather than assume it.
+  const seed = (Date.now() ^ (Math.random() * 0xFFFFFFFF)) >>> 0;
+  state.recorder.logEvent('sequence_seed', { seed });
+  const sequence = buildM0Sequence(seed);
   console.info(`sequence: ${sequence.length} stages, ~${Math.round(estimateDurationMs(sequence) / 1000)}s`);
 
   for (const stage of sequence) {

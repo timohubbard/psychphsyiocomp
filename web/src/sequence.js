@@ -91,6 +91,47 @@ export const TIMINGS = {
 };
 
 /**
+ * Deterministic shuffle, seeded per session.
+ *
+ * Calibration points MUST NOT be presented in a fixed spatial order, and that
+ * is not a stylistic preference — it was measured. Presenting the 13-point grid
+ * row by row makes target position a function of elapsed time: on a real
+ * session, target y correlated with presentation order at **r = +0.56**.
+ *
+ * Any feature that drifts over the session then becomes a proxy for target
+ * position. Head pitch drifted at r = +0.86 with order while carrying almost no
+ * genuine vertical-gaze signal (r = +0.19 with target y), and a linear model
+ * duly used it to predict y. Leave-one-out cross-validation cannot detect this,
+ * because the held-out point's temporal neighbours stay in the training set —
+ * so the model that leaked hardest looked BEST by LOOCV (2.62 deg) while
+ * scoring worst on genuinely held-out targets (5.04 deg).
+ *
+ * Randomising the order decorrelates target from time and the failure mode
+ * disappears. §5.1 notes jsPsych presents its grid in fixed order unless
+ * randomised; this is the reason to randomise it.
+ *
+ * Seeded rather than free-running so a session can be replayed exactly.
+ */
+export function seededShuffle(items, seed) {
+  // mulberry32 — small, fast, and adequate for ordering 13 items. Not for
+  // anything where the randomness itself needs to be unguessable.
+  let a = seed >>> 0;
+  const rand = () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(rand() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+/**
  * Build the M0 sequence as a list of stage descriptors.
  *
  * Every stage a participant could be confused by is preceded by an instruction,
@@ -99,7 +140,7 @@ export const TIMINGS = {
  * staring at a cross, and a participant who does not know it is sixty seconds
  * has no way to tell it apart from the page having frozen.
  */
-export function buildM0Sequence() {
+export function buildM0Sequence(seed = (Date.now() >>> 0)) {
   return [
     { type: 'instruction', id: 'intro',
       title: 'Here is what happens next',
@@ -129,7 +170,7 @@ export function buildM0Sequence() {
         'Move your EYES, not your head — try to keep your head still.',
         '13 dots, about 30 seconds.',
       ] },
-    ...CALIBRATION_POINTS.map((p, i) => ({
+    ...seededShuffle(CALIBRATION_POINTS, seed).map((p, i) => ({
       type: 'calibration_point', id: `calib_${i}`, x: p[0], y: p[1],
       index: i + 1, total: CALIBRATION_POINTS.length,
     })),
@@ -141,7 +182,7 @@ export function buildM0Sequence() {
         'This one measures how well the first part went, so it is worth the same care.',
         '5 dots, about 10 seconds.',
       ] },
-    ...VALIDATION_POINTS.map((p, i) => ({
+    ...seededShuffle(VALIDATION_POINTS, seed ^ 0x9E3779B9).map((p, i) => ({
       type: 'validation_point', id: `valid_${i}`, x: p[0], y: p[1],
       index: i + 1, total: VALIDATION_POINTS.length,
     })),

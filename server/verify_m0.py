@@ -25,7 +25,11 @@ sys.path.insert(0, str(REPO_ROOT / "engines" / "face.mediapipe_blendshapes" / "s
 
 import cv2  # noqa: E402
 
-from engine import MediaPipeBlendshapesBatch, mean_luma  # noqa: E402
+from engine_contract.loader import load_engine_module  # noqa: E402
+from engine_contract.media import mean_luma  # noqa: E402
+
+MediaPipeBlendshapesBatch = load_engine_module(
+    "face.mediapipe_blendshapes").MediaPipeBlendshapesBatch
 from engine_contract import Chunk, SignalRow  # noqa: E402
 from pipeline import MASTER_CLOCK, SessionBundle, process_session  # noqa: E402
 from synthetic_face import write_face_clip  # noqa: E402

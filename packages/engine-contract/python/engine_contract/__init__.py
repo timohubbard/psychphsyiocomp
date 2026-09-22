@@ -17,8 +17,12 @@ from engine_contract.manifest import (
     SignalRow,
     SignalSpec,
 )
+from engine_contract.media import describe_video, mean_luma, sha256_of
 
 __all__ = [
+    "describe_video",
+    "mean_luma",
+    "sha256_of",
     "Chunk",
     "Eligibility",
     "Engine",

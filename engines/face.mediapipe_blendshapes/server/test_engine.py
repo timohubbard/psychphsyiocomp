@@ -17,12 +17,14 @@ import cv2
 import numpy as np
 import pytest
 
-from engine import (  # type: ignore[import-not-found]
-    MediaPipeBlendshapesBatch,
-    describe_video,
-    euler_from_matrix,
-    mean_luma,
-)
+from engine_contract.loader import load_engine_module
+
+# Loaded by engine_id, never by sys.path order — see conftest.py.
+_engine = load_engine_module("face.mediapipe_blendshapes")
+MediaPipeBlendshapesBatch = _engine.MediaPipeBlendshapesBatch
+describe_video = _engine.describe_video
+euler_from_matrix = _engine.euler_from_matrix
+mean_luma = _engine.mean_luma
 from engine_contract import MediaDescriptor
 
 REPO_ROOT = Path(__file__).resolve().parents[3]

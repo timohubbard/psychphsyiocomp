@@ -10,6 +10,7 @@ import {
   errorInDegrees,
   estimateDurationMs,
   evaluateCalibration,
+  seededShuffle,
 } from './sequence.js';
 
 // ---------------------------------------------------------------------------
@@ -269,4 +270,68 @@ test('the gate carries no default threshold of its own', () => {
     /Cannot read|undefined/,
     'criteria must be required, not defaulted',
   );
+});
+
+
+// ---------------------------------------------------------------------------
+// presentation order
+// ---------------------------------------------------------------------------
+
+test('the same seed reproduces the same order', () => {
+  // A session has to be replayable exactly, or the order cannot be audited.
+  const a = seededShuffle(CALIBRATION_POINTS, 12345);
+  const b = seededShuffle(CALIBRATION_POINTS, 12345);
+  assert.deepEqual(a, b);
+});
+
+test('different seeds give different orders', () => {
+  const a = seededShuffle(CALIBRATION_POINTS, 1);
+  const b = seededShuffle(CALIBRATION_POINTS, 2);
+  assert.notDeepEqual(a, b);
+});
+
+test('shuffling keeps every point exactly once', () => {
+  const out = seededShuffle(CALIBRATION_POINTS, 999);
+  assert.equal(out.length, CALIBRATION_POINTS.length);
+  const key = (p) => `${p[0]},${p[1]}`;
+  assert.deepEqual(new Set(out.map(key)), new Set(CALIBRATION_POINTS.map(key)));
+});
+
+test('presentation order is decorrelated from target position', () => {
+  // The measured failure this exists to prevent: with the grid in its declared
+  // row-by-row order, target y correlates with presentation index at r = +0.56.
+  // Any feature drifting over the session then proxies for target position, and
+  // leave-one-out CV cannot see it because the held-out point's temporal
+  // neighbours remain in the training set.
+  const corrWithIndex = (points) => {
+    const n = points.length;
+    const ys = points.map((p) => p[1]);
+    const xs = points.map((_, i) => i);
+    const mx = xs.reduce((a, b) => a + b, 0) / n;
+    const my = ys.reduce((a, b) => a + b, 0) / n;
+    let num = 0, dx = 0, dy = 0;
+    for (let i = 0; i < n; i += 1) {
+      num += (xs[i] - mx) * (ys[i] - my);
+      dx += (xs[i] - mx) ** 2;
+      dy += (ys[i] - my) ** 2;
+    }
+    return num / Math.sqrt(dx * dy);
+  };
+
+  assert.ok(Math.abs(corrWithIndex(CALIBRATION_POINTS)) > 0.5,
+    'the declared order should be the confounded one this guards against');
+
+  // Averaged over many seeds the correlation must sit near zero. Any single
+  // shuffle can be unlucky, which is exactly why the seed is recorded.
+  let total = 0;
+  const trials = 200;
+  for (let s = 1; s <= trials; s += 1) total += corrWithIndex(seededShuffle(CALIBRATION_POINTS, s));
+  const mean = total / trials;
+  assert.ok(Math.abs(mean) < 0.1, `mean correlation across seeds was ${mean.toFixed(3)}`);
+});
+
+test('the sequence presents points in shuffled order', () => {
+  const seq = buildM0Sequence(4242);
+  const shown = seq.filter((s) => s.type === 'calibration_point').map((s) => [s.x, s.y]);
+  assert.deepEqual(shown, seededShuffle(CALIBRATION_POINTS, 4242));
 });

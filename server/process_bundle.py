@@ -24,13 +24,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "packages" / "engine-contract" / "python"))
 sys.path.insert(0, str(ROOT / "server"))
-for _engine_dir in (ROOT / "engines").glob("*/server"):
-    sys.path.insert(0, str(_engine_dir))
-
 import cv2  # noqa: E402
 import numpy as np  # noqa: E402
 
-from engine import MediaPipeBlendshapesBatch, mean_luma  # noqa: E402
+from engine_contract.loader import load_engine_module  # noqa: E402
+from engine_contract.media import mean_luma  # noqa: E402
+
+# Loaded by engine_id rather than by sys.path order. With more than one engine
+# installed, `import engine` is ambiguous and resolves to whichever directory
+# was inserted last — which is exactly how this script broke when the gaze
+# engine was added.
+_face = load_engine_module("face.mediapipe_blendshapes")
+MediaPipeBlendshapesBatch = _face.MediaPipeBlendshapesBatch
 from pipeline import SessionBundle, process_session  # noqa: E402
 from tables import read_session  # noqa: E402
 

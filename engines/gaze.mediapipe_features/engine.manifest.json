@@ -1,0 +1,114 @@
+{
+  "engine_id": "gaze.mediapipe_features",
+  "version": "0.1.0",
+  "modality": "gaze",
+  "runtime": "python-cpu",
+  "placement": "server-batch",
+  "determinism": "deterministic",
+
+  "inputs": [
+    {
+      "kind": "video",
+      "min_fps": 5,
+      "min_resolution": { "width": 320, "height": 240 },
+      "min_roi_luminance": 30
+    }
+  ],
+
+  "params_schema": {
+    "type": "object",
+    "properties": {
+      "min_face_detection_confidence": { "type": "number", "default": 0.5 },
+      "min_face_presence_confidence": { "type": "number", "default": 0.5 },
+      "min_tracking_confidence": { "type": "number", "default": 0.5 }
+    },
+    "additionalProperties": false
+  },
+
+  "outputs": {
+    "signals": [
+      {
+        "channel": "eye.*_iris_dx",
+        "unit": "eye_widths",
+        "nominal_rate_hz": 30,
+        "value_type": "float",
+        "range": [-1, 1],
+        "reliability_tier": "moderate",
+        "description": "Horizontal iris centre offset from the eye-corner midpoint, divided by the inter-corner distance. Normalising by the eye's own width is what makes this comparable across participants and across distances: the same gaze produces the same ratio whether the face fills the frame or not."
+      },
+      {
+        "channel": "eye.*_iris_dy",
+        "unit": "eye_widths",
+        "nominal_rate_hz": 30,
+        "value_type": "float",
+        "range": [-1, 1],
+        "reliability_tier": "low",
+        "description": "Vertical iris offset, also in eye-widths. Tiered LOWER than the horizontal channel on purpose: the vertical range of eye movement is a fraction of the horizontal one and is partly occluded by the eyelid, so the same pixel noise is a much larger share of the signal. §4.2's AOI padding argument applies asymmetrically for the same reason."
+      },
+      {
+        "channel": "eye.*_openness",
+        "unit": "ratio",
+        "nominal_rate_hz": 30,
+        "value_type": "float",
+        "reliability_tier": "moderate",
+        "description": "Eyelid aperture over eye width. Gates the iris channels rather than describing gaze: a blink makes an iris estimate meaningless rather than merely noisy."
+      },
+      {
+        "channel": "eye.inter_ocular_px",
+        "unit": "px",
+        "nominal_rate_hz": 30,
+        "value_type": "float",
+        "reliability_tier": "moderate",
+        "description": "Distance between the two iris centres in pixels. A scale proxy: it shrinks as the participant leans back, which is how the estimator can notice that the geometry recovered by the virtual chinrest no longer holds mid-session."
+      },
+      {
+        "channel": "head_pose.yaw",
+        "unit": "deg",
+        "nominal_rate_hz": 30,
+        "value_type": "float",
+        "reliability_tier": "high",
+        "description": "Emitted here as well as by the facial engine because gaze in screen coordinates is a function of head orientation AND eye-in-head angle. An estimator given only the iris cannot tell a head turn from an eye movement."
+      },
+      {
+        "channel": "head_pose.pitch",
+        "unit": "deg",
+        "nominal_rate_hz": 30,
+        "value_type": "float",
+        "reliability_tier": "high"
+      },
+      {
+        "channel": "head_pose.roll",
+        "unit": "deg",
+        "nominal_rate_hz": 30,
+        "value_type": "float",
+        "reliability_tier": "high"
+      }
+    ],
+    "events": [
+      { "event_type": "face_lost", "description": "Face detection dropped below presence confidence", "has_offset": true },
+      { "event_type": "eyes_closed", "description": "Both eyes below the openness threshold; iris features are not meaningful across this span", "has_offset": true }
+    ],
+    "quality": [
+      { "metric": "achieved_fps", "unit": "hz", "warn_below": 5,
+        "description": "Measured per session, never assumed. §5.3 uses 5 Hz as a published exclusion threshold, which removed 18 of 220 participants in one study." },
+      { "metric": "face_detect_rate", "unit": "proportion", "warn_below": 0.5,
+        "description": "Fraction of frames with a face above presence confidence." },
+      { "metric": "iris_valid_rate", "unit": "proportion", "warn_below": 0.5,
+        "description": "Fraction of frames yielding usable iris features. Distinct from face_detect_rate: a face can be tracked confidently while the eyes are closed, off-frame or too small to localise an iris in, and only this figure says whether gaze was measurable." },
+      { "metric": "mean_luminance", "unit": "level", "warn_below": 30,
+        "description": "§2.5: the rPPG skin-tone accuracy gap largely closes at luminance >=30. Carried here too because it is the evidence base's only quantified bias mitigation and applies to any camera-based measurement." }
+    ]
+  },
+
+  "license": {
+    "spdx": "Apache-2.0",
+    "commercial_use": "yes",
+    "url": "https://github.com/google-ai-edge/mediapipe",
+    "notes": "Apache-2.0 covers the library. The .task model bundle's own licence line was NOT verified during research — re-verify before any commercial ship. Flagged rather than assumed. NOTE: this engine emits FEATURES only, never a gaze direction, so it inherits no gaze-dataset EULA. The estimator fitted on top of these features is where training-set provenance starts to matter."
+  },
+
+  "provenance": {
+    "training_datasets": [],
+    "paper_doi": null
+  }
+}
