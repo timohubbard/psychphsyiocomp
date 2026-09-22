@@ -19,6 +19,7 @@ import { MediaPipeBlendshapesLive } from '../../engines/face.mediapipe_blendshap
 import { runVirtualChinrest, CHINREST_CSS } from './chinrest-ui.js';
 import { stimulusSizeErrorFraction } from './chinrest.js';
 import { retainsMedia, runConsent } from './consent.js';
+import { loadStudy, needsAudio, protocolFor, studyProvenance } from './study.js';
 
 const el = (id) => document.getElementById(id);
 
@@ -43,6 +44,7 @@ const state = {
   rafHandle: null,
   frameLoopKind: null,
   consent: null,
+  study: null,
   geometry: null,
   quality: { fps: null, faceRate: null, luma: null },
 };
@@ -72,21 +74,33 @@ ui.btnEnable.addEventListener('click', async () => {
   ui.btnEnable.disabled = true;
 
   try {
-    // Consent first, before the camera is ever requested. A permission prompt
-    // that appears before the participant has been told what happens to the
-    // recording asks them to decide with the information in the wrong order.
+    // The protocol before anything else, because everything below depends on
+    // it: what the participant is told, which tiers they may choose from, and
+    // whether the microphone is requested at all. There is no fallback — a
+    // session run under a protocol nobody can reconstruct is not salvageable.
+    const studyId = new URLSearchParams(location.search).get('study') || 'm0';
+    if (!state.study) state.study = await loadStudy(studyId);
+
+    // Consent second, still before the camera is ever requested. A permission
+    // prompt that appears before the participant has been told what happens to
+    // the recording asks them to decide with the information in the wrong order.
     if (!state.consent) {
-      state.consent = await runConsent(document.body);
+      state.consent = await runConsent(document.body, protocolFor(state.study));
     }
     ui.chkStream.textContent = 'requesting…';
 
     state.recorder = new SessionRecorder({
       sessionId: `s_${Date.now().toString(36)}`,
       participantId: new URLSearchParams(location.search).get('pid') || 'anonymous',
-      studyId: new URLSearchParams(location.search).get('study') || 'm0',
+      studyId: state.study.study_id,
+      // The microphone is requested only when a modality needs it. Asking for
+      // a device the protocol will not use is a permission prompt with no
+      // answer the participant can give that is in their interest.
+      audio: needsAudio(state.study),
     });
 
     state.recorder.setConsent(state.consent);
+    state.recorder.setStudy(await studyProvenance(state.study));
     const { appliedAudioConstraints } = await state.recorder.start();
     ui.preview.srcObject = state.recorder.stream;
     ui.chkStream.textContent = 'ok';
@@ -108,8 +122,43 @@ ui.btnEnable.addEventListener('click', async () => {
     ui.chkStream.style.color = 'var(--bad)';
     ui.btnEnable.disabled = false;
     console.error(err);
+
+    // A broken study definition is a setup error, not something the
+    // participant did or can fix, and it happens before any consent is taken.
+    // Showing them "failed" and nothing else wastes their session and tells
+    // the researcher nothing — the message has to name the file and the
+    // reason, on screen, where whoever is running the session will see it.
+    if (!state.study) showSetupError(err);
   }
 });
+
+/**
+ * A full-stop error screen for a protocol that could not be loaded.
+ *
+ * Deliberately not dismissible. There is no degraded mode worth offering: a
+ * session run without a study definition has no recorded protocol, and the
+ * disclosure shown to the participant would have to be invented here.
+ */
+function showSetupError(err) {
+  const root = document.createElement('div');
+  root.className = 'chinrest';
+  root.innerHTML = `
+    <div class="cr-panel">
+      <h1>This session cannot start</h1>
+      <p>The study definition could not be loaded, so there is no protocol to
+         run and nothing to tell you about how your data would be handled.
+         Nothing has been recorded.</p>
+      <p class="cr-error">${String(err?.message ?? err)}</p>
+      <div class="note">
+        <strong>If you are running this study:</strong> the definition lives in
+        <code>studies/&lt;id&gt;.json</code> and is selected by the
+        <code>?study=</code> parameter in the URL. See
+        <code>studies/README.md</code> for the required fields — none of them
+        are defaulted, on purpose.
+      </div>
+    </div>`;
+  document.body.appendChild(root);
+}
 
 /**
  * Report whether the browser honoured the request to disable its DSP.

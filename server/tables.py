@@ -136,6 +136,14 @@ SESSIONS_SCHEMA = pa.schema([
     # restrictive tier, and must not be silently treated as one.
     pa.field("consent_tier", pa.string(), nullable=True),
     pa.field("consent_retention_days", pa.int32(), nullable=True),
+    # Which protocol this session ran under. The content hash rather than the
+    # definition, so a study edited in place is detectable even when nobody
+    # bumped the version — see server/study.py. Nullable for the pilots
+    # captured before study definitions existed; NULL means "no protocol was
+    # recorded", which is not the same as "the default protocol".
+    pa.field("study_version", pa.string(), nullable=True),
+    pa.field("study_content_hash", pa.string(), nullable=True),
+    pa.field("study_modalities", pa.string(), nullable=True),  # JSON list
     pa.field("achieved_fps", pa.float64(), nullable=True),
     pa.field("clock_id", pa.string(), nullable=True),
     pa.field("clock_resolution_ms", pa.float64(), nullable=True),
@@ -200,6 +208,7 @@ class CanonicalWriter:
         screen = manifest.get("screen") or {}
         clock = manifest.get("clock") or {}
         audio = manifest.get("applied_audio_constraints")
+        study = manifest.get("study") or {}
 
         started = manifest.get("created_utc")
         started_dt = None
@@ -228,6 +237,10 @@ class CanonicalWriter:
             "consent_tier": (manifest.get("consent") or {}).get("tier"),
             "consent_retention_days": _opt_int(
                 (manifest.get("consent") or {}).get("retentionDays")),
+            "study_version": study.get("study_version"),
+            "study_content_hash": study.get("study_content_hash"),
+            "study_modalities": (json.dumps(study["modalities"])
+                                 if study.get("modalities") else None),
             "achieved_fps": manifest.get("achieved_fps"),
             "clock_id": clock.get("master_clock_id"),
             "clock_resolution_ms": clock.get("measured_resolution_ms"),

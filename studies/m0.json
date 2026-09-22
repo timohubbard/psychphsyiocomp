@@ -1,0 +1,38 @@
+{
+  "study_id": "m0",
+  "name": "M0 pilot — calibration, validation, read-aloud",
+  "version": "1.0.0",
+
+  "notes": [
+    "The protocol the M0 and M1 sessions were actually run under. It exists as",
+    "a file so those sessions have something to be attributable to; the values",
+    "here are transcribed from what the capture page hard-coded, not chosen",
+    "afresh. Do not edit it — a study definition is immutable once a session",
+    "has been collected under it. Copy it to a new study_id instead."
+  ],
+
+  "disclosure": {
+    "retention_days": 365,
+    "secondary_use": "Your data is analysed by the named research team. It is not sold, and it is not shared outside the team without a further, separate agreement.",
+    "contact": "Replace this with the investigator and the route to the ethics board before running a real participant.",
+    "irb_reference": null
+  },
+
+  "consent_tiers": ["features_only", "media_retained", "media_plus_transcript"],
+  "default_tier": "features_only",
+
+  "modalities": ["gaze", "face", "voice"],
+
+  "calibration": {
+    "n_points": 13,
+    "randomise_order": true
+  },
+
+  "tasks": [
+    { "type": "chinrest" },
+    { "type": "calibration" },
+    { "type": "validation" },
+    { "type": "read_aloud", "passage": "default" },
+    { "type": "free_speech", "prompts": "default" }
+  ]
+}

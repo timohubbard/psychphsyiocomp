@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from alignment import Anchor, ClockRegistry, detect_clapper_in_luma
+from study import verify_session_study
 from engine_contract import Engine, MediaDescriptor
 from tables import CanonicalWriter, SessionContext
 
@@ -231,6 +232,23 @@ def enforce_consent(bundle, summary: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+DEFAULT_STUDIES_ROOT = Path(__file__).resolve().parent.parent / "studies"
+
+
+def _verify_study(bundle: SessionBundle, studies_root: str | Path | None):
+    """Does this session's recorded protocol still match the file on disk?
+
+    Sessions captured before study definitions existed carry no study block and
+    come back `no_study_recorded`. That is a fact about the session, not a
+    failure of this run — the M0 and M1 pilots are all in that state, and
+    refusing to process them would discard the only real data this project has.
+    """
+    root = Path(studies_root) if studies_root else DEFAULT_STUDIES_ROOT
+    verdict = verify_session_study(bundle.metadata, root)
+    return {"ok": verdict.ok, "reasons": list(verdict.reasons),
+            "detail": verdict.detail}
+
+
 def process_session(
     bundle: SessionBundle,
     engines: list[tuple[Engine, dict[str, Any]]],
@@ -238,6 +256,7 @@ def process_session(
     *,
     video_luma: list[tuple[float, float]] | None = None,
     extra_stages: list[Any] | None = None,
+    studies_root: str | Path | None = None,
 ) -> dict[str, Any]:
     """Run engines over a session bundle and write the canonical tables.
 
@@ -263,6 +282,11 @@ def process_session(
         "sources": set(),
         "geometry_method": session_row["geometry_method"],
         "degrees_per_px": writer.degrees_per_px(),
+        # Reported, never enforced. The session is already collected and is not
+        # made worse by being processed; what would make it worse is treating
+        # it as comparable with sessions run under an edited protocol. See
+        # server/study.py.
+        "study": _verify_study(bundle, studies_root),
     }
 
     # Browser-live output is already on the master clock.

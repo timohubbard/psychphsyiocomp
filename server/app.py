@@ -35,6 +35,8 @@ sys.path.insert(0, str(ROOT / "server"))
 import aoi_store  # noqa: E402
 from aoi import AOI, AOISet, analyse  # noqa: E402
 from fixations import classify  # noqa: E402
+from study import content_hash as study_hash  # noqa: E402
+from study import list_studies, load_study, verify_session_study  # noqa: E402
 from store import (  # noqa: E402
     agreement_report,
     channel_series,
@@ -45,6 +47,27 @@ from store import (  # noqa: E402
 )
 
 WEB_DIR = ROOT / "web" / "researcher"
+STUDIES_ROOT = ROOT / "studies"
+
+
+def _study_check(meta: dict) -> dict:
+    """Does this session's recorded protocol still match the file on disk?
+
+    Reconstructs what `verify_session_study` expects from the sessions table
+    rather than from session.json, because the table is what survives: a
+    bundle directory is a working file and the canonical tables are the record.
+    """
+    recorded = {
+        "study_id": meta.get("study_id"),
+        "study_version": meta.get("study_version"),
+        "study_content_hash": meta.get("study_content_hash"),
+    }
+    if not recorded["study_content_hash"]:
+        recorded = None
+    verdict = verify_session_study({"study_id": meta.get("study_id"),
+                                    "study": recorded}, STUDIES_ROOT)
+    return {"ok": verdict.ok, "reasons": list(verdict.reasons),
+            "detail": verdict.detail}
 
 
 def _opt_float(values):
@@ -89,7 +112,12 @@ class Handler(SimpleHTTPRequestHandler):
             return {"sessions": list_sessions(self.data_root)}
 
         if len(parts) == 3 and parts[:2] == ["api", "sessions"]:
-            return session_detail(self.data_root, parts[2])
+            d = session_detail(self.data_root, parts[2])
+            # Composed here rather than in store.py: the read side answers
+            # questions about the tables, and this is a question about a file
+            # outside them that may have changed since.
+            d["study_check"] = _study_check(d["meta"])
+            return d
 
         if len(parts) == 4 and parts[:2] == ["api", "sessions"] and parts[3] == "series":
             channel = (query.get("channel") or [None])[0]
@@ -110,6 +138,15 @@ class Handler(SimpleHTTPRequestHandler):
 
         if len(parts) == 4 and parts[:2] == ["api", "sessions"] and parts[3] == "export":
             return self._export(parts[2], query)
+
+        if parts == ["api", "studies"]:
+            return {"studies": list_studies(STUDIES_ROOT)}
+
+        if len(parts) == 3 and parts[:2] == ["api", "studies"]:
+            # Returns the whole definition, not a summary: the point of opening
+            # one is to read the disclosure a participant was shown.
+            study = load_study(STUDIES_ROOT, parts[2])
+            return {"study": study, "content_hash": study_hash(study)}
 
         if parts == ["api", "aoi-sets"]:
             return {"sets": aoi_store.list_sets(self.data_root)}

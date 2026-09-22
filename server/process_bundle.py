@@ -196,6 +196,19 @@ def main() -> int:
                               extra_stages=stages)
 
 
+    st = summary.get("study") or {}
+    if st.get("ok"):
+        d = st["detail"]
+        print(f"\n  protocol         {d['study_id']} v{d['version']} "
+              f"({d['content_hash']})")
+    else:
+        # Named rather than silent. `no_study_recorded` is the expected state
+        # for the pilots captured before study definitions existed;
+        # `study_edited_since_session` is not, and means this session is not
+        # comparable with ones run after the edit.
+        reason = (st.get("reasons") or ["unknown"])[0]
+        print(f"\n  protocol         UNVERIFIED ({reason})")
+
     print("\n  " + "-" * 72)
     print(f"  sources written  {sorted(summary['sources'])}")
     for r in summary["runs"]:

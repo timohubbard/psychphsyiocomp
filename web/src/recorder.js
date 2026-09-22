@@ -42,11 +42,13 @@ export class SessionRecorder {
    * @param {string} opts.sessionId
    * @param {string} opts.participantId
    * @param {string} [opts.studyId]
+   * @param {boolean} [opts.audio] whether the protocol needs the microphone
    */
-  constructor({ sessionId, participantId, studyId = 'default' }) {
+  constructor({ sessionId, participantId, studyId = 'default', audio = true }) {
     this.sessionId = sessionId;
     this.participantId = participantId;
     this.studyId = studyId;
+    this.wantsAudio = audio;
 
     this.stream = null;
     this._mediaRecorder = null;
@@ -58,11 +60,12 @@ export class SessionRecorder {
     this._frameStats = { frames: 0, firstTs: null, lastTs: null };
     this._geometry = null;
     this._consent = null;
+    this._study = null;
   }
 
   // -- capture ---------------------------------------------------------
 
-  async start({ audio = true, video = true } = {}) {
+  async start({ audio = this.wantsAudio, video = true } = {}) {
     startSessionClock();
 
     this.stream = await navigator.mediaDevices.getUserMedia({
@@ -206,6 +209,19 @@ export class SessionRecorder {
     return record;
   }
 
+  /**
+   * Record which protocol this session ran under.
+   *
+   * The content hash rather than the definition. A copy of the study in every
+   * manifest would drift from the file researchers actually edit, and the point
+   * of the hash is to make a protocol change detectable even when someone edits
+   * in place and forgets to bump the version.
+   */
+  setStudy(provenance) {
+    this._study = provenance ?? null;
+    return this._study;
+  }
+
   /** Close a previously-opened event, e.g. a stimulus that has a duration. */
   closeEvent(eventType, stimulusId = null) {
     for (let i = this._events.length - 1; i >= 0; i -= 1) {
@@ -259,6 +275,7 @@ export class SessionRecorder {
       geometry: this._geometry,
       consent: this._consent,
       consent_tier: this._consent?.tier ?? null,
+      study: this._study,
       achieved_fps: this.achievedFps(),
       // Recorded because it bounds what precision was even possible (§3.3).
       clock: {

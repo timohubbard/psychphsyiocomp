@@ -6,6 +6,7 @@ same channel in the same session, plottable against each other.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
 import pyarrow.parquet as pq
@@ -513,3 +514,33 @@ def test_a_missing_consent_record_is_null_not_the_safest_tier(tmp_path, ctx):
     w.close()
 
     assert _sessions(tmp_path)[0]["consent_tier"] is None
+
+
+def test_the_protocol_hash_reaches_the_sessions_table(tmp_path):
+    """Without this column a session's attributability dies with session.json,
+    and the canonical tables are what survives."""
+    ctx = SessionContext(session_id="s_p", participant_id="p", study_id="reading")
+    w = CanonicalWriter(tmp_path, ctx)
+    row = w.set_session_metadata({
+        "created_utc": "2026-09-22T10:00:00.000Z",
+        "clock": {"master_clock_id": "performance.now"},
+        "study": {"study_id": "reading", "study_version": "1.0.0",
+                  "study_content_hash": "880c865173447b19",
+                  "modalities": ["face", "gaze"]},
+    })
+    assert row["study_content_hash"] == "880c865173447b19"
+    assert row["study_version"] == "1.0.0"
+    assert json.loads(row["study_modalities"]) == ["face", "gaze"]
+
+
+def test_a_session_with_no_protocol_records_null_not_a_default(tmp_path):
+    """NULL means "no protocol was recorded", which is a different thing from
+    "the default protocol" — the same distinction consent_tier draws."""
+    ctx = SessionContext(session_id="s_np", participant_id="p", study_id="m0")
+    w = CanonicalWriter(tmp_path, ctx)
+    row = w.set_session_metadata({
+        "created_utc": "2026-09-22T10:00:00.000Z",
+        "clock": {"master_clock_id": "performance.now"},
+    })
+    assert row["study_content_hash"] is None
+    assert row["study_modalities"] is None

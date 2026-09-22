@@ -151,6 +151,8 @@ async function loadDetail(id) {
       `${sm.gaze_calibration_targets ?? 0} usable calibration targets`, 'warn'));
   }
 
+  cards.push(protocolCard(d.study_check));
+
   const luma = lastQuality(d.quality, 'mean_luminance');
   if (luma != null) {
     cards.push(card('Luminance', fmt(luma, 0),
@@ -181,6 +183,8 @@ async function loadDetail(id) {
       ~68–70% under real head movement at the same 30 Hz, which is the regime a
       webcam pipeline lives in. Counts and durations are algorithm-dependent, so
       the detector travels with them.</div>` : ''}
+
+    ${protocolNote(d.study_check)}
 
     ${voicePanel(d.engine_quality)}
     ${respirationPanel(d.engine_quality)}
@@ -906,4 +910,68 @@ function respirationPanel(eq) {
       4(15)</strong> even with no identification purpose, because Art. 9's
       health limb carries no identification qualifier the way the biometric limb
       does (§6.3). Treat it as higher legal risk than gaze, face or voice.</div>`;
+}
+
+// ---------------------------------------------------------------------------
+// protocol
+//
+// Which study definition this session ran under, and whether that definition
+// still says what it said at the time. The four outcomes need different
+// responses, so they are not collapsed into a single green/red.
+// ---------------------------------------------------------------------------
+
+function protocolCard(check) {
+  if (!check) return '';
+  const d = check.detail ?? {};
+
+  if (check.ok) {
+    return card('Protocol', `${d.study_id} v${d.version}`,
+      `${d.content_hash} · matches studies/${d.study_id}.json`, 'ok');
+  }
+
+  const reason = (check.reasons ?? [])[0];
+  if (reason === 'no_study_recorded') {
+    // Not a fault to fix retroactively. These sessions predate study
+    // definitions and there is nothing to recover — an amber note, not a red
+    // one, because the data is fine and only its attributability is missing.
+    return card('Protocol', 'not recorded',
+      `${d.study_id ?? 'unknown'} — captured before study definitions existed`,
+      'warn');
+  }
+  if (reason === 'study_unavailable') {
+    return card('Protocol', 'unavailable',
+      `${d.study_id} is not in studies/ — restore it from version control`,
+      'bad');
+  }
+  return card('Protocol', 'EDITED', `${d.study_id} changed after this session`,
+    'bad');
+}
+
+function protocolNote(check) {
+  if (!check || check.ok) return '';
+  const d = check.detail ?? {};
+  const reason = (check.reasons ?? [])[0];
+
+  if (reason === 'study_edited_since_session') {
+    return `<div class="note bad">
+      <strong>The study definition changed after this session was collected.</strong>
+      It recorded <code>${d.recorded_hash}</code> and
+      <code>studies/${d.study_id}.json</code> now hashes to
+      <code>${d.file_hash}</code>${d.recorded_version === d.file_version
+        ? `, while both still call themselves v${d.file_version}` : ''}.
+      Sessions either side of that edit were not run under the same protocol,
+      and pooling them is the §4.2 problem in a different costume: what changed
+      might be the calibration grid, or it might be the retention period the
+      participant was promised. <code>git log studies/${d.study_id}.json</code>
+      will say which.</div>`;
+  }
+  if (reason === 'no_study_recorded') {
+    return `<div class="note">
+      This session carries no protocol hash, so what the participant was told
+      and what they were asked to do cannot be reconstructed from the data
+      alone. Sessions captured from now on record it; these cannot be
+      retrofitted, because the definition they ran under was never written
+      down.</div>`;
+  }
+  return '';
 }

@@ -72,6 +72,7 @@ PASS. `npm run verify:gaze` → GAZE GATE PASS.
 | M3 — `voice.opensmile_egemaps` (88 eGeMAPSv02 functionals) | done |
 | M4 — `resp.motion_profiles`, waveform only | done |
 | M4 — respiration validation study against an RIP belt | not started |
+| Study definitions — protocol as data, content-hashed | done |
 
 ### What the numbers are
 
@@ -116,6 +117,46 @@ Two related decisions this engine encodes:
   beat a single combined 1D profile, and `test_multiple_profiles_beat_a_single_combined_profile`
   measures it rather than asserting it. The reason is phase: chest rise and
   shoulder rotation are not in phase, so naive averaging cancels the signal.
+
+## The protocol is data
+
+A study lives in `studies/<id>.json`, not in the code. What a participant was
+told, which consent tiers they could choose from, which modalities ran, how
+many calibration targets there were — none of those are properties of this
+software, and until study definitions existed two of them were hard-coded in
+it: a single `STUDY_DISCLOSURE` constant stated a retention period on every
+study's behalf.
+
+Three rules, each one this project has already paid for elsewhere:
+
+**Content-hashed, and immutable once used.** The hash goes into every session
+manifest and into the `sessions` table. Editing a study in place is not
+prevented, but it is *visible*: a session processed afterwards reports
+`study_edited_since_session`, and the researcher app says which sessions are no
+longer comparable. This is §4.2's finding applied to protocols — identical
+fixations yielded 77%, 88% and 93% dwell depending on AOI boundaries, and a
+calibration grid or a retention promise has the same power. A version string
+does not catch it, because nobody bumps a version while fixing a typo in a
+disclosure.
+
+**Validated, never defaulted.** A study missing a retention period is not a
+study with a sensible default retention period. 45 CFR 46.116 requires the
+element to be stated, and a default here would be this software putting an
+unreviewed promise in front of a participant. A definition that does not
+validate does not run, and the capture page shows a full-stop error naming the
+file and the reason rather than a generic failure.
+
+**Modalities are opt-in and enumerated.** The microphone is requested only when
+a modality needs it. Respiration in particular runs because a study said so,
+never because the engine was installed — §6.3 puts it at higher legal risk than
+the other three.
+
+The browser validates before consent is taken and the server validates before a
+session enters the canonical tables, so `web/src/study.js` and `server/study.py`
+are deliberate mirrors. The hash of the shipped `studies/m0.json` is pinned as a
+literal in *both* test suites: if the two implementations ever canonicalise
+differently, every session starts reporting "study edited since session", a
+false alarm indistinguishable from a real one.
 
 ## Core design decisions
 
@@ -398,10 +439,12 @@ server/
   agreement.py                  cross-engine agreement, relative proportions
   respiration.py                band-pass, multi-profile fusion, rate refusal
   consent.py                    tiered consent; pipeline.py enforces retention
+  study.py                      protocol validation + hash (mirrors study.js)
   app.py                        researcher app
 web/
   index.html, src/              participant capture page
   researcher/                   researcher UI
+studies/                        one JSON file per protocol, immutable once used
 tools/license-inventory/        "what would we rip out to go commercial?"
 ```
 

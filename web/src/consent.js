@@ -136,13 +136,16 @@ export function validateConsent(record) {
  * audited later — "they consented to media retention" is not answerable without
  * knowing what they were told retention meant.
  */
-export function consentRecord({ tier, retentionDays, secondaryUse, studyId }) {
+export function consentRecord({ tier, retentionDays, secondaryUse, contact,
+                                irbReference = null, studyId }) {
   const chosen = CONSENT_TIERS.find((t) => t.id === tier);
   return {
     tier,
     understood: true,
     retentionDays,
     secondaryUse,
+    contact: contact ?? null,
+    irb_reference: irbReference,
     study_id: studyId ?? null,
     agreed_utc: new Date().toISOString(),
     disclosed: chosen
@@ -162,31 +165,27 @@ export function consentRecord({ tier, retentionDays, secondaryUse, studyId }) {
 // to decide with the information in the wrong order.
 // ---------------------------------------------------------------------------
 
-/**
- * Study-level disclosures.
- *
- * Hard-coded here for now, and they should not stay that way — retention period
- * and secondary use are properties of a STUDY, not of this software, and 45 CFR
- * 46.116 requires both to be stated. When study definitions exist these come
- * from there. Until then they are visible, editable in one place, and validated
- * rather than assumed.
- */
-export const STUDY_DISCLOSURE = {
-  retentionDays: 365,
-  secondaryUse:
-    'Your data is analysed by the named research team. It is not sold, and it '
-    + 'is not shared outside the team without a further, separate agreement.',
-};
+export function runConsent(host, protocol) {
+  // Takes a resolved protocol rather than a study definition, and has no
+  // fallback for a missing one. Two reasons. It keeps this module a renderer —
+  // `study.js` decides what a study offers, this draws it — and it avoids an
+  // import cycle, since `study.js` already imports the tiers from here. A
+  // default would also mean this software stating a retention period on a
+  // researcher's behalf, which is the thing study definitions exist to stop.
+  const { disclosure, tiers: tiersOffered, defaultTier, studyId } = protocol ?? {};
+  if (!disclosure || !Array.isArray(tiersOffered) || !tiersOffered.length) {
+    throw new Error('runConsent needs a resolved protocol: see study.js');
+  }
 
-export function runConsent(host) {
   return new Promise((resolve) => {
     const root = document.createElement('div');
     root.className = 'chinrest';   // reuses the full-screen overlay styling
     host.appendChild(root);
 
-    const tiers = CONSENT_TIERS.map((t, i) => `
+    const tiers = tiersOffered.map((t, i) => `
       <label class="consent-tier">
-        <input type="radio" name="tier" value="${t.id}" ${i === 0 ? 'checked' : ''}>
+        <input type="radio" name="tier" value="${t.id}"
+               ${t.id === (defaultTier ?? tiersOffered[0].id) ? 'checked' : ''}>
         <span>
           <strong>${t.label}</strong>
           <span class="consent-summary">${t.summary}</span>
@@ -211,8 +210,11 @@ export function runConsent(host) {
 
         <div class="note">
           <strong>How long:</strong> your data is kept for
-          ${STUDY_DISCLOSURE.retentionDays} days and then deleted.<br>
-          <strong>Who else sees it:</strong> ${STUDY_DISCLOSURE.secondaryUse}<br>
+          ${disclosure.retentionDays} days and then deleted.<br>
+          <strong>Who else sees it:</strong> ${disclosure.secondaryUse}<br>
+          <strong>Questions or concerns:</strong> ${disclosure.contact}<br>
+          ${disclosure.irbReference
+            ? `Approved under ${disclosure.irbReference}.<br>` : ''}
           You can stop at any time, and nothing leaves your machine until you
           choose to finish.
         </div>
@@ -235,9 +237,11 @@ export function runConsent(host) {
 
       const record = consentRecord({
         tier,
-        retentionDays: STUDY_DISCLOSURE.retentionDays,
-        secondaryUse: STUDY_DISCLOSURE.secondaryUse,
-        studyId: new URLSearchParams(location.search).get('study') || 'm0',
+        retentionDays: disclosure.retentionDays,
+        secondaryUse: disclosure.secondaryUse,
+        contact: disclosure.contact,
+        irbReference: disclosure.irbReference,
+        studyId,
       });
       record.understood = understood;
 
