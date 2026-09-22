@@ -62,8 +62,8 @@ PASS. `npm run verify:gaze` → GAZE GATE PASS.
 | Capture page — chinrest, calibration, validation, instructions | done |
 | `gaze.mediapipe_features` + per-participant ridge estimator | done |
 | HMM fixation classification | done |
-| AOIs and Holmqvist metrics | done |
-| Researcher app with scanpath | done |
+| AOIs, Holmqvist metrics, and an in-app editor | done |
+| Researcher app — scanpath, AOI editor | done |
 | Eval harness incl. the human-annotation arm | not started |
 | L2CS-Net fine-tune | not started |
 | M2 facial AU (Py-Feat + OpenFace cross-check) | next |
@@ -281,6 +281,16 @@ Per session it shows alignment fraction, recovered geometry with its error bar,
 capture rate against §5.3's 5 Hz exclusion threshold, luminance against §2.5's
 fairness floor, per-engine licence, windowed quality traces, every channel with
 its reliability tier, CSV export, and a scanpath filterable by analysis phase.
+
+**AOIs are drawn on the scanpath**, with the *padded* outline shown alongside
+the drawn one — at 4.5° on a 42 px/deg display the padded region is dramatically
+larger, and someone drawing a tight box around a button is otherwise unaware
+that a fixation two centimetres away will count. AOI definitions are the one
+thing this app may write, and they are not measurements: a measurement is
+something a participant produced and the pipeline recorded, an AOI is a question
+someone decided to ask of it afterwards. Saving a changed set writes a new
+immutable version, because §4.2's 77→88→93 finding means a result computed under
+old boundaries must stay attributable to them.
 
 **Gaze accuracy is deliberately not colour-coded.** §5.3 records that no
 pass/fail cutoff is published for it, so the figure is shown beside §4.2's AOI
