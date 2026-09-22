@@ -119,3 +119,41 @@ The top-level package importing successfully does not mean it works: SAC blocks
 individual `.pyd` files, so `import sklearn` can succeed while
 `sklearn.metrics._dist_metrics` fails. Test the import path the code actually
 uses.
+
+## What we have learned since (2026-09-22)
+
+The policy is narrower than it first looked, and the shape of it is now clearer.
+
+**Four more packages with native extensions installed and imported cleanly**:
+`ctranslate2` 4.8.2, `onnxruntime` 1.30.0, `av` 18.1.0 and `tokenizers` 0.23.2,
+pulled in by `faster-whisper` for the transcript engine. Every one of them ships
+compiled binaries, and none was blocked.
+
+So SAC is not refusing native extensions as a class. It refuses files whose
+*specific hash* it has no reputation data for, which in practice means recently
+published builds. That explains the pattern exactly:
+
+| package | version | outcome |
+|---|---|---|
+| pandas | 3.0.6 (new) | **blocked** |
+| pandas | 2.3.3 (established) | permitted |
+| scikit-learn | 1.9.1 (new) | **blocked** |
+| scikit-learn | 1.7.2 (established) | permitted |
+| ctranslate2, onnxruntime, av, tokenizers | current | permitted |
+
+Two practical consequences:
+
+1. **The pins in `requirements.txt` are about age, not about those libraries.**
+   They will stop being necessary on their own as the blocked builds accumulate
+   reputation — SAC's data is not static. Re-testing the newer versions
+   periodically is worth more than treating the bounds as permanent.
+
+2. **A blocked import is not a signal that a dependency is unsuitable.** It says
+   the build is recent. The decision that matters — whether a package is
+   attributable and appropriately licensed — is unrelated, and was made
+   separately for every engine here. `openface-test` was rejected because it had
+   no author, licence, homepage or summary, not because anything blocked it.
+
+**The WSL2 recommendation above still stands** for a clean separation and for
+matching whatever a collaborator or CI runs. But the case is now weaker than it
+looked: the bounds cost two pinned versions, not a blocked project.
