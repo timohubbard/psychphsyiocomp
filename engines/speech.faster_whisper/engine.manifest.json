@@ -1,0 +1,127 @@
+{
+  "engine_id": "speech.faster_whisper",
+  "version": "0.1.0",
+  "modality": "speech",
+  "runtime": "python-cpu",
+  "placement": "server-batch",
+  "determinism": "deterministic",
+  "inputs": [
+    {
+      "kind": "audio",
+      "min_sample_rate_hz": 8000,
+      "min_duration_s": 0.5
+    }
+  ],
+  "params_schema": {
+    "type": "object",
+    "properties": {
+      "model_size": {
+        "type": "string",
+        "default": "base",
+        "description": "Whisper checkpoint. Recorded in every run, because transcripts from different checkpoints are different measurements and the word error rate between them is not small."
+      },
+      "language": {
+        "type": "string",
+        "default": null,
+        "description": "ISO code. NULL auto-detects, and the detection probability is emitted as quality — a study in a known language should set this rather than let a noisy recording pick."
+      },
+      "beam_size": {
+        "type": "integer",
+        "default": 5,
+        "description": "Beam width. Recorded because it changes the output."
+      },
+      "max_no_speech_prob": {
+        "type": "number",
+        "default": 0.6,
+        "description": "Segments the model itself flags as probably-not-speech above this are dropped. See capability_notes.hallucination."
+      },
+      "min_avg_logprob": {
+        "type": "number",
+        "default": -1.0,
+        "description": "Segments whose mean token log-probability falls below this are dropped. A hallucinated sentence over silence is typically low-confidence AND high no-speech."
+      },
+      "vad_filter": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whisper's own voice-activity filter, which removes the long silences the decoder has most room to invent over. Turning it off increases hallucination pressure, so the two confidence gates matter more, not less. It can also clip genuinely quiet speech — recorded either way rather than assumed."
+      }
+    },
+    "additionalProperties": false
+  },
+  "outputs": {
+    "signals": [
+      {
+        "channel": "speech.rate_wpm",
+        "unit": "words_per_minute",
+        "nominal_rate_hz": 0.2,
+        "value_type": "float",
+        "reliability_tier": "moderate",
+        "description": "Words per minute over each retained segment. Derived from the transcript, so it inherits every caveat the transcript carries — in particular it is measured only where speech was found, never across the silence between utterances."
+      },
+      {
+        "channel": "speech.segment_confidence",
+        "unit": "logprob",
+        "nominal_rate_hz": 0.2,
+        "value_type": "float",
+        "reliability_tier": "high",
+        "description": "Mean token log-probability for the segment, as the model reports it. Travels with every segment so a reader can weight the words rather than take them flat."
+      }
+    ],
+    "events": [
+      {
+        "event_type": "speech_segment",
+        "description": "One transcribed utterance; the text is in metadata",
+        "has_offset": true
+      },
+      {
+        "event_type": "speech_segment_rejected",
+        "description": "A segment the confidence gates dropped; its text is NOT recorded",
+        "has_offset": true
+      }
+    ],
+    "quality": [
+      {
+        "metric": "language_probability",
+        "unit": "proportion",
+        "warn_below": 0.7,
+        "description": "The model's confidence in the language it detected. Low values mean the transcript may be a translation of noise into a language nobody spoke."
+      },
+      {
+        "metric": "segments_retained",
+        "unit": "count",
+        "description": "Segments that passed both confidence gates."
+      },
+      {
+        "metric": "segments_rejected",
+        "unit": "count",
+        "warn_above": 0,
+        "description": "Segments dropped as probable hallucination. Any non-zero value is worth looking at, because the same conditions that produced one usually produced more."
+      },
+      {
+        "metric": "speech_coverage",
+        "unit": "proportion",
+        "warn_below": 0.05,
+        "description": "Fraction of the recording covered by retained speech. Very low coverage on a session that was meant to contain speaking is a finding about the microphone, not about the participant."
+      }
+    ]
+  },
+  "license": {
+    "spdx": "MIT",
+    "commercial_use": "yes",
+    "url": "https://github.com/SYSTRAN/faster-whisper",
+    "notes": "faster-whisper (SYSTRAN, MIT) over CTranslate2 (MIT). The Whisper MODEL WEIGHTS are OpenAI's and released under MIT per the openai/whisper repository; that is a separate artifact from this code and was not independently verified here beyond the repository's own licence file. Weights are downloaded at first use, not vendored."
+  },
+  "provenance": {
+    "training_datasets": [
+      "OpenAI Whisper: 680k hours of weakly-supervised multilingual audio; composition not published in detail"
+    ],
+    "paper_doi": "10.48550/arXiv.2212.04356"
+  },
+  "capability_notes": {
+    "consent_gated": "THIS ENGINE MUST NOT RUN without a consent tier that permits transcription. A transcript can contain anything a participant happened to say, including things they never intended to be recorded as words, and it is the one output here that is trivially readable by anyone who opens the file. `media_plus_transcript` is the only tier that permits it, and the gate lives in server/transcript_stage.py rather than in this engine, because an engine is a pure function of media and cannot see a session's consent.",
+    "hallucination": "Whisper produces fluent text where there is no speech. On silence, breathing or background noise it will sometimes emit a complete, plausible sentence — frequently a caption-style artefact from its training data. In a research record this is worse than a wrong number: it puts words in a named participant's mouth. Two gates therefore apply per segment and BOTH must pass: the model's own no_speech_prob must be at or below max_no_speech_prob, and the mean token log-probability must be at or above min_avg_logprob. A rejected segment is recorded as an event WITH its timing and confidence but WITHOUT its text, so the rejection is auditable without preserving the fabrication.",
+    "no_diarisation": "One speaker is assumed. Nothing here separates voices, and a recording with two people in it produces one undifferentiated transcript. Do not read a transcript from a multi-speaker session as the participant's words.",
+    "accuracy_unstated": "No word error rate is claimed for this pipeline. Published Whisper WERs are measured on curated corpora, not on a consumer webcam microphone in a participant's home with whatever the browser's DSP did to it first, and no figure from those benchmarks transfers. The confidence channels are what ships instead.",
+    "not_a_voice_feature": "Separate from voice.opensmile_egemaps on purpose. That engine measures HOW something was said and never needs the words; this one produces the words and is gated far more tightly. Keeping them apart means a study can have acoustic features without ever creating a transcript."
+  }
+}

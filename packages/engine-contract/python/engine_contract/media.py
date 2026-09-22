@@ -260,4 +260,6 @@ def describe_audio(
         sha256=sha256_of(p),
         duration_s=float(info.duration) if info.duration else None,
         applied_audio_constraints=applied_constraints,
+        sample_rate_hz=float(info.samplerate) if info.samplerate else None,
+        channels=int(info.channels) if info.channels else None,
     )

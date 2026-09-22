@@ -97,6 +97,50 @@ def fetch(model: Model, force: bool = False) -> bool:
     return True
 
 
+WHISPER_DIR = MODELS_DIR / "whisper"
+
+#: Fetched through faster-whisper's own downloader rather than a URL, because
+#: a Whisper checkpoint is a directory of files (weights, tokenizer, config)
+#: and pinning one URL would pin one of them.
+WHISPER_SIZES = ("base",)
+
+WHISPER_LICENCE = (
+    "faster-whisper and CTranslate2 are MIT (SYSTRAN). The WEIGHTS are "
+    "OpenAI's, released under MIT per the openai/whisper repository — a "
+    "separate artifact, and that licence line was read from the repository "
+    "rather than independently verified. Converted checkpoints are "
+    "redistributed on the Hugging Face Hub by the Systran organisation."
+)
+
+
+def fetch_whisper(force: bool = False) -> None:
+    """Pre-download the Whisper checkpoint into models/whisper.
+
+    Optional: nothing else in the pipeline needs it unless a study offers the
+    transcript tier. It is fetched explicitly here rather than on first use so
+    that the licence note above is printed to somebody, and so a run in a
+    sealed environment fails at setup instead of mid-session.
+    """
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError:
+        print("  whisper              SKIPPED  faster-whisper is not installed")
+        print("      (only needed for studies offering the transcript tier)")
+        return
+
+    WHISPER_DIR.mkdir(parents=True, exist_ok=True)
+    for size in WHISPER_SIZES:
+        marker = WHISPER_DIR / f".{size}.fetched"
+        if marker.exists() and not force:
+            print(f"  whisper:{size:12s} present  {WHISPER_DIR.relative_to(REPO_ROOT)}")
+            continue
+        print(f"  whisper:{size:12s} fetching...")
+        WhisperModel(size, device="cpu", compute_type="int8",
+                     download_root=str(WHISPER_DIR))
+        marker.write_text("ok", encoding="utf-8")
+        print(f"  whisper:{size:12s} ok       {WHISPER_DIR.relative_to(REPO_ROOT)}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--force", action="store_true", help="re-fetch even if present")
@@ -112,6 +156,9 @@ def main() -> int:
             state = "present" if m.dest.exists() else "MISSING"
             print(f"  {m.name:20s} {state:8s} {m.dest.relative_to(REPO_ROOT)}")
             print(f"      licence: {m.licence_note}")
+        state = "present" if any(WHISPER_DIR.glob(".*.fetched")) else "MISSING"
+        print(f"  {'whisper':20s} {state:8s} models/whisper  (optional)")
+        print(f"      licence: {WHISPER_LICENCE}")
         print()
         return 0
 
@@ -122,10 +169,13 @@ def main() -> int:
             print(f"  {m.name:20s} FAILED   {exc}", file=sys.stderr)
             return 1
 
+    fetch_whisper(force=args.force)
+
     print("  " + "-" * 72)
     print("  Model licence notes:")
     for m in MODELS:
         print(f"    {m.name}: {m.licence_note}")
+    print(f"    whisper: {WHISPER_LICENCE}")
     print()
     return 0
 

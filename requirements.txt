@@ -49,3 +49,19 @@ imageio-ffmpeg>=0.6.0   # Bundles a static ffmpeg, used to demux the audio track
                         # ffmpeg on purpose: codec support and defaults vary
                         # between builds, and audio extraction is not somewhere
                         # to inherit that variance.
+
+# --- Transcription (optional) ------------------------------------------------
+# Only needed for studies offering the `media_plus_transcript` consent tier.
+# Everything else in the pipeline runs without it, and `tools/fetch_models.py`
+# skips the Whisper checkpoint with a note rather than failing when it is absent.
+#
+# MIT throughout: faster-whisper and CTranslate2 are SYSTRAN's, and the Whisper
+# weights are OpenAI's under MIT per the openai/whisper repository — a separate
+# artifact whose licence line was read there rather than independently verified.
+#
+# Pulls in ctranslate2, onnxruntime, av and tokenizers, all of which ship native
+# extensions. On the Windows machine this was built on they import cleanly under
+# the Application Control policy that refused pandas 3 and scikit-learn 1.9,
+# which is not a guarantee for future releases — if one of these is ever blocked
+# at import, that is the same policy and not a broken install.
+faster-whisper>=1.2.1

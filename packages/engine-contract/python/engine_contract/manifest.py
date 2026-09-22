@@ -82,6 +82,15 @@ class InputSpec:
     #: We record what was actually applied, not what was requested — the spec
     #: permits a UA to ignore the request without failing (§5.2).
     required_audio_constraints: dict[str, bool] | None = None
+    #: Minimum sample rate. Below ~8 kHz a recording has already lost the
+    #: fricative energy that distinguishes many consonants, so a transcript of
+    #: it is a guess dressed as a reading.
+    min_sample_rate_hz: float | None = None
+    #: Minimum duration. Separate from the video floors because the failure is
+    #: different: a short clip does not merely give a weak estimate, it gets
+    #: PADDED to the model's window, and what several models then do is
+    #: transcribe or measure the padding.
+    min_duration_s: float | None = None
 
 
 @dataclass(frozen=True)
@@ -175,6 +184,12 @@ class MediaDescriptor:
     codec: str | None = None
     applied_audio_constraints: dict[str, bool] | None = None
     mean_roi_luminance: float | None = None
+    #: Audio sample rate as the file actually reports it, not as it was
+    #: requested. Without this field an engine's sample-rate gate reads
+    #: a missing attribute and passes everything, which is how the
+    #: transcript engine's floor spent its first hour doing nothing.
+    sample_rate_hz: float | None = None
+    channels: int | None = None
 
 
 @dataclass(frozen=True)

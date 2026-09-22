@@ -73,6 +73,7 @@ PASS. `npm run verify:gaze` → GAZE GATE PASS.
 | M4 — `resp.motion_profiles`, waveform only | done |
 | M4 — respiration validation study against an RIP belt | not started |
 | Study definitions — protocol as data, content-hashed | done |
+| `speech.faster_whisper` — transcripts, consent-gated | done |
 
 ### What the numbers are
 
@@ -157,6 +158,39 @@ are deliberate mirrors. The hash of the shipped `studies/m0.json` is pinned as a
 literal in *both* test suites: if the two implementations ever canonicalise
 differently, every session starts reporting "study edited since session", a
 false alarm indistinguishable from a real one.
+
+### The one output that needs permission first
+
+`speech.faster_whisper` produces a transcript, and it is the only thing here
+that runs *only* when a participant said it could. `media_plus_transcript` is
+the single permitting tier; the gate lives in `server/transcript_stage.py`,
+not in the engine, because an engine is a pure function of media and cannot
+see a session's consent.
+
+The gate inverts this project's usual default. Everywhere else a missing
+consent field means keep-and-flag, because deleting someone's recording on the
+strength of an absent field is unrecoverable. Here the asymmetry runs the other
+way: creating a transcript nobody agreed to is the unrecoverable act, and
+declining to create one costs a re-run. So a missing tier refuses, an
+unacknowledged disclosure refuses, and a tier the study never offered refuses
+as incoherent.
+
+**Whisper hallucinates, and that is handled as a first-class failure.** Given
+silence or room tone it will emit a complete, fluent, plausible sentence. In a
+research record this is worse than a wrong number: a wrong number is visibly a
+measurement, while a fabricated sentence is indistinguishable from a quotation
+attributed to a named participant. Two independent gates apply per segment and
+both must hold — the model's own `no_speech_prob` and its mean token
+log-probability — plus a cross-segment check for the decoder repeat loops that
+neither per-segment gate can see. A rejected segment is recorded with its
+timing and confidence but **without its text**, so the rejection is auditable
+without the fabrication being kept.
+
+Verified against both controls: synthesised speech transcribes exactly at
+p=0.997 language confidence, and 30 seconds of digital silence produces a
+`no_speech_prob = 0.93` hallucination ungated that the gates drop. No word
+error rate is claimed — published Whisper WERs come from curated corpora, not
+from a consumer microphone after the browser's DSP.
 
 ## Core design decisions
 
@@ -429,6 +463,7 @@ engines/                        one directory per engine
   face.pyfeat_aus/              Action Units, per-AU reliability tiers
   voice.opensmile_egemaps/      88 eGeMAPSv02 functionals, server-batch
   resp.motion_profiles/         chest/shoulder motion — waveform, no rate
+  speech.faster_whisper/        transcripts; only runs with the transcript tier
 server/
   alignment.py                  the one place clocks are reconciled
   tables.py / store.py          canonical tables: write side / read side
@@ -440,6 +475,7 @@ server/
   respiration.py                band-pass, multi-profile fusion, rate refusal
   consent.py                    tiered consent; pipeline.py enforces retention
   study.py                      protocol validation + hash (mirrors study.js)
+  transcript_stage.py           the consent gate on transcription
   app.py                        researcher app
 web/
   index.html, src/              participant capture page

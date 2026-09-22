@@ -57,6 +57,12 @@ you see at the point you enable them:
 `voice` is the only modality that requests the microphone. Respiration is
 chest/shoulder motion, not sound and not rPPG.
 
+A **transcript** is not a modality. It is produced by
+`speech.faster_whisper`, runs only for sessions whose consent tier is
+`media_plus_transcript`, and is off unless the pipeline is given `--transcript`.
+Offering that tier in `consent_tiers` makes it *possible*; only the
+participant's own choice makes it happen.
+
 ## Tasks
 
 `tasks` is the stimulus sequence, in order. The known types:

@@ -43,6 +43,7 @@ from tables import read_session  # noqa: E402
 
 MODEL_PATH = ROOT / "models" / "face_landmarker.task"
 POSE_MODEL_PATH = ROOT / "models" / "pose_landmarker.task"
+WHISPER_DIR = ROOT / "models" / "whisper"
 
 
 def scan_luma(video_path: Path, max_frames: int | None = None) -> list[tuple[float, float]]:
@@ -115,6 +116,30 @@ def _voice_stage(writer, bundle, solution):
     return {"status": "ok", "rows": rows, **quality}
 
 
+def _transcript_stage_factory(model_dir, params):
+    """The transcript stage, which may well produce nothing.
+
+    Wrapped in a factory so the consent gate stays in transcript_stage.py and
+    this file never learns what a permitting tier is.
+    """
+    def stage(writer, bundle, solution):
+        from transcript_stage import run_transcript
+        study = None
+        try:
+            from study import load_study
+            recorded = bundle.metadata.get("study") or {}
+            if recorded.get("study_id"):
+                study = load_study(ROOT / "studies", recorded["study_id"])
+        except (FileNotFoundError, ValueError):
+            # Not fatal, and not a reason to widen the gate: without the study
+            # the check falls back to the session's own consent record, which
+            # is the participant's actual decision either way.
+            study = None
+        return run_transcript(writer, bundle, solution, study=study,
+                              model_dir=model_dir, params=params)
+    return stage
+
+
 def _gaze_stage(writer, bundle, solution):
     """Feature engine plus estimator, as one pipeline stage."""
     from gaze_pipeline import run_gaze
@@ -137,6 +162,13 @@ def main() -> int:
                     help="analyse every Nth frame for AUs; AU dynamics are slow")
     ap.add_argument("--no-voice", action="store_true",
                     help="skip audio extraction and the eGeMAPS engine")
+    ap.add_argument("--transcript", action="store_true",
+                    help="also transcribe speech — ONLY runs for sessions whose "
+                         "consent tier is media_plus_transcript, and records a "
+                         "reason when it refuses")
+    ap.add_argument("--whisper-model", default="base",
+                    help="Whisper checkpoint; recorded in the run row because "
+                         "different checkpoints give different transcripts")
     ap.add_argument("--resp", action="store_true",
                     help="also run the respiration engine (waveform only — it "
                          "does not emit a breathing rate, see its manifest)")
@@ -191,6 +223,9 @@ def main() -> int:
         stages.append(("gaze", _gaze_stage))
     if not args.no_voice:
         stages.append(("voice", _voice_stage))
+    if args.transcript:
+        stages.append(("transcript", _transcript_stage_factory(
+            WHISPER_DIR, {"model_size": args.whisper_model})))
 
     summary = process_session(bundle, engines, args.out, video_luma=luma,
                               extra_stages=stages)
@@ -225,6 +260,20 @@ def main() -> int:
 
     aligned = pc.sum(pc.invert(pc.is_null(sig.column("master_ts")))).as_py() or 0
     print(f"  aligned rows     {aligned} / {sig.num_rows}")
+
+    t = summary.get("transcript")
+    if t:
+        print(f"\n  transcript     status={t['status']}")
+        if t["status"] == "ok":
+            print(f"    segments     {t.get('segments_retained', 0):.0f} kept, "
+                  f"{t.get('segments_rejected', 0):.0f} rejected as probable "
+                  f"hallucination")
+            print(f"    coverage     {t.get('speech_coverage', 0):.1%} of the "
+                  f"recording   language p={t.get('language_probability', 0):.2f}")
+        else:
+            # A refusal is the expected outcome for most sessions and reads as
+            # one, rather than as a failure.
+            print(f"    {t.get('reason') or t.get('reasons')}")
 
     v = summary.get("voice")
     if v:
