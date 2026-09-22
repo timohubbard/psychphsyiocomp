@@ -51,7 +51,7 @@ seen the evidence behind them.
 
 **M0 (walking skeleton) complete. M1 (gaze) working end to end.**
 
-`npm run check` → licence gate green, 286 tests (80 JS + 206 Python), M0 gate
+`npm run check` → licence gate green, 298 tests (80 JS + 218 Python), M0 gate
 PASS. `npm run verify:gaze` → GAZE GATE PASS.
 
 | | |
