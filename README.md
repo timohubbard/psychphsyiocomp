@@ -49,9 +49,10 @@ seen the evidence behind them.
 
 ## Status
 
-**M0 (walking skeleton) complete. M1 (gaze) working end to end.**
+**M0 (walking skeleton) complete. M1 (gaze) working end to end. All four
+modalities run on real footage; facial has two AU engines.**
 
-`npm run check` → licence gate green, 342 tests (80 JS + 262 Python), M0 gate
+`npm run check` → licence inventory, 652 tests (152 JS + 500 Python), M0 gate
 PASS. `npm run verify:gaze` → GAZE GATE PASS.
 
 | | |
@@ -69,7 +70,8 @@ PASS. `npm run verify:gaze` → GAZE GATE PASS.
 | L2CS-Net fine-tune | not started |
 | M2 — `face.pyfeat_aus`, per-AU reliability tiers | done |
 | M2 — inter-engine agreement + relative proportions | done |
-| M2 — a second AU engine for cross-check | **blocked, see below** |
+| M2 — `face.opengraphau_aus`, the second AU engine | done |
+| M2 — agreement measured on *expressive* footage | not started — needs a recording |
 | M3 — `voice.opensmile_egemaps` (88 eGeMAPSv02 functionals) | done |
 | M4 — `resp.motion_profiles`, waveform only | done |
 | M4 — respiration validation study against an RIP belt | not started |
@@ -418,7 +420,7 @@ randomized" — and in the design matrix, which carries only iris terms plus hea
 pose. Eyelid aperture and inter-ocular distance are quality gates, not gaze
 signals, and handing a drifting quantity to a regression is an invitation.
 
-### Never single-engine on facial — and we currently are
+### Never single-engine on facial
 
 §2.2 is the most consequential finding in the evidence base for this modality:
 engine choice alone swung valid-frame yield 43%→63% and expression counts 3–4×
@@ -426,18 +428,88 @@ on **identical video**, with between-engine agreement at r = 0.37–0.75. That
 spread is the *free uncertainty estimate* — the only empirical handle on how
 much of a result is the face and how much is the detector.
 
-There is currently one AU engine, so that figure is unavailable, and the app
-says so explicitly rather than leaving a blank panel. A second engine is
-blocked, not skipped:
+So `--aus` runs two engines, and they are deliberately unalike:
 
-- **LibreFace** pins `mediapipe==0.10.5`, which would downgrade the two working
-  engines, and has no cp314 wheel.
-- **OpenFace 3.0** is not on PyPI under any attributable name. The `openface`
-  package there is a 0.0.0 placeholder; `openface-test` has no author, licence,
-  homepage or summary, so it was not installed.
+| | `face.pyfeat_aus` | `face.opengraphau_aus` |
+|---|---|---|
+| face finder | RetinaFace | MediaPipe, warped onto a measured template |
+| model | XGBoost over HOG features | ResNet-50 + AU-relation graph (ME-GraphAU, IJCAI 2022) |
+| output | occurrence probability | occurrence score (cosine, thresholded at 0.5 upstream) |
+| licence | MIT; AU weights unconfirmed | Apache-2.0 code, vendored; weights' datasets research-only |
 
-Getting a second AU source likely means building OpenFace 3.0 from the CMU
-source repository.
+The 18 AUs they share carry identical channel names, so `server/agreement.py`
+pairs them with no mapping table. LibreFace (pins `mediapipe==0.10.5`) and
+OpenFace 3.0 (not on PyPI under any attributable name) were the two options
+tried first and remain blocked.
+
+#### Five things the second engine surfaced
+
+**Upstream loads its weights with `strict=False`, and its demo builds the wrong
+architecture.** `demo.py --stage 2` constructs the stage-1 network whatever the
+flag says. Measured: the stage-2 checkpoint loaded that way leaves **8 tensors at
+random initialisation and discards 49**, and still runs and emits plausible
+numbers. The engine vendors the model code (`graphau_model.py`, notice and
+changes stated), loads strictly, and refuses a checkpoint whose SHA-256 is not
+the one the manifest names — the weights come from a Google Drive link that can
+be re-pointed.
+
+**The shared AU normaliser was folding left into bilateral.** It kept only the
+digits, so OpenGraphAU's `AUL12` became `AU12` and would have been written into
+the real AU12 channel frame by frame. Laterality is now preserved (`AU12_L`), and
+a lateralised unit is tiered `low` rather than inheriting AU12's `high` — no
+per-side figure exists in the evidence base for any AU. The 14 lateral channels
+are off by default.
+
+**Crop geometry is measured, not chosen.** All six of upstream's demo images
+place the eye midpoint at (0.50, 0.49) with inter-ocular distance 0.234 of the
+width (range 0.219–0.244). The engine warps every frame onto that template.
+Against upstream's own preprocessing on those images, scores correlate at r =
+0.975–0.991 across AUs; shrinking with area averaging before the warp halved the
+remaining per-AU error (mean 0.019–0.054 → 0.013–0.026), because a 4× bilinear
+downscale aliases where upstream's PIL resize does not.
+
+**Py-Feat forces the whole process onto one thread.** It sets
+`OMP_NUM_THREADS=1` on import — a macOS workaround for torch and xgboost loading
+different OpenMP runtimes — and that is process-wide. After Py-Feat had run,
+OpenGraphAU took **908 ms/frame instead of 112**. The engine now sets torch's
+thread count for its own forward passes and restores it after; outputs are
+identical to 1e-7 either way, and xgboost is unaffected.
+
+**Py-Feat's `unit` was wrong.** Its manifest said "intensity"; the XGBoost model
+returns `predict_proba`, an occurrence probability. Corrected. Both engines now
+declare what they emit, which is also why their values can be correlated at all
+and why neither should be read absolutely.
+
+#### What the two engines say about each other
+
+On the pilot session, 18 shared AUs, 446 aligned frames each: **median r = 0.14,
+range −0.57 to +0.54.** That is well below §2.2's 0.37–0.75, and it is *not* a
+measurement of what §2.2 measured. The recording is the M0 gaze protocol; the
+face is neutral throughout. MediaPipe's smile blendshapes never exceed 0.015 at
+the 99th percentile and cheek-squint is exactly zero, so there was no AU12 or
+AU06 to agree about. The 0.01 variance floor that catches this for blendshapes
+does not catch it here, because AU classifiers are noisier than blendshapes on a
+still face. An agreement figure is only as informative as the behaviour in the
+recording — a neutral recording cannot estimate between-engine uncertainty.
+
+One thing does show through. On that neutral face Py-Feat reached AU12 = 0.89
+and AU06 = 0.86 — confident smiles that are not there — while OpenGraphAU peaked
+at 0.30. That is §2.2's 3–4× over-calling, reproduced.
+
+As a positive control, both engines were run on upstream's six demo images,
+which carry real expressions. Pooled over 108 image×AU pairs, **r = 0.36** — the
+bottom edge of §2.2's range. On the two broad smiles they agree at r = 0.70 and
+0.58 and both call the smile configuration (AU 6, 7, 10, 12, 14, 25); on subtle
+faces they diverge, with Py-Feat calling up to 10 AUs present where OpenGraphAU
+calls 2. **This control favours OpenGraphAU**: those images are likely drawn from
+its own training data. It shows the engine responds to expressions; it does not
+show which engine is right.
+
+**Still needed:** a short *expressive* recording through the real capture path
+(posed smile, brow raise, frown, jaw drop, then spontaneous), so agreement is
+measured on behaviour that happened. And human labels on it via the annotation
+page, so each engine can be scored against people rather than against the other
+engine.
 
 #### Barely moved is not disagreed
 
@@ -548,6 +620,7 @@ engines/                        one directory per engine
   face.mediapipe_blendshapes/   reference engine, both placements
   gaze.mediapipe_features/      eye/iris features, server-batch
   face.pyfeat_aus/              Action Units, per-AU reliability tiers
+  face.opengraphau_aus/         the second AU engine, for §2.2's cross-check
   voice.opensmile_egemaps/      88 eGeMAPSv02 functionals, server-batch
   resp.motion_profiles/         chest/shoulder motion — waveform, no rate
   speech.faster_whisper/        transcripts; only runs with the transcript tier
@@ -583,7 +656,8 @@ silently imported the facial engine into the gaze engine's tests.
 ```bash
 npm run serve                     # participant capture page
 npm run process -- <dir> --out o/ # bundle -> canonical tables + gaze
-#   --aus    also run Action Units (slow: ~0.25s/analysed frame)
+#   --aus    also run Action Units — BOTH engines, so §2.2's spread exists
+#   --au-engines pyfeat|opengraphau   one only (the app will say what is lost)
 #   --resp   also run respiration (waveform only, never a rate)
 #   --no-gaze / --no-voice   skip those stages
 npm run app                       # researcher app
@@ -616,6 +690,7 @@ one command away instead of an archaeology project. Verified during research:
 | rPPG-Toolbox | Responsible AI License — use-based restrictions, not OSI |
 | WebGazer.js | GPLv3, and unmaintained since Feb 2026 |
 | Py-Feat | MIT — but ships a non-commercial InsightFace weight to exclude |
+| OpenGraphAU | Apache-2.0 code (vendored); weights trained on research-only datasets, EULAs unverified |
 | MediaPipe, SpeechBrain, emotion2vec, L2CS-Net | permissive |
 
 The licence tool fails safe: a manifest that omits `commercial_use` is bucketed

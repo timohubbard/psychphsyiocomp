@@ -1,4 +1,4 @@
-"""face.pyfeat_aus — FACS Action Unit intensities from stored video.
+"""face.pyfeat_aus — FACS Action Unit occurrence probabilities from stored video.
 
 Three things about this engine are decisions rather than implementation.
 
@@ -101,12 +101,13 @@ def _build_manifest() -> EngineManifest:
         outputs=EngineOutputs(
             signals=[
                 SignalSpec(
-                    channel="au.*", unit="intensity", nominal_rate_hz=6.0,
+                    channel="au.*", unit="probability", nominal_rate_hz=6.0,
                     value_type="float", value_range=(0.0, 1.0),
                     reliability_tier="moderate",
                     description=(
-                        "FACS Action Unit intensities. The tier on each ROW is set "
-                        "per AU from the published per-unit floor; this spec-level "
+                        "FACS Action Unit occurrence probabilities, not "
+                        "intensities. The tier on each ROW is set per AU from "
+                        "the published per-unit floor; this spec-level "
                         "value is only a default."
                     ),
                 ),

@@ -31,6 +31,11 @@ class Model:
     url: str
     dest: Path
     licence_note: str
+    #: When set, a download that does not hash to this is discarded. Needed for
+    #: sources that can be silently re-pointed (a Google Drive share link), and
+    #: for weights whose engine refuses any other checkpoint anyway — better to
+    #: fail here, at setup, than at the first session.
+    sha256: str | None = None
 
 
 MODELS = [
@@ -62,6 +67,25 @@ MODELS = [
             "keypoints per frame."
         ),
     ),
+    Model(
+        name="opengraphau_r50_s2",
+        # Upstream's README links this Google Drive file for "Ours (ResNet-50)",
+        # stage 2. `confirm=t` skips the large-file interstitial page, which
+        # would otherwise be saved as the "checkpoint".
+        url=(
+            "https://drive.usercontent.google.com/download?"
+            "id=1UMnpbj_YKlqHF1m0DHV0KYD3qmcOmeXp&export=download&confirm=t"
+        ),
+        dest=MODELS_DIR / "opengraphau" / "OpenGprahAU-ResNet50_second_stage.pth",
+        sha256="72a02eaa18ef35d6c72c96dca3c099e705731fe846e15395d17dee8ac702e71d",
+        licence_note=(
+            "OpenGraphAU code is Apache-2.0. The weights carry no licence of "
+            "their own and were trained on BP4D, DISFA, RAF-AU, Aff-Wild2, CK+ "
+            "and CASME II, whose EULAs are believed research-only and were NOT "
+            "individually verified. Usable under this project's academic "
+            "position; re-verify before any commercial ship."
+        ),
+    ),
 ]
 
 
@@ -85,6 +109,13 @@ def fetch(model: Model, force: bool = False) -> bool:
         with urllib.request.urlopen(model.url, timeout=120) as resp, tmp.open("wb") as out:
             while block := resp.read(1 << 16):
                 out.write(block)
+        if model.sha256 is not None:
+            got = sha256_of(tmp)
+            if got != model.sha256:
+                raise ValueError(
+                    f"sha256 {got[:16]}... does not match the pinned "
+                    f"{model.sha256[:16]}... — the source now serves a different "
+                    "file, and the engine that uses it would refuse it anyway")
         tmp.replace(model.dest)
     except Exception:
         tmp.unlink(missing_ok=True)

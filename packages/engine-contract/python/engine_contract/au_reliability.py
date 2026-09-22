@@ -62,6 +62,17 @@ MEAN_AUC_POSED = 0.81
 def reliability(au: str) -> AUReliability:
     """Tier for one AU, normalising `au01`, `AU1` and `AU01` to the same unit."""
     key = normalise(au)
+    if key.endswith(("_L", "_R")):
+        # One side of a bilateral movement. The evidence base has no per-side
+        # figure for ANY unit, including AU06 and AU12, so inheriting the
+        # bilateral tier would lend AU12's measured reliability to a quantity
+        # nobody measured — with half the pixels to work from.
+        return AUReliability(
+            au=key, tier="low", stratified=False,
+            evidence=("lateralised unit: no per-side figure exists in the "
+                      "evidence base for any AU; the bilateral tier is not "
+                      "inherited"),
+        )
     if key in _MEASURED:
         tier, evidence = _MEASURED[key]
         return AUReliability(au=key, tier=tier, stratified=True, evidence=evidence)
@@ -73,14 +84,27 @@ def reliability(au: str) -> AUReliability:
 
 
 def normalise(au: str) -> str:
-    """`au1`, `AU1`, `AU01` -> `AU01`.
+    """`au1`, `AU1`, `AU01` -> `AU01`; `AUL12`, `AU12L`, `AU12_L` -> `AU12_L`.
 
     Detectors label these inconsistently and a mismatch would silently drop an
     AU out of the tiering and into the unstratified default — which is exactly
     the failure this module exists to prevent.
+
+    Laterality is preserved, not stripped. The first version kept only the
+    digits, which is fine for Py-Feat but maps OpenGraphAU's `AUL12` (left lip
+    corner puller) onto `AU12` — and the left side would then be written into
+    the bilateral channel, where it overwrites the real AU12 frame by frame
+    and agrees with it suspiciously well.
     """
-    digits = "".join(c for c in str(au) if c.isdigit())
-    return f"AU{int(digits):02d}" if digits else str(au).upper()
+    s = str(au).strip().upper().replace("-", "_")
+    body = s[2:] if s.startswith("AU") else s
+    digits = "".join(c for c in body if c.isdigit())
+    if not digits:
+        return s
+    letters = body.replace("_", "").replace(digits, "", 1)
+    side = letters if letters in ("L", "R") else ""
+    key = f"AU{int(digits):02d}"
+    return f"{key}_{side}" if side else key
 
 
 def low_confidence_aus() -> tuple[str, ...]:

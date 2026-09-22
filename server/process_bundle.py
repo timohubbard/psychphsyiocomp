@@ -44,6 +44,7 @@ from tables import read_session  # noqa: E402
 MODEL_PATH = ROOT / "models" / "face_landmarker.task"
 POSE_MODEL_PATH = ROOT / "models" / "pose_landmarker.task"
 WHISPER_DIR = ROOT / "models" / "whisper"
+OPENGRAPHAU_WEIGHTS = ROOT / "models" / "opengraphau" / "OpenGprahAU-ResNet50_second_stage.pth"
 
 
 def scan_luma(video_path: Path, max_frames: int | None = None) -> list[tuple[float, float]]:
@@ -157,7 +158,13 @@ def main() -> int:
     ap.add_argument("--no-gaze", action="store_true",
                     help="skip the gaze engine and estimator")
     ap.add_argument("--aus", action="store_true",
-                    help="also run the Py-Feat Action Unit engine (slow: ~0.25s/frame)")
+                    help="also run the Action Unit engines (slow: ~0.4s per analysed "
+                         "frame for both together)")
+    ap.add_argument("--au-engines", default="pyfeat,opengraphau",
+                    help="comma-separated AU engines for --aus. Both by default: "
+                         "§2.2's between-engine spread is the only uncertainty "
+                         "estimate facial measurement has, and one engine "
+                         "cannot produce it")
     ap.add_argument("--au-stride", type=int, default=15,
                     help="analyse every Nth frame for AUs; AU dynamics are slow")
     ap.add_argument("--no-voice", action="store_true",
@@ -215,9 +222,21 @@ def main() -> int:
     # Off by default so the common path stays fast, rather than silently skipped
     # when it fails — an engine that is present must run.
     if args.aus:
-        _pyfeat = load_engine_module("face.pyfeat_aus")
-        engines.append((_pyfeat.PyFeatAUs(),
-                        {"frame_stride": args.au_stride, "batch_size": 8}))
+        chosen = {e.strip() for e in args.au_engines.split(",") if e.strip()}
+        unknown = chosen - {"pyfeat", "opengraphau"}
+        if unknown:
+            ap.error(f"unknown AU engine(s): {sorted(unknown)}")
+        if len(chosen) == 1:
+            print(f"\n  NOTE: one AU engine ({next(iter(chosen))}) — the §2.2 "
+                  "between-engine uncertainty will be reported as unavailable")
+        if "pyfeat" in chosen:
+            _pyfeat = load_engine_module("face.pyfeat_aus")
+            engines.append((_pyfeat.PyFeatAUs(),
+                            {"frame_stride": args.au_stride, "batch_size": 8}))
+        if "opengraphau" in chosen:
+            _ogau = load_engine_module("face.opengraphau_aus")
+            engines.append((_ogau.OpenGraphAUs(OPENGRAPHAU_WEIGHTS, str(MODEL_PATH)),
+                            {"frame_stride": args.au_stride, "batch_size": 16}))
     stages = []
     if not args.no_gaze:
         stages.append(("gaze", _gaze_stage))
@@ -313,6 +332,27 @@ def main() -> int:
                   f"   luma {resp_q.get('mean_luminance', 0):.0f}")
             print("    rate         withheld: no validation study exists "
                   "(see engine.manifest.json)")
+
+    if args.aus:
+        from store import agreement_report
+        rep = agreement_report(args.out, bundle.session_id, max_channels=200)
+        au = [c for c in rep["channels"] if c["channel"].startswith("au.")]
+        between = [c for c in au if c["kind"] == "engines" and c["verdict"] == "ok"]
+        print("\n  action units   between-engine agreement (§2.2 published "
+              "r = 0.37-0.75)")
+        if between:
+            rs = sorted(c["r"] for c in between)
+            print(f"    measured     {len(between)} shared AUs   median r "
+                  f"{float(np.median(rs)):.2f}   range {rs[0]:.2f} .. {rs[-1]:.2f}")
+            for c in sorted(between, key=lambda c: c["r"]):
+                print(f"      {c['channel']:14s} r={c['r']:+.2f}  n={c['n']}  "
+                      f"sd {c['sd_a']:.3f}/{c['sd_b']:.3f}")
+        by_verdict: dict[str, int] = {}
+        for c in au:
+            if c["verdict"] != "ok":
+                by_verdict[c["verdict"]] = by_verdict.get(c["verdict"], 0) + 1
+        if by_verdict:
+            print(f"    not measured {by_verdict}")
 
     print("\n  M0 criterion on REAL data: "
           f"{'PASS' if len(srcs) >= 2 else 'FAIL'} "

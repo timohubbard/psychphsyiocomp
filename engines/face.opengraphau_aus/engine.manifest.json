@@ -1,0 +1,84 @@
+{
+  "engine_id": "face.opengraphau_aus",
+  "version": "0.1.0",
+  "modality": "face",
+  "runtime": "python-cpu",
+  "placement": "server-batch",
+  "determinism": "deterministic",
+
+  "inputs": [
+    {
+      "kind": "video",
+      "min_fps": 5,
+      "min_resolution": { "width": 320, "height": 240 },
+      "min_roi_luminance": 30
+    }
+  ],
+
+  "params_schema": {
+    "type": "object",
+    "properties": {
+      "frame_stride": { "type": "integer", "default": 5,
+        "description": "Process every Nth frame. Recorded so the effective rate is measured, never assumed." },
+      "batch_size": { "type": "integer", "default": 16,
+        "description": "Aligned faces per forward pass. Results are identical batched or single (measured max difference 6e-8); batching only saves setup." },
+      "emit_lateral": { "type": "boolean", "default": false,
+        "description": "Also emit the 14 left/right units (AU01_L ... AU14_R). Off by default: no per-side reliability figure exists in the evidence base for any AU, and no other engine here emits them, so they cannot be cross-checked." },
+      "min_face_detection_confidence": { "type": "number", "default": 0.5 },
+      "torch_threads": { "type": "integer", "default": 0,
+        "description": "CPU threads for this engine's forward passes; 0 means all cores. Set explicitly and restored afterwards, because Py-Feat forces OMP_NUM_THREADS=1 process-wide on import and this network then runs ~20x slower." }
+    },
+    "additionalProperties": false
+  },
+
+  "outputs": {
+    "signals": [
+      {
+        "channel": "au.*",
+        "unit": "probability",
+        "nominal_rate_hz": 6,
+        "value_type": "float",
+        "range": [0, 1],
+        "reliability_tier": "per-channel",
+        "description": "Per-AU OCCURRENCE scores (cosine similarity to a learned AU prototype, thresholded at 0.5 upstream) — not intensities, and not calibrated probabilities. 27 bilateral units; the 18 shared with face.pyfeat_aus carry the same channel names so the two engines pair for §2.2 agreement without a mapping table. Tier is set per AU from the shared contract table."
+      },
+      {
+        "channel": "face.detected",
+        "unit": "bool",
+        "nominal_rate_hz": 6,
+        "value_type": "float",
+        "reliability_tier": "high",
+        "description": "Whether a face was found and aligned. Detection here is MediaPipe, not Py-Feat's RetinaFace, so the two engines' denominators differ — which §2.2 says is itself a finding."
+      }
+    ],
+    "events": [
+      { "event_type": "face_lost", "description": "No face detected", "has_offset": true }
+    ],
+    "quality": [
+      { "metric": "achieved_fps", "unit": "hz", "warn_below": 1,
+        "description": "Effective AU sampling rate after frame_stride." },
+      { "metric": "face_detect_rate", "unit": "proportion", "warn_below": 0.5,
+        "description": "Engine-specific; never comparable across engines as a property of the recording." },
+      { "metric": "mean_luminance", "unit": "level", "warn_below": 30,
+        "description": "§2.5: the only quantified bias mitigation." },
+      { "metric": "crop_outside_frame", "unit": "proportion",
+        "description": "Median share of the aligned 224px crop that fell outside the video frame and was filled black. A face at the frame edge is analysed on partly-invented pixels; this makes that visible rather than silent." }
+    ]
+  },
+
+  "license": {
+    "spdx": "Apache-2.0",
+    "commercial_use": "unknown",
+    "url": "https://github.com/lingjivoo/OpenGraphAU",
+    "notes": "CODE is Apache-2.0 (repo LICENSE, read 2026-09-22); the model code is vendored in server/graphau_model.py with the notice and a list of modifications. The WEIGHTS carry no licence of their own and were trained on BP4D, DISFA, RAF-AU, Aff-Wild2, CK+ and CASME II, whose EULAs are believed research-only and were NOT individually verified. Fine under this project's academic/non-profit position; marked `unknown` so the commercial gate treats it as unverified. Face detection uses the MediaPipe face_landmarker bundle, whose own licence line is likewise unverified."
+  },
+
+  "provenance": {
+    "training_datasets": ["BP4D", "DISFA", "RAF-AU", "Aff-Wild2", "CK+", "CASME II"],
+    "weights_sha256": "72a02eaa18ef35d6c72c96dca3c099e705731fe846e15395d17dee8ac702e71d",
+    "paper_doi": "10.24963/ijcai.2022/173",
+    "upstream_commit": "a0ad10d516ed121f476cbc6d66a84ebfc033a53f",
+    "checkpoint": "OpenGprahAU-ResNet50_second_stage.pth (upstream's spelling)",
+    "published_performance": "Upstream reports average F1 23.24 / accuracy 93.31 over all 41 units on its hybrid test split, at threshold 0.5. No per-AU figures are published. The average is dragged down by rare units, but it is the only number upstream gives and it is reported here unflattered."
+  }
+}

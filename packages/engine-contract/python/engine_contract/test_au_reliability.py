@@ -50,6 +50,28 @@ def test_label_variants_normalise_to_one_unit():
         assert normalise(variant) == "AU01"
 
 
+def test_laterality_survives_normalising():
+    """The digits-only first version mapped OpenGraphAU's `AUL12` onto `AU12`,
+    writing the left side into the bilateral channel — where it overwrites the
+    real AU12 and agrees with it suspiciously well."""
+    for variant in ("AUL12", "AU12L", "AU12_L", "au_l12", "L12"):
+        assert normalise(variant) == "AU12_L", variant
+    assert normalise("AUR1") == "AU01_R"
+    assert normalise("AUL12") != normalise("AU12")
+    assert normalise("AUL12") != normalise("AUR12")
+
+
+def test_a_lateralised_unit_does_not_inherit_the_bilateral_tier():
+    """No per-side figure exists for any AU. AU12 is `high` on evidence about
+    both lip corners; lending that to one corner would cite a measurement
+    nobody made."""
+    assert reliability("AU12").tier == "high"
+    left = reliability("AUL12")
+    assert left.tier == "low"
+    assert left.stratified is False
+    assert "per-side" in left.evidence
+
+
 def test_normalising_is_applied_by_the_lookup_itself():
     assert reliability("au12").tier == "high"
     assert reliability("AU12").tier == "high"

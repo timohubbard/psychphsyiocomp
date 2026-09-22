@@ -34,12 +34,12 @@
     "signals": [
       {
         "channel": "au.*",
-        "unit": "intensity",
+        "unit": "probability",
         "nominal_rate_hz": 6,
         "value_type": "float",
         "range": [0, 1],
         "reliability_tier": "per-channel",
-        "description": "FACS Action Unit intensities. reliability_tier is set PER AU from the published per-unit floor, never uniformly — §2.2 measured AU12 at F1 .72-.83 and AU20 at .13-.24 on the same data with the same model, and a uniform confidence across 20+ units would misrepresent both ends."
+        "description": "FACS Action Unit OCCURRENCE probabilities (XGBoost predict_proba), not intensities — the manifest said intensity until 2026-09-22, which the model never produced. reliability_tier is set PER AU from the published per-unit floor, never uniformly — §2.2 measured AU12 at F1 .72-.83 and AU20 at .13-.24 on the same data with the same model, and a uniform confidence across 20+ units would misrepresent both ends."
       },
       {
         "channel": "face.detected",
