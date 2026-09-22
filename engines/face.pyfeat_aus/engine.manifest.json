@@ -1,0 +1,77 @@
+{
+  "engine_id": "face.pyfeat_aus",
+  "version": "0.1.0",
+  "modality": "face",
+  "runtime": "python-cpu",
+  "placement": "server-batch",
+  "determinism": "deterministic",
+
+  "inputs": [
+    {
+      "kind": "video",
+      "min_fps": 5,
+      "min_resolution": { "width": 320, "height": 240 },
+      "min_roi_luminance": 30
+    }
+  ],
+
+  "params_schema": {
+    "type": "object",
+    "properties": {
+      "face_model": { "type": "string", "default": "retinaface",
+        "description": "Detector stack. MUST NOT be a model that performs identity recognition — see the licence note." },
+      "landmark_model": { "type": "string", "default": "mobilefacenet" },
+      "au_model": { "type": "string", "default": "xgb" },
+      "batch_size": { "type": "integer", "default": 8,
+        "description": "Frames per inference call. ~0.25s/frame measured on CPU either way; batching avoids repeating setup." },
+      "frame_stride": { "type": "integer", "default": 5,
+        "description": "Process every Nth frame. AU dynamics are slow relative to 30fps and the model is expensive; the stride is recorded so the effective rate is never assumed." }
+    },
+    "additionalProperties": false
+  },
+
+  "outputs": {
+    "signals": [
+      {
+        "channel": "au.*",
+        "unit": "intensity",
+        "nominal_rate_hz": 6,
+        "value_type": "float",
+        "range": [0, 1],
+        "reliability_tier": "per-channel",
+        "description": "FACS Action Unit intensities. reliability_tier is set PER AU from the published per-unit floor, never uniformly — §2.2 measured AU12 at F1 .72-.83 and AU20 at .13-.24 on the same data with the same model, and a uniform confidence across 20+ units would misrepresent both ends."
+      },
+      {
+        "channel": "face.detected",
+        "unit": "bool",
+        "nominal_rate_hz": 6,
+        "value_type": "float",
+        "reliability_tier": "high",
+        "description": "Whether a face was found in this frame. Emitted as a signal rather than left implicit because §2.2 measured valid-face-frame yield at 43% vs 62-63% between engines on identical video — the denominator is itself a finding."
+      }
+    ],
+    "events": [
+      { "event_type": "face_lost", "description": "No face detected", "has_offset": true }
+    ],
+    "quality": [
+      { "metric": "achieved_fps", "unit": "hz", "warn_below": 1,
+        "description": "Effective AU sampling rate after frame_stride. Lower than the capture rate by construction, which is why it is measured rather than inferred from the video." },
+      { "metric": "face_detect_rate", "unit": "proportion", "warn_below": 0.5,
+        "description": "§2.2: 43% (iMotions/AFFDEX) vs 62-63% (FaceReader/Py-Feat) on identical video. This number is engine-specific and must never be compared across engines as if it were a property of the recording." },
+      { "metric": "mean_luminance", "unit": "level", "warn_below": 30,
+        "description": "§2.5: the only quantified bias mitigation in the evidence base." }
+    ]
+  },
+
+  "license": {
+    "spdx": "MIT",
+    "commercial_use": "unknown",
+    "url": "https://github.com/cosanlab/py-feat",
+    "notes": "Py-Feat's own code is MIT. BUT its default detector stack can include an InsightFace ArcFace weight that is non-commercial, and ArcFace is an IDENTITY model — it is not needed for AU work and is excluded by this engine's params. Marked `unknown` rather than `yes` deliberately: the AU model's own weight licence was NOT separately confirmed during research, and the licence tool buckets unknown as unverified rather than permissive. Re-verify before any commercial ship."
+  },
+
+  "provenance": {
+    "training_datasets": ["DISFA+", "BP4D (via the shipped AU models)"],
+    "paper_doi": "10.1007/s10919-023-00448-3"
+  }
+}

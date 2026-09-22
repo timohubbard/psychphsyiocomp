@@ -12,3 +12,25 @@ tzdata                  # IANA timezone DB — Windows Python does not ship it, 
 
 # Pulled in transitively by mediapipe, pinned here for visibility:
 #   opencv-contrib-python, numpy, matplotlib, absl-py, sounddevice
+
+# --- M2: facial Action Units -------------------------------------------------
+py-feat>=2.1.3          # MIT code. AU model weights' own licence NOT verified —
+                        # the manifest marks commercial_use "unknown" and the
+                        # licence tool buckets that as unverified, not permissive.
+                        # NOTE: py-feat DEFAULTS identity_model='arcface', a face
+                        # recognition model with a non-commercial InsightFace
+                        # weight. The engine passes identity_model=None and
+                        # refuses it in params; see check_no_identity_model.
+
+# Upper bounds below are NOT correctness constraints. On the Windows machine this
+# was built on, an Application Control policy blocks freshly-published unsigned
+# .pyd files, and pandas 3.0.6 / scikit-learn 1.9.1 were both refused at import
+# with "An Application Control policy has blocked this file". These older builds
+# are permitted. On Linux, or once those versions age into the policy's
+# reputation data, the bounds can be lifted.
+pandas<3                # 2.3.3 verified
+scikit-learn<1.8        # 1.7.2 verified
+
+# py-feat can read video directly, but that path needs torchcodec + FFmpeg
+# shared libraries. The engine decodes with OpenCV instead, which is already a
+# dependency, and feeds frames as tensors.

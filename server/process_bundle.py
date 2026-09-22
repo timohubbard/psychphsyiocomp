@@ -90,6 +90,10 @@ def main() -> int:
                     help="cap the decode for a quick smoke run")
     ap.add_argument("--no-gaze", action="store_true",
                     help="skip the gaze engine and estimator")
+    ap.add_argument("--aus", action="store_true",
+                    help="also run the Py-Feat Action Unit engine (slow: ~0.25s/frame)")
+    ap.add_argument("--au-stride", type=int, default=15,
+                    help="analyse every Nth frame for AUs; AU dynamics are slow")
     args = ap.parse_args()
 
     bundle = SessionBundle.from_dir(args.bundle)
@@ -119,6 +123,15 @@ def main() -> int:
               f"(median {float(np.median(vals)):.1f})")
 
     engines = [(MediaPipeBlendshapesBatch(str(MODEL_PATH)), {})]
+
+    # Opt-in, because it is the slowest thing in the pipeline by a wide margin:
+    # ~0.25s per analysed frame on CPU against a few milliseconds for the others.
+    # Off by default so the common path stays fast, rather than silently skipped
+    # when it fails — an engine that is present must run.
+    if args.aus:
+        _pyfeat = load_engine_module("face.pyfeat_aus")
+        engines.append((_pyfeat.PyFeatAUs(),
+                        {"frame_stride": args.au_stride, "batch_size": 8}))
     summary = process_session(bundle, engines, args.out, video_luma=luma,
                               extra_stages=None if args.no_gaze else [_gaze_stage])
 
