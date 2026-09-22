@@ -140,6 +140,27 @@ def is_repeat_loop(texts: list[str], limit: int = MAX_CONSECUTIVE_REPEATS) -> bo
     return len(set(tail)) == 1 and bool(tail[0])
 
 
+#: Measured on the first real session with speech (s_mud6trnr: one participant,
+#: a 92-word read-aloud passage, laptop microphone at ~39 cm, browser DSP off),
+#: word error rate on the known passage:
+#:
+#:                      base    small
+#:   VAD, default        21.7%   19.6%
+#:   VAD, threshold .35  20.7%   13.0%
+#:   no VAD              20.7%   14.1%
+#:
+#: The default VAD threshold (0.5) clipped the first words of the passage —
+#: "The old harbour" became "Starver" (base) and "Carver" (small) — and a lower
+#: threshold recovers them without giving up the VAD's protection against text
+#: invented over silence. No configuration produced a segment outside the
+#: speaking windows. `small` costs 9 s against 3 s for the whole session.
+#:
+#: One participant and 92 words is thin evidence, and it is stated as such: it
+#: justifies a default, not a claimed accuracy.
+DEFAULT_MODEL_SIZE = "small"
+DEFAULT_VAD_THRESHOLD = 0.35
+
+
 def segment_span(seg) -> tuple[float, float]:
     """(start, end) in seconds: the first and last WORD when word timestamps
     exist, else the segment's own times.
@@ -222,7 +243,7 @@ class FasterWhisperTranscript:
         return self._model
 
     def run(self, media: MediaDescriptor, params: dict[str, Any]) -> Iterator[Chunk]:
-        model_size = str(params.get("model_size", "base"))
+        model_size = str(params.get("model_size", DEFAULT_MODEL_SIZE))
         language = params.get("language") or None
         beam_size = int(params.get("beam_size", 5))
         max_no_speech = float(params.get("max_no_speech_prob", 0.6))
@@ -234,6 +255,7 @@ class FasterWhisperTranscript:
         # turn it off — it can clip genuinely quiet speech — and the parameter
         # is recorded either way rather than assumed.
         vad_filter = bool(params.get("vad_filter", True))
+        vad_threshold = float(params.get("vad_threshold", DEFAULT_VAD_THRESHOLD))
 
         # Word timestamps, and segment times taken from the words. With the VAD
         # on, faster-whisper removes silence, transcribes the joined speech,
@@ -249,6 +271,7 @@ class FasterWhisperTranscript:
         segments, info = model.transcribe(
             str(media.path), language=language, beam_size=beam_size,
             vad_filter=vad_filter, word_timestamps=word_timestamps,
+            vad_parameters={"threshold": vad_threshold} if vad_filter else None,
         )
 
         signals: list[SignalRow] = []

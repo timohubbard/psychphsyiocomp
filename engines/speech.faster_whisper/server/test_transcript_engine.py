@@ -61,7 +61,7 @@ def media(**kw) -> MediaDescriptor:
 def engine_with(segments, info=None):
     e = FasterWhisperTranscript()
     e._model = FakeModel(segments, info)
-    e._loaded_size = "base"
+    e._loaded_size = _engine.DEFAULT_MODEL_SIZE
     return e
 
 
@@ -394,3 +394,18 @@ def test_word_timestamps_are_requested_by_default_and_can_be_turned_off():
     assert e._model.calls[-1]["word_timestamps"] is True
     _, e = run([FakeSegment(1.0, 2.0, "hi")], params={"word_timestamps": False})
     assert e._model.calls[-1]["word_timestamps"] is False
+
+
+def test_the_tuned_vad_threshold_reaches_the_model():
+    """The library default (0.5) clipped "The old harbour" off a real passage;
+    0.35 recovered it. Passed only while the VAD is on."""
+    _, e = run([FakeSegment(1.0, 2.0, "hi")])
+    assert e._model.calls[-1]["vad_parameters"] == {"threshold": _engine.DEFAULT_VAD_THRESHOLD}
+    _, e = run([FakeSegment(1.0, 2.0, "hi")], params={"vad_filter": False})
+    assert e._model.calls[-1]["vad_parameters"] is None
+
+
+def test_the_manifest_defaults_match_the_engine():
+    props = MANIFEST["params_schema"]["properties"]
+    assert props["model_size"]["default"] == _engine.DEFAULT_MODEL_SIZE
+    assert props["vad_threshold"]["default"] == _engine.DEFAULT_VAD_THRESHOLD

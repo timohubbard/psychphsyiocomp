@@ -215,7 +215,7 @@ def main() -> int:
                     help="also transcribe speech — ONLY runs for sessions whose "
                          "consent tier is media_plus_transcript, and records a "
                          "reason when it refuses")
-    ap.add_argument("--whisper-model", default="base",
+    ap.add_argument("--whisper-model", default="small",
                     help="Whisper checkpoint; recorded in the run row because "
                          "different checkpoints give different transcripts")
     ap.add_argument("--resp", action="store_true",

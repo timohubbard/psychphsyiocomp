@@ -133,7 +133,7 @@ WHISPER_DIR = MODELS_DIR / "whisper"
 #: Fetched through faster-whisper's own downloader rather than a URL, because
 #: a Whisper checkpoint is a directory of files (weights, tokenizer, config)
 #: and pinning one URL would pin one of them.
-WHISPER_SIZES = ("base",)
+WHISPER_SIZES = ("small",)
 
 WHISPER_LICENCE = (
     "faster-whisper and CTranslate2 are MIT (SYSTRAN). The WEIGHTS are "

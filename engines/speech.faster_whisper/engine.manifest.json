@@ -1,6 +1,6 @@
 {
   "engine_id": "speech.faster_whisper",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "modality": "speech",
   "runtime": "python-cpu",
   "placement": "server-batch",
@@ -17,8 +17,8 @@
     "properties": {
       "model_size": {
         "type": "string",
-        "default": "base",
-        "description": "Whisper checkpoint. Recorded in every run, because transcripts from different checkpoints are different measurements and the word error rate between them is not small."
+        "default": "small",
+        "description": "Whisper checkpoint. Default changed base -> small in 0.3.0: on the first real session's read-aloud passage, word error 13.0% vs 20.7% at the tuned VAD threshold (one participant, 92 words — see DEFAULT_MODEL_SIZE in the engine). Recorded in every run, because transcripts from different checkpoints are different measurements and the word error rate between them is not small."
       },
       "language": {
         "type": "string",
@@ -44,6 +44,11 @@
         "type": "boolean",
         "default": true,
         "description": "Whisper's own voice-activity filter, which removes the long silences the decoder has most room to invent over. Turning it off increases hallucination pressure, so the two confidence gates matter more, not less. It can also clip genuinely quiet speech — recorded either way rather than assumed."
+      },
+      "vad_threshold": {
+        "type": "number",
+        "default": 0.35,
+        "description": "Speech probability above which the VAD keeps audio. The library default of 0.5 clipped the first words of a real read-aloud passage; 0.35 recovered them with no text produced outside the speaking windows. Added in 0.3.0."
       },
       "word_timestamps": {
         "type": "boolean",
