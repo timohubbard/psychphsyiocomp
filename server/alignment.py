@@ -221,73 +221,187 @@ class ClockRegistry:
         return {c: self.solve(c) for c in sorted(ids)}
 
 
-def detect_clapper_in_luma(
+#: How long the capture page holds the sync flash. Mirrors TIMINGS.clapperFlashMs
+#: in web/src/sequence.js — the detector matches on this duration, so the two
+#: must agree. A 200ms flash is 6 frames at 30fps, not a single bright frame.
+CLAPPER_FLASH_MS = 200.0
+
+#: Rolling-median window for the luminance baseline. Long enough to be unmoved
+#: by the flash itself, short enough to track auto-exposure and room-light drift
+#: across a session that may run for many minutes.
+BASELINE_WINDOW_MS = 3000.0
+
+
+def _rolling_baseline(ts: list[float], values: list[float], window_ms: float) -> list[float]:
+    """Median of a centred time window around each sample.
+
+    A *local* baseline, not the session median, because a webcam's auto-exposure
+    walks the whole signal over a long session. Measured on a real capture: the
+    baseline sat at 185.9 before the first clapper and 182.8 before the second,
+    so a single global median mis-scores one of them no matter where it is set.
+    """
+    out: list[float] = []
+    half = window_ms / 2.0
+    lo = hi = 0
+    for i, t in enumerate(ts):
+        while lo < len(ts) and ts[lo] < t - half:
+            lo += 1
+        while hi < len(ts) and ts[hi] <= t + half:
+            hi += 1
+        window = sorted(values[lo:hi]) or [values[i]]
+        out.append(window[len(window) // 2])
+    return out
+
+
+def detect_clappers_in_luma(
     luma_by_ts: list[tuple[float, float]],
     *,
     z_threshold: float = 4.0,
-    min_absolute_rise: float = 15.0,
+    min_absolute_rise: float = 2.5,
     min_samples: int = 10,
-) -> tuple[float, float] | None:
-    """Find a sync-clapper flash in a luminance time series.
+    min_edge_fraction: float = 0.4,
+    flash_duration_ms: float = CLAPPER_FLASH_MS,
+    baseline_window_ms: float = BASELINE_WINDOW_MS,
+) -> list[tuple[float, float, float]]:
+    """Find every sync-clapper flash in a luminance series.
 
-    The capture page flashes the screen white at a known ``performance.now()``.
-    That flash reflects off the participant's face and raises frame luminance
-    sharply, giving a coincidence observable on both clocks — the browser knows
-    when it drew the flash, the video shows when it arrived.
+    Returns ``(native_ts, uncertainty_ms, score)`` per flash, strongest first.
 
-    Returns ``(native_ts_of_peak, uncertainty_ms)`` or ``None`` if no flash
-    stands out. Returning ``None`` is a real outcome, not a failure: the
-    caller then has no anchor and must leave the stream unaligned rather than
-    invent an offset.
+    The flash is a PLATEAU of known length, not a spike, and that is what makes
+    it separable from noise. The detector averages each candidate window of
+    ``flash_duration_ms`` against a local rolling-median baseline: a sustained
+    rise accumulates across the whole window, while single-frame noise is
+    divided down by the window length. Scoring a point maximum instead throws
+    that discrimination away and forces the threshold so high that real flashes
+    are missed.
 
-    A candidate must clear BOTH criteria: statistically prominent against the
-    session's own noise, and absolutely prominent in luma terms. Requiring both
-    is what separates a real flash from a lamp being nudged, and it keeps the
-    detector working on a clean signal — with a near-noiseless baseline the
-    robust deviation collapses toward zero, which would otherwise make the
-    easiest possible input undetectable.
-
-    :param luma_by_ts: ``(native_ts_ms, mean_luma)`` in ascending time order
-    :param z_threshold: robust standard deviations above the median required
-    :param min_absolute_rise: minimum rise over the median, in luma levels
+    Which is exactly what happened. The previous implementation required a
+    15-luma rise over the session median and took the global peak. On the first
+    real capture the flash was **+8.5 luma** — unmistakable to the eye, a clean
+    7-frame plateau at the right instant — and was rejected, leaving every
+    server-side row with a NULL ``master_ts``. The tests did not catch it
+    because they modelled the flash as one bright frame at 240 against a
+    baseline of 100, a contrast no real room produces: a camera already exposed
+    for a lit room has little headroom left when the screen turns white.
     """
-    if len(luma_by_ts) < min_samples:
-        return None
+    n = len(luma_by_ts)
+    if n < min_samples:
+        return []
 
+    ts = [t for t, _ in luma_by_ts]
     values = [v for _, v in luma_by_ts]
-    median = sorted(values)[len(values) // 2]
+    baseline = _rolling_baseline(ts, values, baseline_window_ms)
+    detrended = [v - b for v, b in zip(values, baseline)]
 
-    # Median absolute deviation — robust to the flash itself, which a plain
-    # standard deviation would be inflated by.
-    deviations = sorted(abs(v - median) for v in values)
-    mad = deviations[len(deviations) // 2]
-    robust_sd = mad * 1.4826
+    # Noise scale from successive DIFFERENCES, not from the detrended residual.
+    #
+    # The residual is the wrong basis: a rolling median tracks the signal so
+    # closely that the residual collapses toward zero, the estimated sd with it,
+    # and every z-score explodes to meaninglessness. Measured on a real capture,
+    # that produced scores of 132 and 76 for a genuine flash and a spurious one
+    # alike — the statistical test had stopped participating in the decision and
+    # only the absolute threshold was doing any work.
+    #
+    # Successive differences measure frame-to-frame noise directly and are blind
+    # to any drift the baseline already removed. For iid noise the MAD of the
+    # differences estimates sigma once scaled by 1.4826/sqrt(2).
+    diffs = [b - a for a, b in zip(detrended, detrended[1:])]
+    if diffs:
+        dmed = sorted(diffs)[len(diffs) // 2]
+        dmad = sorted(abs(d - dmed) for d in diffs)[len(diffs) // 2]
+        robust_sd = dmad * 1.4826 / math.sqrt(2.0)
+    else:
+        robust_sd = 0.0
 
-    peak_ts, peak_value = None, -math.inf
-    for ts, v in luma_by_ts:
-        if v > peak_value:
-            peak_ts, peak_value = ts, v
+    intervals = [b - a for a, b in zip(ts, ts[1:]) if b > a]
+    frame_interval = sorted(intervals)[len(intervals) // 2] if intervals else SINGLE_ANCHOR_UNCERTAINTY_MS
+    span = max(1, round(flash_duration_ms / frame_interval)) if frame_interval > 0 else 1
 
-    if peak_ts is None:
+    # Averaging `span` samples reduces noise by sqrt(span); the window mean must
+    # be scored against that, not against the single-sample noise.
+    window_noise = robust_sd / math.sqrt(span) if robust_sd > 0 else 0.0
+
+    def _mean(lo: int, hi: int) -> float:
+        lo, hi = max(0, lo), min(n, hi)
+        return sum(detrended[lo:hi]) / (hi - lo) if hi > lo else 0.0
+
+    # Matched filter: mean elevation over a window the length of the flash,
+    # required to be a PULSE rather than a step.
+    candidates: list[tuple[float, float, float]] = []
+    for i in range(n - span + 1):
+        rise = _mean(i, i + span)
+        if rise < min_absolute_rise:
+            continue
+        if window_noise > 0 and rise / window_noise < z_threshold:
+            continue
+
+        # The clapper goes back down. A stimulus background changing, a lamp
+        # switched on, or auto-exposure settling all rise and STAY — and on a
+        # real capture one of those scored as high as the flash did. Requiring
+        # the level to fall back afterwards is what separates a 200ms pulse from
+        # a new steady state, and it costs nothing because we know the flash
+        # ends by construction.
+        before = _mean(i - span, i)
+        after = _mean(i + span, i + 2 * span)
+        if before > rise * 0.5 or after > rise * 0.5:
+            continue
+
+        # A screen turning white is a STEP: on a real capture the leading edge
+        # was 186.6 -> 193.4 between two consecutive frames, 82% of the total
+        # rise in one frame interval. Auto-exposure settling and a participant
+        # shifting in their seat produce the same size of bump spread over a
+        # dozen frames — one such ramp scored as high as the true flash and was
+        # otherwise indistinguishable. Edge sharpness is what tells them apart,
+        # and it is the one property a screen flash cannot fail to have.
+        edge_lo = max(1, i - 1)
+        edge_hi = min(n, i + span)
+        edge_steps = [
+            (detrended[k] - detrended[k - 1], k) for k in range(edge_lo, edge_hi)
+        ]
+        if not edge_steps:
+            continue
+        best_step, onset_idx = max(edge_steps)
+        if best_step < rise * min_edge_fraction:
+            continue
+
+        # Report the first bright frame, not the window start. The matched
+        # filter is indifferent to where inside the plateau its window sits, so
+        # using the window start smears the anchor by a frame or two — and the
+        # anchor is the entire point.
+        score = rise / window_noise if window_noise > 0 else float("inf")
+        candidates.append(
+            (ts[onset_idx], max(frame_interval, MIN_UNCERTAINTY_MS), score)
+        )
+
+    if not candidates:
+        return []
+
+    # Collapse overlapping windows: one flash produces a run of passing starts,
+    # and they are the same event, not several.
+    candidates.sort(key=lambda c: c[0])
+    merged: list[tuple[float, float, float]] = []
+    for c in candidates:
+        if merged and c[0] - merged[-1][0] < flash_duration_ms * 2:
+            if c[2] > merged[-1][2]:
+                merged[-1] = c
+        else:
+            merged.append(c)
+
+    merged.sort(key=lambda c: c[2], reverse=True)
+    return merged
+
+
+def detect_clapper_in_luma(
+    luma_by_ts: list[tuple[float, float]],
+    **kwargs,
+) -> tuple[float, float] | None:
+    """Strongest sync-clapper flash, or None.
+
+    ``None`` is a real outcome, not a failure: the caller then has no anchor and
+    must leave the stream unaligned rather than invent an offset.
+    """
+    found = detect_clappers_in_luma(luma_by_ts, **kwargs)
+    if not found:
         return None
-
-    rise = peak_value - median
-    if rise < min_absolute_rise:
-        return None
-
-    # With a noiseless baseline the z-score is unbounded (or undefined); the
-    # absolute-rise test above already carried the decision, so only apply the
-    # statistical test when there is actual noise to measure against.
-    if robust_sd > 0:
-        if rise / robust_sd < z_threshold:
-            return None
-
-    # Uncertainty is one frame interval: we cannot localise the flash more
-    # precisely than the sampling grid it was observed on.
-    intervals = [
-        b[0] - a[0] for a, b in zip(luma_by_ts, luma_by_ts[1:]) if b[0] > a[0]
-    ]
-    frame_interval = (
-        sorted(intervals)[len(intervals) // 2] if intervals else SINGLE_ANCHOR_UNCERTAINTY_MS
-    )
-    return peak_ts, max(frame_interval, MIN_UNCERTAINTY_MS)
+    ts, uncertainty, _score = found[0]
+    return ts, uncertainty

@@ -19,6 +19,7 @@ from alignment import (
     Anchor,
     ClockRegistry,
     detect_clapper_in_luma,
+    detect_clappers_in_luma,
 )
 
 MASTER = "performance.now"
@@ -199,34 +200,82 @@ def _flat_luma(n=60, value=100.0, start=0.0, step=33.3):
     return [(start + i * step, value) for i in range(n)]
 
 
-def test_clapper_found_in_a_clear_flash():
-    series = _flat_luma()
-    series[30] = (series[30][0], 240.0)  # the flash
+def _with_flash(series, at, rise, span=6):
+    """Insert a realistic clapper: a sharp-edged plateau of `span` frames.
+
+    A real 200ms flash at 30fps is SIX frames, not one. These tests previously
+    modelled it as a single frame jumping from 100 to 240 — a contrast no real
+    room produces, since a camera already exposed for a lit room has little
+    headroom left when the screen turns white. That fiction let the detector be
+    tuned to require a 15-luma rise, and the first real capture's flash (+8.5
+    luma, a clean 7-frame plateau) was rejected — leaving every server-side row
+    with a NULL master_ts and the session unalignable.
+    """
+    out = list(series)
+    for k in range(at, min(len(out), at + span)):
+        out[k] = (out[k][0], out[k][1] + rise)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# the shape of a real flash
+# ---------------------------------------------------------------------------
+
+def test_clapper_found_in_a_realistic_flash():
+    """+8 luma on a bright baseline — the magnitude actually observed."""
+    series = _with_flash(_flat_luma(value=185.0), at=30, rise=8.0)
     found = detect_clapper_in_luma(series)
 
-    assert found is not None
+    assert found is not None, "a real-magnitude flash must be detectable"
     ts, unc = found
-    assert abs(ts - series[30][0]) < 1e-6
+    assert abs(ts - series[30][0]) < 1e-6, "must report the first bright frame"
     assert unc >= MIN_UNCERTAINTY_MS
 
+
+def test_clapper_still_found_when_it_is_dramatic():
+    """The easy case must not regress while fixing the hard one."""
+    series = _with_flash(_flat_luma(value=100.0), at=30, rise=140.0)
+    found = detect_clapper_in_luma(series)
+    assert found is not None
+    assert abs(found[0] - series[30][0]) < 1e-6
+
+
+def test_detector_reports_flash_onset_not_plateau_middle():
+    """The anchor is the instant the screen turned white."""
+    series = _with_flash(_flat_luma(value=185.0), at=25, rise=9.0, span=8)
+    ts, _ = detect_clapper_in_luma(series)
+    assert abs(ts - series[25][0]) < 1e-6
+
+
+# ---------------------------------------------------------------------------
+# what must NOT be mistaken for a flash
+# ---------------------------------------------------------------------------
 
 def test_no_clapper_in_flat_luminance_returns_none():
     """A real outcome, not a failure — the caller must then leave it unaligned."""
     assert detect_clapper_in_luma(_flat_luma()) is None
 
 
-def test_clapper_uncertainty_matches_the_frame_interval():
-    """We cannot localise a flash more precisely than the sampling grid."""
-    series = _flat_luma(step=33.3)
-    series[20] = (series[20][0], 250.0)
-    _, unc = detect_clapper_in_luma(series)
-    assert 30.0 < unc < 40.0, f"expected ~one frame at 30fps, got {unc}"
-
-
 def test_gentle_drift_is_not_mistaken_for_a_flash():
     """Someone adjusting a lamp mid-session must not read as a sync marker."""
     series = [(i * 33.3, 100.0 + i * 0.5) for i in range(60)]
-    assert detect_clapper_in_luma(series, z_threshold=4.0) is None
+    assert detect_clapper_in_luma(series) is None
+
+
+def test_slow_bump_of_flash_magnitude_is_rejected():
+    """The exact false positive found in the first real capture.
+
+    Auto-exposure settling produced a +4 luma rise over ~13 frames that decayed
+    again — a genuine pulse of comparable size to the flash, and it scored just
+    as high until edge sharpness was required. A screen turning white cannot
+    take a dozen frames to do it.
+    """
+    series = _flat_luma(n=120, value=185.0)
+    for k in range(40, 53):          # gradual rise
+        series[k] = (series[k][0], 185.0 + 4.0 * (k - 40) / 12)
+    for k in range(53, 71):          # gradual decay
+        series[k] = (series[k][0], 189.0 - 4.0 * (k - 53) / 17)
+    assert detect_clapper_in_luma(series) is None
 
 
 def test_too_few_samples_returns_none():
@@ -237,4 +286,46 @@ def test_noise_alone_does_not_trigger_detection():
     import random
     rng = random.Random(0)
     series = [(i * 33.3, 100.0 + rng.gauss(0, 3)) for i in range(120)]
-    assert detect_clapper_in_luma(series, z_threshold=4.0) is None
+    assert detect_clapper_in_luma(series) is None
+
+
+def test_step_change_that_never_returns_is_not_a_flash():
+    """A stimulus background going from dark to light is a new steady state."""
+    series = [(i * 33.3, 100.0 if i < 40 else 130.0) for i in range(120)]
+    assert detect_clapper_in_luma(series) is None
+
+
+# ---------------------------------------------------------------------------
+# uncertainty and multiplicity
+# ---------------------------------------------------------------------------
+
+def test_clapper_uncertainty_matches_the_frame_interval():
+    """We cannot localise a flash more precisely than the sampling grid."""
+    series = _with_flash(_flat_luma(step=33.3, value=185.0), at=20, rise=9.0)
+    _, unc = detect_clapper_in_luma(series)
+    assert 30.0 < unc < 40.0, f"expected ~one frame at 30fps, got {unc}"
+
+
+def test_both_bookend_clappers_are_found():
+    """Two anchors are what let the aligner fit a RATE, not just an offset.
+
+    Consumer clocks routinely differ by tens of ppm, which accumulates to real
+    skew across a long session — so finding only the first flash silently
+    reduces the alignment to an offset.
+    """
+    series = _flat_luma(n=300, value=185.0)
+    series = _with_flash(series, at=30, rise=9.0)
+    series = _with_flash(series, at=240, rise=7.0)
+
+    found = detect_clappers_in_luma(series)
+    assert len(found) == 2, f"expected both bookends, got {len(found)}"
+
+    onsets = sorted(f[0] for f in found)
+    assert abs(onsets[0] - series[30][0]) < 1e-6
+    assert abs(onsets[1] - series[240][0]) < 1e-6
+
+
+def test_one_flash_yields_one_detection_not_a_run():
+    """Overlapping matched-filter windows are the same event, not several."""
+    series = _with_flash(_flat_luma(n=120, value=185.0), at=50, rise=9.0, span=7)
+    assert len(detect_clappers_in_luma(series)) == 1
