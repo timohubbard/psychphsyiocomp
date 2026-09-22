@@ -12,6 +12,8 @@ import {
   estimateDurationMs,
   evaluateCalibration,
   seededShuffle,
+  DEFAULT_EXPRESSIONS,
+  EXPRESSION_TIMINGS,
 } from './sequence.js';
 
 // ---------------------------------------------------------------------------
@@ -553,4 +555,74 @@ test('a study with no calibration does not ask the participant to hold still', (
 test('a gaze study still asks the participant to hold still', () => {
   const intro = buildSequence(studyFor(), 5).find((s) => s.id === 'intro');
   assert.ok(intro.lines.some((l) => l.includes('head still')));
+});
+
+// ---------------------------------------------------------------------------
+// posed expressions — the AU engines' positive control
+// ---------------------------------------------------------------------------
+
+const exprStudy = (task = {}) => ({
+  modalities: ['face'],
+  tasks: [{ type: 'expression_prompts', expressions: 'default', ...task }],
+});
+
+test('expression_prompts is a known task and needs no gaze or voice', () => {
+  const seq = buildSequence(exprStudy(), 7);
+  const trials = seq.filter((s) => s.type === 'expression');
+  assert.equal(trials.length, 2 * DEFAULT_EXPRESSIONS.length);
+  assert.ok(!seq.some((s) => s.type === 'calibration_point'));
+});
+
+test('every trial carries the AUs it asks for, so analysis can score against them', () => {
+  for (const t of buildSequence(exprStudy(), 7).filter((s) => s.type === 'expression')) {
+    assert.ok(Array.isArray(t.targetAus) && t.targetAus.length > 0, t.id);
+    assert.ok(t.targetAus.every(Number.isInteger), t.id);
+  }
+});
+
+test('instructions describe movements, never emotions', () => {
+  // "Look disgusted" invites each participant's own idea of disgust.
+  const banned = /happy|sad|angry|anger|disgust|fear|surpris|emotion|feel/i;
+  for (const e of DEFAULT_EXPRESSIONS) assert.doesNotMatch(e.text, banned, e.id);
+});
+
+test('each repeat is shuffled, so expression is not a function of time', () => {
+  // The calibration lesson: fixed order let a drifting quantity stand in for
+  // target position. Same risk here with lighting, posture and fatigue.
+  const trials = buildSequence(exprStudy({ repeats: 2 }), 7)
+    .filter((s) => s.type === 'expression');
+  const n = DEFAULT_EXPRESSIONS.length;
+  const first = trials.slice(0, n).map((t) => t.expression);
+  const second = trials.slice(n).map((t) => t.expression);
+  assert.deepEqual([...first].sort(), [...second].sort());
+  assert.notDeepEqual(first, second);
+  assert.notDeepEqual(first, DEFAULT_EXPRESSIONS.map((e) => e.id));
+});
+
+test('the same seed gives the same order, so a session can be replayed', () => {
+  const ids = (seed) => buildSequence(exprStudy(), seed).map((s) => s.id);
+  assert.deepEqual(ids(11), ids(11));
+});
+
+test('trial ids are unique, because events are joined to prompts by them', () => {
+  const ids = buildSequence(exprStudy({ repeats: 3 }), 7)
+    .filter((s) => s.type === 'expression').map((s) => s.id);
+  assert.equal(new Set(ids).size, ids.length);
+});
+
+test('the time estimate includes the expression trials', () => {
+  const seq = buildSequence(exprStudy(), 7);
+  const per = EXPRESSION_TIMINGS.readyMs + EXPRESSION_TIMINGS.holdMs + EXPRESSION_TIMINGS.relaxMs;
+  assert.ok(estimateDurationMs(seq) >= 2 * DEFAULT_EXPRESSIONS.length * per);
+});
+
+test('studies/au-expressions.json validates and builds', async () => {
+  const fs = await import('node:fs/promises');
+  const { validateStudy } = await import('./study.js');
+  const s = JSON.parse(await fs.readFile('studies/au-expressions.json', 'utf8'));
+  assert.equal(validateStudy(s).valid, true);
+  // Only media_retained: the AU engines run on the video, which
+  // features_only deletes.
+  assert.deepEqual(s.consent_tiers, ['media_retained']);
+  assert.ok(buildSequence(s, 3).some((x) => x.type === 'expression'));
 });

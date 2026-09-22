@@ -94,6 +94,46 @@ export const DEFAULT_PROMPTS = [
   'Talk about how you usually get from home to somewhere you go often.',
 ];
 
+/**
+ * Posed facial expressions, each with the Action Units it is meant to produce.
+ *
+ * This is the positive control the AU engines never had. The M0 pilot was a
+ * gaze protocol with a neutral face throughout — smile blendshape p99 0.015 —
+ * so two AU engines "disagreeing" on it were correlating noise. Agreement is
+ * only informative on behaviour that happened, and the cheapest way to make it
+ * happen is to ask for it.
+ *
+ * `target_aus` is the FACS prototype for the instruction, recorded in each
+ * prompt's event so analysis can ask "did this engine's AU12 rise when a smile
+ * was asked for, and not otherwise?" It is what was REQUESTED, not a label of
+ * what the face did: people pose unevenly and recruit neighbouring units, which
+ * is why human annotation stays the reference standard (server/evaluation.py).
+ *
+ * Instructions describe movements, never emotions. "Look disgusted" invites
+ * each participant's own idea of disgust; "wrinkle your nose" asks for AU9.
+ */
+export const DEFAULT_EXPRESSIONS = [
+  { id: 'brow_raise', text: 'Raise your eyebrows as high as you can.', target_aus: [1, 2] },
+  { id: 'brow_lower', text: 'Frown — pull your eyebrows down and together.', target_aus: [4] },
+  { id: 'smile', text: 'Smile broadly, showing your teeth.', target_aus: [6, 12, 25] },
+  { id: 'closed_smile', text: 'Smile with your lips closed.', target_aus: [12] },
+  { id: 'nose_wrinkle', text: 'Wrinkle your nose.', target_aus: [9, 10] },
+  { id: 'lip_corners_down', text: 'Pull the corners of your mouth down.', target_aus: [15] },
+  { id: 'chin_raise', text: 'Push your lower lip up, as if pouting.', target_aus: [17] },
+  { id: 'lip_stretch', text: 'Stretch your lips sideways, towards your ears.', target_aus: [20] },
+  { id: 'lip_press', text: 'Press your lips tightly together.', target_aus: [23, 24] },
+  { id: 'jaw_drop', text: 'Let your jaw drop — open your mouth wide.', target_aus: [25, 26] },
+];
+
+export const EXPRESSION_TIMINGS = {
+  /** Instruction visible, face still neutral — the within-trial baseline. */
+  readyMs: 2500,
+  /** The hold. Long enough for several frames at the AU engines' stride. */
+  holdMs: 4000,
+  /** Back to neutral, so consecutive holds do not blur into each other. */
+  relaxMs: 3000,
+};
+
 export const TIMINGS = {
   /** How long the flash stays up. Long enough to survive a dropped frame. */
   clapperFlashMs: 200,
@@ -229,7 +269,7 @@ export function buildSequence(study, seed = (Date.now() >>> 0)) {
 
   const body = [];
   for (const task of tasks) {
-    const stages = stagesForTask(task, { calPoints, valPoints, wantsGaze, wantsVoice });
+    const stages = stagesForTask(task, { calPoints, valPoints, wantsGaze, wantsVoice, seed });
     if (stages === null) {
       throw new Error(`study asks for an unknown task type: ${task.type}`);
     }
@@ -299,7 +339,7 @@ function taskIsWanted(task, mods) {
  * speak into a microphone nobody requested. Returns `null` for a type this
  * build does not know, which is an error rather than an omission.
  */
-function stagesForTask(task, { calPoints, valPoints, wantsGaze, wantsVoice }) {
+function stagesForTask(task, { calPoints, valPoints, wantsGaze, wantsVoice, seed }) {
   switch (task.type) {
     case 'chinrest':
       // Handled by the setup flow before the sequence runs; listed in studies
@@ -396,6 +436,43 @@ function stagesForTask(task, { calPoints, valPoints, wantsGaze, wantsVoice }) {
       ];
     }
 
+    case 'expression_prompts': {
+      // Face only needs the camera, which every study has; no modality gate.
+      const set = (!task.expressions || task.expressions === 'default')
+        ? DEFAULT_EXPRESSIONS : task.expressions;
+      const repeats = Math.max(1, task.repeats ?? 2);
+      const holdMs = task.hold_ms ?? EXPRESSION_TIMINGS.holdMs;
+
+      // Shuffled per repeat, for the reason calibration is: in a fixed order,
+      // expression becomes a function of elapsed time, and anything that
+      // drifts over a session (lighting, posture, fatigue) turns into a fake
+      // per-expression effect.
+      const trials = [];
+      for (let r = 0; r < repeats; r += 1) {
+        for (const e of seededShuffle(set, (seed ^ (0x51ED27 * (r + 1))) >>> 0)) {
+          trials.push({ ...e, rep: r + 1 });
+        }
+      }
+      const perTrial = EXPRESSION_TIMINGS.readyMs + holdMs + EXPRESSION_TIMINGS.relaxMs;
+
+      return [
+        { type: 'instruction', id: 'expression_intro',
+          title: 'Now some facial movements',
+          lines: [
+            'An instruction will appear, such as "raise your eyebrows".',
+            'When it says NOW, make that movement and hold it until it says relax.',
+            'Then let your face go back to neutral and wait for the next one.',
+            'Exaggerate a little. It does not need to look natural, and nobody is judging it.',
+            `${trials.length} movements, about ${describeDuration(trials.length * perTrial)}.`,
+          ] },
+        ...trials.map((t, i) => ({
+          type: 'expression', id: `expr_${String(i + 1).padStart(2, '0')}_${t.id}`,
+          expression: t.id, text: t.text, targetAus: [...(t.target_aus ?? [])],
+          rep: t.rep, index: i + 1, total: trials.length, holdMs,
+        })),
+      ];
+    }
+
     default:
       return null;
   }
@@ -410,6 +487,7 @@ function countParts(body, nCal, nVal) {
   if (has('fixation')) parts.push('A cross in the middle. Rest your eyes on it.');
   if (has('speech_read')) parts.push('You read a short passage aloud.');
   if (has('speech_free')) parts.push('You talk for a short while about an everyday topic.');
+  if (has('expression')) parts.push('You make some facial movements when asked, one at a time.');
   return parts;
 }
 
@@ -484,6 +562,10 @@ export function estimateDurationMs(sequence) {
       case 'speech_read':
       case 'speech_free':
         total += (stage.durationMs ?? 0) + 2 * TIMINGS.speechPadMs;
+        break;
+      case 'expression':
+        total += EXPRESSION_TIMINGS.readyMs + (stage.holdMs ?? EXPRESSION_TIMINGS.holdMs)
+          + EXPRESSION_TIMINGS.relaxMs;
         break;
       case 'instruction':
         // Genuinely participant-paced now, so any number here is an allowance
@@ -565,6 +647,7 @@ export function stageLabel(stage) {
     case 'calibration_point': return 'Calibrating';
     case 'validation_point': return 'Checking calibration';
     case 'fixation': return 'Recording';
+    case 'expression': return 'Facial movements';
     case 'instruction': return 'Instructions';
     default: return stage.type;
   }

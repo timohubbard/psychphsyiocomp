@@ -13,7 +13,7 @@
 import { SessionRecorder } from './recorder.js';
 import { now, stamp } from './clock.js';
 import {
-  buildSequence, TIMINGS, wait, stageLabel, estimateDurationMs,
+  buildSequence, TIMINGS, EXPRESSION_TIMINGS, wait, stageLabel, estimateDurationMs,
 } from './sequence.js';
 import { MediaPipeBlendshapesLive } from '../../engines/face.mediapipe_blendshapes/browser/engine.js';
 import { runVirtualChinrest, CHINREST_CSS } from './chinrest-ui.js';
@@ -372,6 +372,7 @@ async function runStage(stage) {
     case 'fixation':       return runFixation(stage);
     case 'speech_read':
     case 'speech_free':    return runSpeech(stage);
+    case 'expression':     return runExpression(stage);
     default:
       console.warn('unknown stage', stage);
       return undefined;
@@ -583,6 +584,59 @@ async function runSpeech(stage) {
 
   await wait(TIMINGS.speechPadMs);
   state.recorder.closeEvent(stage.type, stage.id);
+  ui.stageText.style.display = 'none';
+}
+
+/**
+ * One posed expression: ready (neutral), hold, relax.
+ *
+ * Two events per trial. `expression_prompt` spans the whole trial and carries
+ * what was asked for; `expression_hold` spans only the hold, which is the
+ * window analysis should score. The ready phase doubles as a within-trial
+ * neutral baseline, so a rise can be measured against the same face a few
+ * seconds earlier rather than against a session-wide average.
+ *
+ * The hold is timed, not self-paced. A participant-controlled hold would make
+ * its length a property of the participant, and per-AU comparisons across
+ * expressions would then compare different amounts of data.
+ */
+async function runExpression(stage) {
+  ui.target.style.opacity = '0';
+  ui.fixation.style.display = 'none';
+
+  const meta = {
+    expression: stage.expression, target_aus: stage.targetAus,
+    rep: stage.rep, index: stage.index, total: stage.total,
+  };
+
+  ui.stageText.innerHTML = `
+    <h2 class="instr-title">${stage.index} of ${stage.total}</h2>
+    <p class="speech-body">${stage.text}</p>
+    <p class="instr-continue expr-status" id="exprStatus">get ready…</p>`;
+  ui.stageText.style.display = 'block';
+  const status = document.getElementById('exprStatus');
+
+  state.recorder.logEvent('expression_prompt', meta, stage.id);
+  await wait(EXPRESSION_TIMINGS.readyMs);
+
+  const holdMs = stage.holdMs ?? EXPRESSION_TIMINGS.holdMs;
+  const endsAt = now() + holdMs;
+  status.classList.add('expr-now');
+  state.recorder.logEvent('expression_hold', { ...meta, hold_ms: holdMs }, stage.id);
+  const tick = setInterval(() => {
+    const left = Math.max(0, Math.ceil((endsAt - now()) / 1000));
+    status.textContent = `NOW — hold it… ${left}`;
+  }, 100);
+
+  await wait(holdMs);
+  clearInterval(tick);
+  state.recorder.closeEvent('expression_hold', stage.id);
+
+  status.classList.remove('expr-now');
+  status.textContent = 'relax — back to a neutral face';
+  await wait(EXPRESSION_TIMINGS.relaxMs);
+
+  state.recorder.closeEvent('expression_prompt', stage.id);
   ui.stageText.style.display = 'none';
 }
 

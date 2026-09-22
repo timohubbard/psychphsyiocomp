@@ -1,0 +1,35 @@
+{
+  "study_id": "au-expressions",
+  "name": "AU engine check — posed facial movements",
+  "version": "1.0.0",
+
+  "notes": [
+    "A positive control for the two Action Unit engines, not a behavioural",
+    "study. The M0 pilot's face was neutral throughout, so between-engine",
+    "agreement on it measured noise; this protocol makes the movements happen",
+    "and stamps what was asked for (target_aus) into each prompt's event.",
+    "Face only: no gaze calibration and no microphone. It offers only",
+    "media_retained because both AU engines run server-side on the recording —",
+    "under features_only the video is deleted and there is nothing to analyse.",
+    "Posed movements are exaggerated and clean; agreement here is an upper",
+    "bound on agreement for spontaneous behaviour, not an estimate of it."
+  ],
+
+  "disclosure": {
+    "retention_days": 365,
+    "secondary_use": "The recording is used only to test and compare the facial analysis engines in this software. It is not shared outside the research team.",
+    "contact": "Replace this with the investigator and the route to the ethics board before running anyone other than the developer.",
+    "irb_reference": null
+  },
+
+  "consent_tiers": ["media_retained"],
+  "default_tier": "media_retained",
+
+  "modalities": ["face"],
+
+  "tasks": [
+    { "type": "rest_fixation", "duration_ms": 20000 },
+    { "type": "expression_prompts", "expressions": "default", "repeats": 2 },
+    { "type": "rest_fixation", "duration_ms": 20000 }
+  ]
+}

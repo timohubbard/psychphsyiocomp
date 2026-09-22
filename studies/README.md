@@ -75,6 +75,7 @@ participant's own choice makes it happen.
 | `rest_fixation` | a centre cross; `duration_ms` optional |
 | `read_aloud` | `passage: "default"` or your own array of lines |
 | `free_speech` | `prompts: "default"` or your own; `duration_ms` optional |
+| `expression_prompts` | posed facial movements, ready → hold → relax; `expressions: "default"` or your own `[{id, text, target_aus}]`, `repeats` (default 2, each shuffled), `hold_ms` optional. Each trial's events carry the AUs it asked for |
 
 A task whose modality is not enabled is dropped — `read_aloud` in a study
 without `voice` would ask a participant to speak into a microphone nobody
