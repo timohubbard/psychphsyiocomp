@@ -51,7 +51,7 @@ seen the evidence behind them.
 
 **M0 (walking skeleton) complete. M1 (gaze) working end to end.**
 
-`npm run check` → licence gate green, 298 tests (80 JS + 218 Python), M0 gate
+`npm run check` → licence gate green, 342 tests (80 JS + 262 Python), M0 gate
 PASS. `npm run verify:gaze` → GAZE GATE PASS.
 
 | | |
@@ -66,7 +66,9 @@ PASS. `npm run verify:gaze` → GAZE GATE PASS.
 | Researcher app — scanpath, AOI editor | done |
 | Eval harness incl. the human-annotation arm | not started |
 | L2CS-Net fine-tune | not started |
-| M2 facial AU (Py-Feat + OpenFace cross-check) | next |
+| M2 — `face.pyfeat_aus`, per-AU reliability tiers | done |
+| M2 — inter-engine agreement + relative proportions | done |
+| M2 — a second AU engine for cross-check | **blocked, see below** |
 | M3 voice, M4 respiration | not started |
 
 ### What the numbers are
@@ -220,6 +222,47 @@ what §5.1 means when it notes jsPsych presents its grid in fixed order "unless
 randomized" — and in the design matrix, which carries only iris terms plus head
 pose. Eyelid aperture and inter-ocular distance are quality gates, not gaze
 signals, and handing a drifting quantity to a regression is an invitation.
+
+### Never single-engine on facial — and we currently are
+
+§2.2 is the most consequential finding in the evidence base for this modality:
+engine choice alone swung valid-frame yield 43%→63% and expression counts 3–4×
+on **identical video**, with between-engine agreement at r = 0.37–0.75. That
+spread is the *free uncertainty estimate* — the only empirical handle on how
+much of a result is the face and how much is the detector.
+
+There is currently one AU engine, so that figure is unavailable, and the app
+says so explicitly rather than leaving a blank panel. A second engine is
+blocked, not skipped:
+
+- **LibreFace** pins `mediapipe==0.10.5`, which would downgrade the two working
+  engines, and has no cp314 wheel.
+- **OpenFace 3.0** is not on PyPI under any attributable name. The `openface`
+  package there is a 0.0.0 placeholder; `openface-test` has no author, licence,
+  homepage or summary, so it was not installed.
+
+Getting a second AU source likely means building OpenFace 3.0 from the CMU
+source repository.
+
+#### Barely moved is not disagreed
+
+Agreement machinery exists and runs, and building it surfaced a trap worth
+recording. The first run reported min r = 0.065 for `blendshape.jawRight`
+between two *placements of the same engine on the same pixels* — alarming, until
+its mean turned out to be 0.0003 with sd 0.010. The participant never moved
+their jaw sideways. Both engines correctly reported nothing, and correlating two
+near-zero noise series gives approximately zero.
+
+|  | before | after |
+|---|---|---|
+| channels measured | 51 | 24 |
+| median r | 0.884 | 0.915 |
+| **min r** | **0.065** | **0.813** |
+
+27 channels are now excluded as barely-moved rather than counted as
+disagreement. Placement comparisons are also labelled separately from engine
+comparisons, because one model over the same pixels should agree closely — a low
+value there is a bug, not the uncertainty §2.2 describes.
 
 ### Where the model is guessing
 
