@@ -64,7 +64,8 @@ PASS. `npm run verify:gaze` → GAZE GATE PASS.
 | HMM fixation classification | done |
 | AOIs, Holmqvist metrics, and an in-app editor | done |
 | Researcher app — scanpath, AOI editor | done |
-| Eval harness incl. the human-annotation arm | not started |
+| Eval harness — kappa, human ceiling, refusals | done |
+| Human-annotation UI for collecting the reference labels | not started |
 | L2CS-Net fine-tune | not started |
 | M2 — `face.pyfeat_aus`, per-AU reliability tiers | done |
 | M2 — inter-engine agreement + relative proportions | done |
@@ -191,6 +192,37 @@ p=0.997 language confidence, and 30 seconds of digital silence produces a
 `no_speech_prob = 0.93` hallucination ungated that the gates drop. No word
 error rate is claimed — published Whisper WERs come from curated corpora, not
 from a consumer microphone after the browser's DSP.
+
+### Measured against people, not against 1.0
+
+`agreement.py` compares two engines. `evaluation.py` compares an engine to
+people, which is a different question with a different trap: an engine scored
+against one person's labels is scored against that person, and calling the
+result accuracy launders one opinion into ground truth. `reference_from`
+therefore **refuses** a single rater rather than warning.
+
+**The human ceiling travels with every score.** §2.1: coders reached 92% on
+the same webcam video where WebGazer reached 70%. If two coders agree at 0.70,
+an engine agreeing at 0.68 is at the bar — reporting it against an implied 1.0
+calls that a failure. An engine *above* the ceiling is flagged too, and not as
+a triumph: agreeing with a majority vote more than the people who cast it is a
+property of majority voting.
+
+**The kappa paradox is detected, not documented.** Two label sets with
+identical 85% agreement score kappa 0.700 when the categories are balanced and
+0.316 when one dominates — measured, in a test, on the textbook tables. Most
+AUs are absent in most frames, so the skewed table is the normal case in
+behavioural coding rather than an edge case. Every kappa ships with its
+prevalence and bias indices, a confidence interval, and, when the paradox
+fires, a note saying which number to read and which to explain. The flag
+detects the phenomenon directly — high agreement under low kappa — because the
+first version thresholded a proxy on prevalence and missed the textbook case at
+0.75 while the thing it stood for was plainly present.
+
+Refusals throughout, in the project's usual shape: too few items, a single
+category both coders used for everything, ragged rater lists, an unknown
+ceiling statistic. A `Refusal` is falsy, so a caller cannot use one as a score
+by accident.
 
 ## Core design decisions
 
@@ -472,6 +504,7 @@ server/
   fixations.py                  two-state HMM, not I-VT
   aoi.py                        areas of interest, Holmqvist metrics
   agreement.py                  cross-engine agreement, relative proportions
+  evaluation.py                 engine vs humans, and the ceiling humans set
   respiration.py                band-pass, multi-profile fusion, rate refusal
   consent.py                    tiered consent; pipeline.py enforces retention
   study.py                      protocol validation + hash (mirrors study.js)
