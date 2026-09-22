@@ -261,7 +261,7 @@ test('the shipped m0 study hashes to the value the Python mirror pins', async ()
   // hash is pinned on both sides, and drift fails a test instead.
   const fs = await import('node:fs/promises');
   const s = JSON.parse(await fs.readFile('studies/m0.json', 'utf8'));
-  assert.equal(await contentHash(s), '880c865173447b19');
+  assert.equal(await contentHash(s), '5b54b291bc9d74b0');
 });
 
 test('non-ASCII disclosure text is not escaped before hashing', async () => {

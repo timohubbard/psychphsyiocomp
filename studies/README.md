@@ -57,6 +57,32 @@ you see at the point you enable them:
 `voice` is the only modality that requests the microphone. Respiration is
 chest/shoulder motion, not sound and not rPPG.
 
+## Tasks
+
+`tasks` is the stimulus sequence, in order. The known types:
+
+| type | what it does |
+|---|---|
+| `chinrest` | the virtual-chinrest step (runs in setup, adds no stage) |
+| `calibration` | `calibration.n_points` targets, order randomised |
+| `validation` | five held-out targets, deliberately not a calibration subset |
+| `rest_fixation` | a centre cross; `duration_ms` optional |
+| `read_aloud` | `passage: "default"` or your own array of lines |
+| `free_speech` | `prompts: "default"` or your own; `duration_ms` optional |
+
+A task whose modality is not enabled is dropped — `read_aloud` in a study
+without `voice` would ask a participant to speak into a microphone nobody
+requested. An *unknown* task type is an error, not an omission: running a
+quietly degraded version of someone's protocol is the worst available option.
+
+The two sync clappers always bookend the sequence and a study cannot remove
+them. One anchor gives the aligner an offset; two let it fit a rate, and
+consumer clocks differ by tens of ppm.
+
+Participant-facing counts and durations are derived from the stages, never
+written beside them. An instruction reading "13 dots" above a 9-dot grid is the
+same defect as a stale comment, except a participant acts on it.
+
 ## Before running a real participant
 
 `m0.json` is the pilot protocol, transcribed from what the capture page used to

@@ -29,7 +29,7 @@ from study import (
 #: of the two suites fails. Without it, a drift would show up as every session
 #: being reported as "study edited since session" — a false alarm that looks
 #: exactly like a real one.
-M0_CONTENT_HASH = "880c865173447b19"
+M0_CONTENT_HASH = "5b54b291bc9d74b0"
 
 
 def study(**overrides):

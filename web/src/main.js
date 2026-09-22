@@ -13,7 +13,7 @@
 import { SessionRecorder } from './recorder.js';
 import { now, stamp } from './clock.js';
 import {
-  buildM0Sequence, TIMINGS, wait, stageLabel, estimateDurationMs,
+  buildSequence, TIMINGS, wait, stageLabel, estimateDurationMs,
 } from './sequence.js';
 import { MediaPipeBlendshapesLive } from '../../engines/face.mediapipe_blendshapes/browser/engine.js';
 import { runVirtualChinrest, CHINREST_CSS } from './chinrest-ui.js';
@@ -323,7 +323,9 @@ async function runSequence() {
   // analysis can confirm the order was randomised rather than assume it.
   const seed = (Date.now() ^ (Math.random() * 0xFFFFFFFF)) >>> 0;
   state.recorder.logEvent('sequence_seed', { seed });
-  const sequence = buildM0Sequence(seed);
+  // Built from the study, so the protocol the session is hashed against is
+  // the protocol the participant actually saw.
+  const sequence = buildSequence(state.study, seed);
   console.info(`sequence: ${sequence.length} stages, ~${Math.round(estimateDurationMs(sequence) / 1000)}s`);
 
   for (const stage of sequence) {

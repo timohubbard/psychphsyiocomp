@@ -32,6 +32,7 @@
     { "type": "chinrest" },
     { "type": "calibration" },
     { "type": "validation" },
+    { "type": "rest_fixation", "duration_ms": 60000 },
     { "type": "read_aloud", "passage": "default" },
     { "type": "free_speech", "prompts": "default" }
   ]

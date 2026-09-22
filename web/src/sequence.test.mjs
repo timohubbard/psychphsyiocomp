@@ -6,6 +6,7 @@ import {
   VALIDATION_POINTS,
   TIMINGS,
   buildM0Sequence,
+  buildSequence,
   clapperCount,
   errorInDegrees,
   estimateDurationMs,
@@ -390,4 +391,166 @@ test('the duration estimate accounts for the speaking tasks', () => {
     .reduce((n, s) => n + s.durationMs, 0);
   assert.ok(total > TIMINGS.fixationMs + speech,
     'estimate does not include the speech stages');
+});
+
+// ---------------------------------------------------------------------------
+// the sequence a STUDY asks for
+//
+// The study definition is content-hashed. A hash that covers a field nothing
+// reads is worse than no field: it promises attributability it does not
+// deliver. These check that `calibration.n_points` and `tasks` actually change
+// what a participant sees.
+// ---------------------------------------------------------------------------
+
+function studyFor(overrides = {}) {
+  return {
+    modalities: ['gaze', 'face', 'voice'],
+    calibration: { n_points: 13, randomise_order: true },
+    ...overrides,
+  };
+}
+
+test('every generated instruction line is a finished sentence', () => {
+  // The test that was missing. 39 sequence tests passed while the calibration
+  // screen told participants "13 dots, about NaN seconds" — the counts had
+  // been derived from TIMINGS keys that do not exist. Nothing asserted on the
+  // prose, because the prose used to be a literal.
+  const studies = [
+    studyFor(),
+    studyFor({ calibration: { n_points: 5, randomise_order: true } }),
+    studyFor({ modalities: ['gaze'] }),
+    studyFor({ modalities: ['voice'], calibration: undefined }),
+    studyFor({ tasks: [{ type: 'rest_fixation', duration_ms: 30_000 }] }),
+  ];
+  for (const s of studies) {
+    for (const stage of buildSequence(s, 1).filter((x) => x.type === 'instruction')) {
+      for (const line of stage.lines) {
+        assert.ok(!/NaN|undefined|\[object/.test(line),
+          `${stage.id}: ${line}`);
+        assert.ok(line.trim().length > 0, `${stage.id} has an empty line`);
+      }
+    }
+  }
+});
+
+test('the dot count in the prose matches the dots in the sequence', () => {
+  const seq = buildSequence(studyFor({
+    calibration: { n_points: 9, randomise_order: true } }), 3);
+  const dots = seq.filter((s) => s.type === 'calibration_point').length;
+  const intro = seq.find((s) => s.id === 'calib_intro');
+  assert.equal(dots, 9);
+  assert.ok(intro.lines.some((l) => l.startsWith('9 dots')),
+    intro.lines.join(' | '));
+});
+
+test('a smaller calibration grid still spans the screen', () => {
+  // Taking the first N in declaration order would give the outer ring and
+  // leave the centre uncalibrated — the region a ridge model most needs.
+  const seq = buildSequence(studyFor({
+    calibration: { n_points: 5, randomise_order: true } }), 11);
+  const pts = seq.filter((s) => s.type === 'calibration_point');
+  const xs = pts.map((p) => p.x);
+  const ys = pts.map((p) => p.y);
+  assert.ok(Math.max(...xs) - Math.min(...xs) > 0.5);
+  assert.ok(Math.max(...ys) - Math.min(...ys) > 0.5);
+});
+
+test('asking for more calibration points than exist throws', () => {
+  // The definition already validated, so this is a protocol asking for
+  // something this build cannot give — running a quietly degraded version of
+  // someone's protocol is the worst available option.
+  assert.throws(() => buildSequence(studyFor({
+    calibration: { n_points: 99, randomise_order: true } })), /only 13/);
+});
+
+test('an unknown task type throws rather than being skipped', () => {
+  assert.throws(() => buildSequence(studyFor({
+    tasks: [{ type: 'stroop' }] })), /unknown task type: stroop/);
+});
+
+test('a study without voice contains no speech stages', () => {
+  const seq = buildSequence(studyFor({ modalities: ['gaze', 'face'] }), 5);
+  assert.equal(seq.filter((s) => s.type.startsWith('speech_')).length, 0);
+  assert.ok(!seq.some((s) => s.id === 'speech_intro'));
+});
+
+test('a speech task in a study without voice is dropped, not honoured', () => {
+  // Asking a participant to speak into a microphone nobody requested.
+  const seq = buildSequence(studyFor({
+    modalities: ['gaze'], tasks: [{ type: 'calibration' }, { type: 'read_aloud' }] }), 5);
+  assert.equal(seq.filter((s) => s.type === 'speech_read').length, 0);
+});
+
+test('a study without gaze contains no calibration', () => {
+  const seq = buildSequence(studyFor({
+    modalities: ['voice'], calibration: undefined,
+    tasks: [{ type: 'read_aloud' }] }), 5);
+  assert.equal(seq.filter((s) => s.type === 'calibration_point').length, 0);
+});
+
+test('tasks run in the order the study declares them', () => {
+  const seq = buildSequence(studyFor({
+    tasks: [{ type: 'read_aloud' }, { type: 'calibration' }] }), 5);
+  const kinds = seq.map((s) => s.type);
+  assert.ok(kinds.indexOf('speech_read') < kinds.indexOf('calibration_point'));
+});
+
+test('the clappers still bookend whatever the study asked for', () => {
+  // Two anchors, not one: one gives an offset, two let the aligner fit a rate.
+  // A study that reorders its tasks must not be able to lose that.
+  const seq = buildSequence(studyFor({ tasks: [{ type: 'rest_fixation' }] }), 5);
+  assert.equal(clapperCount(seq), 2);
+  assert.equal(seq[seq.length - 1].type, 'sync_clapper');
+  assert.equal(seq.findIndex((s) => s.type === 'sync_clapper'), 2);
+});
+
+test('a chinrest task is accepted and adds no stage', () => {
+  // It runs in setup before the sequence. Listing it in a study is honest
+  // about the protocol; silently rejecting it would make the task list a lie.
+  const seq = buildSequence(studyFor({
+    tasks: [{ type: 'chinrest' }, { type: 'rest_fixation' }] }), 5);
+  assert.equal(clapperCount(seq), 2);
+  assert.ok(seq.some((s) => s.type === 'fixation'));
+});
+
+test('a study may set its own rest duration', () => {
+  const seq = buildSequence(studyFor({
+    tasks: [{ type: 'rest_fixation', duration_ms: 20_000 }] }), 5);
+  const stage = seq.find((s) => s.type === 'fixation');
+  assert.equal(stage.durationMs, 20_000);
+  const intro = seq.find((s) => s.id === 'fixation_intro');
+  assert.ok(intro.lines.some((l) => l.includes('20 seconds')), intro.lines.join('|'));
+});
+
+test('a study may supply its own passage', () => {
+  // §"Read-aloud passage": the stage takes the text as data, and researchers
+  // should substitute their own.
+  const seq = buildSequence(studyFor({
+    tasks: [{ type: 'read_aloud', passage: ['My own text.'] }] }), 5);
+  assert.deepEqual(seq.find((s) => s.type === 'speech_read').text, ['My own text.']);
+});
+
+test('buildM0Sequence matches what studies/m0.json describes', async () => {
+  // The shortcut is asserted against the file, not trusted to agree with it.
+  const fs = await import('node:fs/promises');
+  const m0 = JSON.parse(await fs.readFile('studies/m0.json', 'utf8'));
+  const fromFile = buildSequence(m0, 99).map((s) => `${s.type}:${s.id}`);
+  const fromShortcut = buildM0Sequence(99).map((s) => `${s.type}:${s.id}`);
+  assert.deepEqual(fromShortcut, fromFile);
+});
+
+test('a study with no calibration does not ask the participant to hold still', () => {
+  // An instruction with no purpose teaches participants the rest can be
+  // skimmed too — §5.1 attributes about half of a 46-66% attrition to
+  // avoidable instruction failure.
+  const seq = buildSequence(studyFor({
+    modalities: ['voice'], calibration: undefined,
+    tasks: [{ type: 'read_aloud' }] }), 5);
+  const intro = seq.find((s) => s.id === 'intro');
+  assert.ok(!intro.lines.some((l) => l.includes('head still')), intro.lines.join('|'));
+});
+
+test('a gaze study still asks the participant to hold still', () => {
+  const intro = buildSequence(studyFor(), 5).find((s) => s.id === 'intro');
+  assert.ok(intro.lines.some((l) => l.includes('head still')));
 });

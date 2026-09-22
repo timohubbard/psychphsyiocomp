@@ -189,17 +189,70 @@ export function seededShuffle(items, seed) {
  * staring at a cross, and a participant who does not know it is sixty seconds
  * has no way to tell it apart from the page having frozen.
  */
-export function buildM0Sequence(seed = (Date.now() >>> 0)) {
+/**
+ * Build the stimulus sequence a study asks for.
+ *
+ * The study definition is hashed, and a hash that covers a field nothing reads
+ * is worse than no field at all: it promises attributability it does not
+ * deliver. So `calibration.n_points` and `tasks` drive what is actually shown,
+ * and the participant-facing counts are derived from the stages rather than
+ * written into the prose beside them — an instruction that says "13 dots" above
+ * a 9-dot grid is the same class of defect as a stale comment, except a
+ * participant acts on it.
+ *
+ * Throws on a study asking for something it cannot have. By the time this runs
+ * the definition has already validated, so anything left is a mismatch between
+ * the protocol and this build of the software, and running a degraded version
+ * of someone's protocol without saying so is the worst available option.
+ */
+export function buildSequence(study, seed = (Date.now() >>> 0)) {
+  const mods = new Set(study?.modalities ?? []);
+  const wantsGaze = mods.has('gaze');
+  const wantsVoice = mods.has('voice');
+
+  const nCal = study?.calibration?.n_points ?? CALIBRATION_POINTS.length;
+  if (wantsGaze && nCal > CALIBRATION_POINTS.length) {
+    throw new Error(
+      `study asks for ${nCal} calibration points but only `
+      + `${CALIBRATION_POINTS.length} are defined`);
+  }
+
+  // Shuffle BEFORE taking the subset, so a 9-point study gets 9 points spread
+  // over the whole grid rather than the first 9 in declaration order — which
+  // are the outer ring, and would leave the centre uncalibrated.
+  const calPoints = seededShuffle(CALIBRATION_POINTS, seed).slice(0, nCal);
+  const valPoints = seededShuffle(VALIDATION_POINTS, seed ^ 0x9E3779B9);
+
+  const tasks = study?.tasks?.length
+    ? study.tasks
+    : DEFAULT_TASKS.filter((t) => taskIsWanted(t, mods));
+
+  const body = [];
+  for (const task of tasks) {
+    const stages = stagesForTask(task, { calPoints, valPoints, wantsGaze, wantsVoice });
+    if (stages === null) {
+      throw new Error(`study asks for an unknown task type: ${task.type}`);
+    }
+    body.push(...stages);
+  }
+
+  const parts = countParts(body, calPoints.length, valPoints.length);
+
   return [
     { type: 'instruction', id: 'intro',
       title: 'Here is what happens next',
       lines: [
-        'Four short parts, about four minutes in total.',
-        '1. The screen flashes white once. This syncs the recording — it is expected.',
-        '2. A dot appears in 13 places. Look at each one.',
-        '3. The same again in 5 more places, to check the first part worked.',
-        '4. A cross in the middle. Rest your eyes on it for one minute.',
-        'Please keep your head still and stay roughly where you are now throughout.',
+        `${parts.length} short parts, about ${Math.round(
+          estimateDurationMs([...body,
+            { type: 'sync_clapper' }, { type: 'sync_clapper' }]) / 60000)} minutes in total.`,
+        ...parts.map((line, i) => `${i + 1}. ${line}`),
+        // Only where it is actually required. A voice-only study asking a
+        // participant to hold still is an instruction with no purpose, and
+        // instructions that turn out not to matter teach participants that the
+        // rest can be skimmed too.
+        ...(body.some((s) => s.type === 'calibration_point')
+          ? ['Please keep your head still and stay roughly where you are now throughout.']
+          : []),
       ] },
 
     { type: 'instruction', id: 'clapper_intro',
@@ -211,62 +264,7 @@ export function buildM0Sequence(seed = (Date.now() >>> 0)) {
       ] },
     { type: 'sync_clapper', id: 'clapper_1' },
 
-    { type: 'instruction', id: 'calib_intro',
-      title: 'Follow the dot',
-      lines: [
-        'A dot will appear, hold still for a moment, then jump somewhere else.',
-        'Look straight at the centre of each dot and keep looking until it moves.',
-        'Move your EYES, not your head — try to keep your head still.',
-        '13 dots, about 30 seconds.',
-      ] },
-    ...seededShuffle(CALIBRATION_POINTS, seed).map((p, i) => ({
-      type: 'calibration_point', id: `calib_${i}`, x: p[0], y: p[1],
-      index: i + 1, total: CALIBRATION_POINTS.length,
-    })),
-
-    { type: 'instruction', id: 'valid_intro',
-      title: 'Once more, to check it worked',
-      lines: [
-        'The same task again, in 5 new places.',
-        'This one measures how well the first part went, so it is worth the same care.',
-        '5 dots, about 10 seconds.',
-      ] },
-    ...seededShuffle(VALIDATION_POINTS, seed ^ 0x9E3779B9).map((p, i) => ({
-      type: 'validation_point', id: `valid_${i}`, x: p[0], y: p[1],
-      index: i + 1, total: VALIDATION_POINTS.length,
-    })),
-
-    { type: 'instruction', id: 'fixation_intro',
-      title: 'Now just rest your eyes',
-      lines: [
-        'A cross will appear in the middle of the screen.',
-        'Look at it and let your face relax. There is nothing to do and nothing to press.',
-        'This lasts one minute. A countdown will show how long is left.',
-        'Blinking is completely fine — please do not try to hold your eyes open.',
-      ] },
-    { type: 'fixation', id: 'fixation_1', durationMs: TIMINGS.fixationMs },
-
-    { type: 'instruction', id: 'speech_intro',
-      title: 'Now we need to hear your voice',
-      lines: [
-        'Two short speaking tasks. Nothing is judged and nobody listens live.',
-        'First you will read a short passage aloud from the screen.',
-        'Then you will be asked to talk for half a minute about an everyday topic.',
-        'Speak at a normal volume and pace, as if to someone across the table.',
-        'If you stumble, just carry on — it does not matter.',
-      ] },
-    { type: 'speech_read', id: 'speech_read_1',
-      text: DEFAULT_PASSAGE, durationMs: SPEECH_TIMINGS.readMs },
-
-    { type: 'instruction', id: 'speech_free_intro',
-      title: 'Now in your own words',
-      lines: [
-        'A prompt will appear. Talk about it for about thirty seconds.',
-        'There is no right answer and you will not be cut off mid-sentence.',
-        'If you run out of things to say, describing what you can see is fine.',
-      ] },
-    { type: 'speech_free', id: 'speech_free_1',
-      prompt: DEFAULT_PROMPTS[0], durationMs: SPEECH_TIMINGS.freeMs },
+    ...body,
 
     { type: 'instruction', id: 'clapper_2_intro',
       title: 'One more flash, then you are done',
@@ -277,6 +275,180 @@ export function buildM0Sequence(seed = (Date.now() >>> 0)) {
     { type: 'sync_clapper', id: 'clapper_2' },
   ];
 }
+
+/** The task list a study gets when it declares none. */
+export const DEFAULT_TASKS = [
+  { type: 'calibration' },
+  { type: 'validation' },
+  { type: 'rest_fixation' },
+  { type: 'read_aloud' },
+  { type: 'free_speech' },
+];
+
+function taskIsWanted(task, mods) {
+  if (['calibration', 'validation'].includes(task.type)) return mods.has('gaze');
+  if (['read_aloud', 'free_speech'].includes(task.type)) return mods.has('voice');
+  return true;
+}
+
+/**
+ * One task to the stages that deliver it.
+ *
+ * Returns `[]` for a task the study's modalities do not support — a protocol
+ * listing `read_aloud` without enabling `voice` is asking a participant to
+ * speak into a microphone nobody requested. Returns `null` for a type this
+ * build does not know, which is an error rather than an omission.
+ */
+function stagesForTask(task, { calPoints, valPoints, wantsGaze, wantsVoice }) {
+  switch (task.type) {
+    case 'chinrest':
+      // Handled by the setup flow before the sequence runs; listed in studies
+      // because it is part of the protocol, and silently dropping it here
+      // would make the task list a lie.
+      return [];
+
+    case 'calibration':
+      if (!wantsGaze) return [];
+      return [
+        { type: 'instruction', id: 'calib_intro',
+          title: 'Follow the dot',
+          lines: [
+            'A dot will appear, hold still for a moment, then jump somewhere else.',
+            'Look straight at the centre of each dot and keep looking until it moves.',
+            'Move your EYES, not your head — try to keep your head still.',
+            `${calPoints.length} dots, about ${describeDuration(
+              calPoints.length * (TIMINGS.saccadeMs + TIMINGS.calibrationDwellMs))}.`,
+          ] },
+        ...calPoints.map((p, i) => ({
+          type: 'calibration_point', id: `calib_${i}`, x: p[0], y: p[1],
+          index: i + 1, total: calPoints.length,
+        })),
+      ];
+
+    case 'validation':
+      if (!wantsGaze) return [];
+      return [
+        { type: 'instruction', id: 'valid_intro',
+          title: 'Once more, to check it worked',
+          lines: [
+            `The same task again, in ${valPoints.length} new places.`,
+            'This one measures how well the first part went, so it is worth the same care.',
+            `${valPoints.length} dots, about ${describeDuration(
+              valPoints.length * (TIMINGS.saccadeMs + TIMINGS.validationDwellMs))}.`,
+          ] },
+        ...valPoints.map((p, i) => ({
+          type: 'validation_point', id: `valid_${i}`, x: p[0], y: p[1],
+          index: i + 1, total: valPoints.length,
+        })),
+      ];
+
+    case 'rest_fixation': {
+      const ms = task.duration_ms ?? TIMINGS.fixationMs;
+      return [
+        { type: 'instruction', id: 'fixation_intro',
+          title: 'Now just rest your eyes',
+          lines: [
+            'A cross will appear in the middle of the screen.',
+            'Look at it and let your face relax. There is nothing to do and nothing to press.',
+            `This lasts ${describeDuration(ms)}. A countdown will show how long is left.`,
+            'Blinking is completely fine — please do not try to hold your eyes open.',
+          ] },
+        { type: 'fixation', id: 'fixation_1', durationMs: ms },
+      ];
+    }
+
+    case 'read_aloud': {
+      if (!wantsVoice) return [];
+      // `passage: "default"` means the shipped one. Anything else is the
+      // researcher's own text, taken as data — §"Read-aloud passage" explains
+      // why the shipped one is original rather than Rainbow or Grandfather.
+      const text = (!task.passage || task.passage === 'default')
+        ? DEFAULT_PASSAGE : [].concat(task.passage);
+      return [
+        { type: 'instruction', id: 'speech_intro',
+          title: 'Now we need to hear your voice',
+          lines: [
+            'Nothing is judged and nobody listens live.',
+            'You will read a short passage aloud from the screen.',
+            'Speak at a normal volume and pace, as if to someone across the table.',
+            'If you stumble, just carry on — it does not matter.',
+          ] },
+        { type: 'speech_read', id: 'speech_read_1',
+          text, durationMs: task.duration_ms ?? SPEECH_TIMINGS.readMs },
+      ];
+    }
+
+    case 'free_speech': {
+      if (!wantsVoice) return [];
+      const prompts = (!task.prompts || task.prompts === 'default')
+        ? DEFAULT_PROMPTS : [].concat(task.prompts);
+      const ms = task.duration_ms ?? SPEECH_TIMINGS.freeMs;
+      return [
+        { type: 'instruction', id: 'speech_free_intro',
+          title: 'Now in your own words',
+          lines: [
+            `A prompt will appear. Talk about it for about ${describeDuration(ms)}.`,
+            'There is no right answer and you will not be cut off mid-sentence.',
+            'If you run out of things to say, describing what you can see is fine.',
+          ] },
+        { type: 'speech_free', id: 'speech_free_1',
+          prompt: prompts[0], durationMs: ms },
+      ];
+    }
+
+    default:
+      return null;
+  }
+}
+
+/** Participant-facing one-liners, derived from the stages actually built. */
+function countParts(body, nCal, nVal) {
+  const has = (t) => body.some((s) => s.type === t);
+  const parts = ['The screen flashes white once. This syncs the recording — it is expected.'];
+  if (has('calibration_point')) parts.push(`A dot appears in ${nCal} places. Look at each one.`);
+  if (has('validation_point')) parts.push(`The same again in ${nVal} more places, to check the first part worked.`);
+  if (has('fixation')) parts.push('A cross in the middle. Rest your eyes on it.');
+  if (has('speech_read')) parts.push('You read a short passage aloud.');
+  if (has('speech_free')) parts.push('You talk for a short while about an everyday topic.');
+  return parts;
+}
+
+/**
+ * A duration as a participant would say it.
+ *
+ * Rounded to something a person can hold in their head: nobody needs "about 26
+ * seconds", and a false precision in an estimate invites them to treat it as a
+ * promise. Minutes once it is long enough that seconds stop being useful.
+ */
+function describeDuration(ms) {
+  const secs = Math.round(ms / 1000);
+  if (secs < 20) return `${secs} seconds`;
+  if (secs < 55) return `${Math.round(secs / 10) * 10} seconds`;
+  if (secs < 105) return 'one minute';
+  return `${Math.round(secs / 60)} minutes`;
+}
+
+/**
+ * The M0 protocol, kept as a named shortcut for tests and the verifier.
+ *
+ * Equivalent to building `studies/m0.json`, and a test asserts that rather
+ * than trusting it.
+ */
+export function buildM0Sequence(seed = (Date.now() >>> 0)) {
+  return buildSequence({
+    modalities: ['gaze', 'face', 'voice'],
+    calibration: { n_points: CALIBRATION_POINTS.length, randomise_order: true },
+    tasks: [
+      { type: 'chinrest' },
+      { type: 'calibration' },
+      { type: 'validation' },
+      { type: 'rest_fixation' },
+      { type: 'read_aloud', passage: 'default' },
+      { type: 'free_speech', prompts: 'default' },
+    ],
+  }, seed);
+}
+
 
 /**
  * Two clappers, not one.

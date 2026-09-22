@@ -1,0 +1,30 @@
+{
+  "study_id": "voice-only-example",
+  "name": "Voice-only example — no eye tracking, no chinrest",
+  "version": "1.0.0",
+
+  "notes": [
+    "An example, not a protocol anyone has run. It exists to show that a study",
+    "definition genuinely changes what happens: this one skips the chinrest and",
+    "the calibration grid entirely, and the capture page still requests the",
+    "microphone because `voice` is enabled. Copy it and change the disclosure",
+    "before using it for anything real."
+  ],
+
+  "disclosure": {
+    "retention_days": 90,
+    "secondary_use": "Recordings are analysed by the named team and are not shared outside it.",
+    "contact": "Replace with the investigator and the route to the ethics board.",
+    "irb_reference": null
+  },
+
+  "consent_tiers": ["features_only", "media_retained"],
+  "default_tier": "features_only",
+
+  "modalities": ["voice", "face"],
+
+  "tasks": [
+    { "type": "read_aloud", "passage": "default" },
+    { "type": "free_speech", "prompts": "default", "duration_ms": 45000 }
+  ]
+}
