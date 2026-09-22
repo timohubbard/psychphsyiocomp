@@ -194,11 +194,14 @@ async function loadDetail(id) {
     <h2>Events <span class="pill">${d.events.length}</span></h2>
     <div class="scroll">${eventsTable(d.events)}</div>
 
+    <div id="scanpath"></div>
     <div id="plot"></div>`;
 
   [...document.querySelectorAll('tr.clickable')].forEach((tr) => {
     tr.addEventListener('click', () => plotChannel(id, tr.dataset.channel, tr.dataset.source));
   });
+
+  if (sm.gaze_n_fixations) showScanpath(id).catch(() => {});
 }
 
 function card(k, v, note, cls = '') {
@@ -325,3 +328,116 @@ const ordinal = (n) => (n % 10 === 1 && n % 100 !== 11 ? 'st'
 loadList().catch((e) => {
   $('detail').innerHTML = `<div class="note">Failed to load: ${e.message}</div>`;
 });
+
+// ---------------------------------------------------------------------------
+// scanpath
+// ---------------------------------------------------------------------------
+
+/**
+ * The canonical eye-tracking picture: fixations as circles sized by duration,
+ * numbered in order, joined by saccades.
+ *
+ * Drawn from the recorded events rather than recomputed from samples. §4.1
+ * warns fixation counts and durations are algorithm-dependent, so a viewer that
+ * re-derived them would be showing a different session from the one the metrics
+ * on this page describe.
+ *
+ * The stimulus targets are drawn underneath, because a reader should be able to
+ * see for themselves whether the fixations went where the participant was told
+ * to look — rather than taking the hit rate on trust.
+ */
+async function loadScanpath(sessionId, window = null) {
+  const q = window ? `?start=${window[0]}&end=${window[1]}` : '';
+  const sp = await api(`/api/sessions/${encodeURIComponent(sessionId)}/scanpath${q}`);
+  return sp;
+}
+
+function scanpathSvg(sp, { w = 900, aspect = 1067 / 1707 } = {}) {
+  const h = Math.round(w * aspect);
+  const X = (x) => x * w;
+  const Y = (y) => y * h;
+
+  if (!sp.fixations.length) {
+    return '<div class="empty">No fixations recorded</div>';
+  }
+
+  // Radius by duration, on a square-root scale so area tracks time rather than
+  // radius — a 4x longer fixation should look 4x bigger, not 16x.
+  const durs = sp.fixations.map((f) => f.duration_ms);
+  const maxDur = Math.max(...durs);
+  const r = (d) => 4 + 22 * Math.sqrt(d / maxDur);
+
+  const targets = sp.stimuli.map((s) => `
+    <circle cx="${X(s.x)}" cy="${Y(s.y)}" r="7" fill="none"
+      stroke="${s.kind === 'validation_point' ? '#e0a800' : '#5cb85c'}"
+      stroke-width="1.5" stroke-dasharray="2 2"/>`).join('');
+
+  const path = sp.fixations.map((f, i) =>
+    `${i ? 'L' : 'M'}${X(f.x).toFixed(1)},${Y(f.y).toFixed(1)}`).join('');
+
+  const dots = sp.fixations.map((f, i) => `
+    <circle cx="${X(f.x)}" cy="${Y(f.y)}" r="${r(f.duration_ms).toFixed(1)}"
+      fill="rgba(76,141,255,.22)" stroke="#4c8dff" stroke-width="1">
+      <title>#${i + 1} · ${Math.round(f.duration_ms)}ms · ${f.n_samples} samples</title>
+    </circle>`).join('');
+
+  // Only number the longer fixations; labelling all 80 is unreadable and the
+  // short ones are the ones a reader is least interested in following.
+  const labelled = sp.fixations
+    .map((f, i) => ({ f, i }))
+    .filter(({ f }) => f.duration_ms > maxDur * 0.15)
+    .map(({ f, i }) => `<text x="${X(f.x)}" y="${Y(f.y) + 4}" fill="#cfd4da"
+      font-size="11" text-anchor="middle">${i + 1}</text>`).join('');
+
+  return `
+    <svg viewBox="0 0 ${w} ${h}" width="100%" style="background:#7f7f7f;border-radius:8px">
+      <rect x="0" y="0" width="${w}" height="${h}" fill="none" stroke="#5a5a5a"/>
+      ${targets}
+      <path d="${path}" fill="none" stroke="rgba(255,255,255,.35)" stroke-width="1"/>
+      ${dots}${labelled}
+    </svg>`;
+}
+
+async function showScanpath(sessionId, window = null, phaseKey = null) {
+  const host = $('scanpath');
+  if (!host) return;
+  host.innerHTML = '<div class="empty">loading…</div>';
+
+  const sp = await loadScanpath(sessionId, window);
+  const durs = sp.fixations.map((f) => f.duration_ms).sort((a, b) => a - b);
+  const median = durs.length ? durs[durs.length >> 1] : 0;
+
+  // One button per contiguous viewing block. Drawing the whole session at once
+  // overlays the calibration grid, the instruction screens and a minute of
+  // staring at a cross — all real gaze, and together an unreadable tangle that
+  // hides the structure rather than showing it.
+  const tabs = [{ key: null, label: 'Whole session', duration_s: null },
+                ...(sp.phases ?? [])]
+    .map((p) => `<button data-phase="${p.key ?? ''}"
+      data-start="${p.start ?? ''}" data-end="${p.end ?? ''}"
+      style="${(p.key ?? null) === phaseKey ? 'border-color:var(--accent);color:var(--accent)' : ''}">
+      ${p.label}${p.duration_s ? ` · ${p.duration_s}s` : ''}</button>`).join(' ');
+
+  host.innerHTML = `
+    <h2>Scanpath</h2>
+    <p style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px">${tabs}</p>
+    <div class="card">
+      ${scanpathSvg(sp)}
+      <div class="n" style="margin-top:8px">
+        ${sp.fixations.length} fixations (circle area ∝ duration, median
+        ${Math.round(median)}ms) · ${sp.saccades.length} saccades ·
+        dashed rings are the calibration
+        <span style="color:var(--ok)">■</span> and validation
+        <span style="color:var(--warn)">■</span> targets that were on screen.
+        Drawn from recorded events, not recomputed.
+      </div>
+    </div>`;
+
+  [...host.querySelectorAll('button[data-phase]')].forEach((b) => {
+    b.addEventListener('click', () => {
+      const key = b.dataset.phase || null;
+      const win = b.dataset.start ? [Number(b.dataset.start), Number(b.dataset.end)] : null;
+      showScanpath(sessionId, win, key).catch(() => {});
+    });
+  });
+}

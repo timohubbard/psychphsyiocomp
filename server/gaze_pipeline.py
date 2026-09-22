@@ -210,6 +210,11 @@ def _fixation_events(result, clock_id: str):
         return []
     from engine_contract import EventRow
 
+    # Namespaced. The stimulus sequence already emits an event called
+    # `fixation` — the 60-second cross — and a derived measure sharing that name
+    # would make "how many fixations" ambiguous in the events table. `source`
+    # distinguishes them, but relying on a second column to disambiguate a name
+    # is exactly the kind of trap this schema exists to avoid.
     out = []
     for e in result.events:
         meta = {"n_samples": e.n_samples}
@@ -219,7 +224,7 @@ def _fixation_events(result, clock_id: str):
             meta.update({"amplitude_deg": e.amplitude_deg,
                          "peak_velocity_deg_s": e.peak_velocity_deg_s})
         out.append(EventRow(
-            event_type=e.kind, native_clock_id=clock_id,
+            event_type=f"gaze_{e.kind}", native_clock_id=clock_id,
             onset_native_ts=e.onset_ts, offset_native_ts=e.offset_ts,
             stimulus_id=None, metadata=meta))
     return out

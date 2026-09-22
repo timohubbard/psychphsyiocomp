@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "packages" / "engine-contract" / "python"))
 sys.path.insert(0, str(ROOT / "server"))
 
-from store import channel_series, list_sessions, session_detail  # noqa: E402
+from store import channel_series, list_sessions, phases, scanpath, session_detail  # noqa: E402
 
 WEB_DIR = ROOT / "web" / "researcher"
 
@@ -79,6 +79,13 @@ class Handler(SimpleHTTPRequestHandler):
                 source=(query.get("source") or [None])[0],
                 max_points=int((query.get("max_points") or ["2000"])[0]),
             )
+
+        if len(parts) == 4 and parts[:2] == ["api", "sessions"] and parts[3] == "scanpath":
+            def num(key):
+                v = (query.get(key) or [None])[0]
+                return float(v) if v is not None else None
+            return {**scanpath(self.data_root, parts[2], num("start"), num("end")),
+                    "phases": phases(self.data_root, parts[2])}
 
         if len(parts) == 4 and parts[:2] == ["api", "sessions"] and parts[3] == "export":
             return self._export(parts[2], query)

@@ -281,3 +281,120 @@ def _run_summary(runs) -> list[dict[str, Any]]:
         "clock_uncertainty_ms": r.get("clock_uncertainty_ms"),
         "unaligned_reason": r.get("unaligned_reason"),
     } for r in runs.to_pylist()]
+
+
+def scanpath(root: str | Path, session_id: str,
+             start_ms: float | None = None, end_ms: float | None = None) -> dict[str, Any]:
+    """Fixations and saccades for drawing, optionally within a time window.
+
+    Read from the events table rather than recomputed from samples, so what is
+    drawn is exactly what was recorded — §4.1 warns fixation counts and
+    durations are algorithm-dependent, and a viewer that re-derived them with
+    different settings would show a different session from the one the metrics
+    describe.
+    """
+    d = Path(root) / f"session_id={session_id}"
+    events = _read(d / "events.parquet")
+    if events is None or not events.num_rows:
+        return {"fixations": [], "saccades": [], "stimuli": []}
+
+    fixations, saccades, stimuli = [], [], []
+    for r in events.to_pylist():
+        onset, offset = r.get("onset_master_ts"), r.get("offset_master_ts")
+        if onset is None:
+            continue
+        if start_ms is not None and onset < start_ms:
+            continue
+        if end_ms is not None and onset > end_ms:
+            continue
+
+        meta = r.get("metadata")
+        if isinstance(meta, str):
+            try:
+                meta = json.loads(meta)
+            except json.JSONDecodeError:
+                meta = {}
+        meta = meta or {}
+
+        if r["event_type"] == "gaze_fixation":
+            fixations.append({
+                "t": onset, "duration_ms": (offset - onset) if offset else 0.0,
+                "x": meta.get("x"), "y": meta.get("y"),
+                "n_samples": meta.get("n_samples"),
+            })
+        elif r["event_type"] == "gaze_saccade":
+            saccades.append({
+                "t": onset, "duration_ms": (offset - onset) if offset else 0.0,
+                "amplitude_deg": meta.get("amplitude_deg"),
+                "peak_velocity_deg_s": meta.get("peak_velocity_deg_s"),
+            })
+        elif r["event_type"].endswith("_point_sampling") and "x" in meta:
+            # The target that was on screen. Drawn alongside so a reader can see
+            # for themselves whether the fixations went where they were told to
+            # look, rather than taking the hit rate on trust.
+            stimuli.append({
+                "t": onset, "end": offset, "x": meta["x"], "y": meta["y"],
+                "kind": r["event_type"].replace("_sampling", ""),
+            })
+
+    fixations.sort(key=lambda f: f["t"])
+    return {
+        "fixations": [f for f in fixations if f["x"] is not None],
+        "saccades": saccades,
+        "stimuli": sorted(stimuli, key=lambda s: s["t"]),
+    }
+
+
+def phases(root: str | Path, session_id: str) -> list[dict[str, Any]]:
+    """Time windows a researcher would want to look at separately.
+
+    A whole-session scanpath overlays the calibration block, the instruction
+    screens someone spent eighteen seconds reading, and a minute of staring at a
+    fixation cross. All of that is real gaze, and drawing it together makes an
+    unreadable tangle that hides the structure rather than showing it — the
+    stimulus, not the participant, is what changed.
+
+    Derived from the event log rather than configured, so a study that changes
+    its sequence gets the right windows without anyone updating a list.
+    """
+    d = Path(root) / f"session_id={session_id}"
+    events = _read(d / "events.parquet")
+    if events is None or not events.num_rows:
+        return []
+
+    spans: dict[str, list[float]] = {}
+    for r in events.to_pylist():
+        onset, offset = r.get("onset_master_ts"), r.get("offset_master_ts")
+        if onset is None:
+            continue
+        end = offset if offset is not None else onset
+
+        etype = r["event_type"]
+        if etype.endswith("_point_sampling"):
+            key = etype.replace("_point_sampling", "")
+        elif etype == "fixation" and r.get("stimulus_id"):
+            # The stimulus cross, not a derived gaze fixation — those are
+            # namespaced `gaze_fixation` precisely so this test is possible.
+            key = "fixation_cross"
+        else:
+            # Instructions are interleaved through the session, so a single
+            # min-to-max span would cover almost all of it and mean nothing.
+            # Phases are contiguous viewing blocks or they are not phases.
+            continue
+
+        if key not in spans:
+            spans[key] = [onset, end]
+        else:
+            spans[key][0] = min(spans[key][0], onset)
+            spans[key][1] = max(spans[key][1], end)
+
+    label = {
+        "calibration": "Calibration block",
+        "validation": "Validation block",
+        "fixation_cross": "Fixation cross",
+    }
+    out = [{"key": k, "label": label.get(k, k), "start": v[0], "end": v[1],
+            "duration_s": round((v[1] - v[0]) / 1000.0, 1)}
+           for k, v in spans.items()]
+    out.sort(key=lambda p: p["start"])
+    return out
