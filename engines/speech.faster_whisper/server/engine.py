@@ -140,6 +140,21 @@ def is_repeat_loop(texts: list[str], limit: int = MAX_CONSECUTIVE_REPEATS) -> bo
     return len(set(tail)) == 1 and bool(tail[0])
 
 
+def segment_span(seg) -> tuple[float, float]:
+    """(start, end) in seconds: the first and last WORD when word timestamps
+    exist, else the segment's own times.
+
+    Segment times are unreliable across VAD-removed silence (see `run`); word
+    times are not. A segment without words falls back rather than failing,
+    because a study may turn word timestamps off.
+    """
+    words = [w for w in (getattr(seg, "words", None) or [])
+             if getattr(w, "start", None) is not None and getattr(w, "end", None) is not None]
+    if words:
+        return float(words[0].start), float(words[-1].end)
+    return float(seg.start), float(seg.end)
+
+
 class FasterWhisperTranscript:
     """Whisper transcription with the confidence gates wired in.
 
@@ -220,10 +235,20 @@ class FasterWhisperTranscript:
         # is recorded either way rather than assumed.
         vad_filter = bool(params.get("vad_filter", True))
 
+        # Word timestamps, and segment times taken from the words. With the VAD
+        # on, faster-whisper removes silence, transcribes the joined speech,
+        # and maps times back — and a SEGMENT that crosses a removed silence
+        # takes its start from before it. Measured on a real session: "I'm
+        # sitting in a office..." was stamped 217.0 s, while the prompt it
+        # answers appeared at 236.6 s. Words are mapped back individually and
+        # put it at 238.6 s. Twenty seconds is the difference between a word
+        # landing on the right stimulus and on the wrong one.
+        word_timestamps = bool(params.get("word_timestamps", True))
+
         model = self._load(model_size)
         segments, info = model.transcribe(
             str(media.path), language=language, beam_size=beam_size,
-            vad_filter=vad_filter,
+            vad_filter=vad_filter, word_timestamps=word_timestamps,
         )
 
         signals: list[SignalRow] = []
@@ -237,7 +262,8 @@ class FasterWhisperTranscript:
             text = (seg.text or "").strip()
             no_speech = float(getattr(seg, "no_speech_prob", 0.0) or 0.0)
             logprob = float(getattr(seg, "avg_logprob", 0.0) or 0.0)
-            duration = max(float(seg.end) - float(seg.start), 0.0)
+            start, end = segment_span(seg)
+            duration = max(end - start, 0.0)
 
             fails = []
             if no_speech > max_no_speech:
@@ -260,8 +286,8 @@ class FasterWhisperTranscript:
                 events.append(EventRow(
                     event_type="speech_segment_rejected",
                     native_clock_id=NATIVE_CLOCK_ID,
-                    onset_native_ts=float(seg.start) * 1000.0,
-                    offset_native_ts=float(seg.end) * 1000.0,
+                    onset_native_ts=start * 1000.0,
+                    offset_native_ts=end * 1000.0,
                     metadata={"reasons": fails, "no_speech_prob": round(no_speech, 4),
                               "avg_logprob": round(logprob, 4),
                               "n_words_discarded": word_count(text)},
@@ -275,15 +301,15 @@ class FasterWhisperTranscript:
             events.append(EventRow(
                 event_type="speech_segment",
                 native_clock_id=NATIVE_CLOCK_ID,
-                onset_native_ts=float(seg.start) * 1000.0,
-                offset_native_ts=float(seg.end) * 1000.0,
+                onset_native_ts=start * 1000.0,
+                offset_native_ts=end * 1000.0,
                 metadata={"text": text, "n_words": word_count(text),
                           "no_speech_prob": round(no_speech, 4),
                           "avg_logprob": round(logprob, 4),
                           "language": info.language},
             ))
 
-            mid_ms = (float(seg.start) + duration / 2.0) * 1000.0
+            mid_ms = (start + duration / 2.0) * 1000.0
             signals.append(SignalRow(
                 stream="speech", channel="speech.segment_confidence",
                 native_clock_id=NATIVE_CLOCK_ID, native_ts=mid_ms,

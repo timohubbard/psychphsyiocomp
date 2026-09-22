@@ -544,3 +544,26 @@ def test_a_session_with_no_protocol_records_null_not_a_default(tmp_path):
     })
     assert row["study_content_hash"] is None
     assert row["study_modalities"] is None
+
+
+def test_reprocessing_replaces_the_session_rather_than_layering_on_it(tmp_path, ctx):
+    """A stream from an earlier run that the new run does not produce used to
+    survive beside the new tables and be read back as part of them."""
+    first = CanonicalWriter(tmp_path, ctx)
+    first.add_chunks([_chunk()], source="face@1+server-batch", params={},
+                     solution=_aligned_solution())
+    resp = Chunk(signals=(SignalRow(stream="respiration", channel="resp.x",
+                                    native_clock_id=VIDEO, native_ts=0.0, value=1.0,
+                                    reliability_tier="low"),))
+    first.add_chunks([resp], source="resp@1+server-batch", params={},
+                     solution=_aligned_solution())
+    first.close()
+    assert (tmp_path / "session_id=s001" / "stream=respiration" / "signals.parquet").exists()
+
+    second = CanonicalWriter(tmp_path, ctx)
+    second.add_chunks([_chunk()], source="face@1+server-batch", params={},
+                      solution=_aligned_solution())
+    second.close()
+
+    sources = {r["source"] for r in read_session(tmp_path, "s001", "signals").to_pylist()}
+    assert sources == {"face@1+server-batch"}

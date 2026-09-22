@@ -351,3 +351,46 @@ def test_no_declared_channel_carries_the_words():
     float-valued and a transcript is not a measurement of a quantity."""
     for spec in MANIFEST["outputs"]["signals"]:
         assert spec["value_type"] == "float"
+
+
+# ---------------------------------------------------------------------------
+# timing comes from words, not segments
+# ---------------------------------------------------------------------------
+
+class FakeWord:
+    def __init__(self, start, end):
+        self.start, self.end = start, end
+
+
+def test_segment_timing_comes_from_its_words():
+    """Measured on a real session: a segment crossing VAD-removed silence was
+    stamped 217.0 s, 20 s before the prompt it answered; its words said 238.6 s."""
+    seg = FakeSegment(217.0, 247.1, "I'm sitting in an office")
+    seg.words = [FakeWord(238.6, 238.9), FakeWord(246.5, 247.1)]
+    chunk, _ = run([seg])
+    ev = next(e for e in chunk.events if e.event_type == "speech_segment")
+    assert ev.onset_native_ts == pytest.approx(238_600.0)
+    assert ev.offset_native_ts == pytest.approx(247_100.0)
+
+
+def test_rate_uses_the_word_span_not_the_stretched_segment():
+    """Dividing by the stretched 30 s segment would understate the rate by
+    more than a factor of three; the words span 8.5 s."""
+    seg = FakeSegment(217.0, 247.1, "I'm sitting in an office")
+    seg.words = [FakeWord(238.6, 238.9), FakeWord(246.5, 247.1)]
+    chunk, _ = run([seg])
+    wpm = next(s for s in chunk.signals if s.channel == "speech.rate_wpm").value
+    assert wpm == pytest.approx(word_count("I'm sitting in an office") / 8.5 * 60, rel=0.01)
+
+
+def test_segments_without_words_fall_back_to_segment_times():
+    chunk, _ = run([FakeSegment(1.0, 2.0, "hello there")])
+    ev = next(e for e in chunk.events if e.event_type == "speech_segment")
+    assert ev.onset_native_ts == pytest.approx(1000.0)
+
+
+def test_word_timestamps_are_requested_by_default_and_can_be_turned_off():
+    _, e = run([FakeSegment(1.0, 2.0, "hi")])
+    assert e._model.calls[-1]["word_timestamps"] is True
+    _, e = run([FakeSegment(1.0, 2.0, "hi")], params={"word_timestamps": False})
+    assert e._model.calls[-1]["word_timestamps"] is False

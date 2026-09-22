@@ -393,6 +393,17 @@ class CanonicalWriter:
         session_dir.mkdir(parents=True, exist_ok=True)
         written: dict[str, Path] = {}
 
+        # Reprocessing replaces the session wholesale. Each file below is
+        # overwritten, but a stream partition from an earlier run that this run
+        # does not produce (say, respiration from a run with --resp, then a run
+        # without) would otherwise survive beside the new tables — rows from a
+        # different run, read back as part of this one. Only this writer's own
+        # outputs are removed; AOI sets and annotations live elsewhere.
+        for stale in session_dir.glob("stream=*/*.parquet"):
+            stale.unlink()
+        for stale in session_dir.glob("*.parquet"):
+            stale.unlink()
+
         # signals and quality partition by stream; a gaze analysis should not
         # have to read facial rows to find its own.
         for name, rows, schema in (

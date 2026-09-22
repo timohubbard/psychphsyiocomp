@@ -1,6 +1,6 @@
 {
   "engine_id": "speech.faster_whisper",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "modality": "speech",
   "runtime": "python-cpu",
   "placement": "server-batch",
@@ -44,6 +44,11 @@
         "type": "boolean",
         "default": true,
         "description": "Whisper's own voice-activity filter, which removes the long silences the decoder has most room to invent over. Turning it off increases hallucination pressure, so the two confidence gates matter more, not less. It can also clip genuinely quiet speech — recorded either way rather than assumed."
+      },
+      "word_timestamps": {
+        "type": "boolean",
+        "default": true,
+        "description": "Take each segment's start and end from its first and last word. Segment times alone crossed VAD-removed silence on a real session: a free-speech answer was stamped 217.0 s when its prompt appeared at 236.6 s; word times put it at 238.6 s. Added in 0.2.0."
       }
     },
     "additionalProperties": false
