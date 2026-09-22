@@ -297,3 +297,57 @@ def effective_rate(timestamps: np.ndarray) -> float:
         return 0.0
     span_s = (timestamps[-1] - timestamps[0]) / 1000.0
     return float(len(timestamps) / span_s) if span_s > 0 else 0.0
+
+
+# ---------------------------------------------------------------------------
+# how far outside its own calibration is the model being asked to guess?
+# ---------------------------------------------------------------------------
+
+def extrapolation_distance(
+    X_design: np.ndarray, calibration_design: np.ndarray,
+) -> np.ndarray:
+    """Mahalanobis distance of each sample from the calibration distribution.
+
+    A validation score says how well the model interpolates BETWEEN calibration
+    points. It says nothing about what happens when the features leave the range
+    the model ever saw — and on the first real session, 34% of predicted gaze
+    samples landed off-screen entirely, with 11% beyond twice the screen
+    dimensions and one reaching fifteen screen-heights below the bottom.
+
+    Quadratic terms make this worse, not better: they buy curvature inside the
+    calibrated region and diverge quickly outside it. So the model is at its
+    most confident-looking exactly where it is least supported.
+
+    Distance is measured in the calibration set's own units, so "far" means far
+    relative to how much this participant's features actually varied while being
+    calibrated. A regularised covariance keeps it defined when there are fewer
+    calibration targets than design columns, which with 13 points is normal.
+    """
+    mu = calibration_design.mean(axis=0)
+    centred = calibration_design - mu
+    n, d = centred.shape
+
+    cov = (centred.T @ centred) / max(n - 1, 1)
+    # Ridge on the covariance for the same reason as on the regression: with 13
+    # targets and more columns than that, the empirical covariance is singular.
+    cov += np.eye(d) * (np.trace(cov) / d) * 1e-3
+
+    try:
+        inv = np.linalg.inv(cov)
+    except np.linalg.LinAlgError:
+        return np.full(len(X_design), np.nan)
+
+    delta = X_design - mu
+    return np.sqrt(np.maximum(np.einsum("ij,jk,ik->i", delta, inv, delta), 0.0))
+
+
+def onscreen_mask(pred: np.ndarray, margin: float = 0.1) -> np.ndarray:
+    """Which predictions land on the screen, within a small margin.
+
+    The margin is not generosity — gaze genuinely does land slightly outside a
+    screen's bounds near its edges, and the estimator's own error is around a
+    degree. Beyond it, the prediction is not a measurement of where someone
+    looked; it is the model being asked a question outside its training range.
+    """
+    return ((pred[:, 0] > -margin) & (pred[:, 0] < 1 + margin)
+            & (pred[:, 1] > -margin) & (pred[:, 1] < 1 + margin))

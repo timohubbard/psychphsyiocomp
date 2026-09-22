@@ -131,6 +131,21 @@ async function loadDetail(id) {
       deg != null ? `§4.2 AOI budget is 3–4.5°` : 'no geometry — px only'));
     cards.push(card('Within ROI', `${((sm.gaze_percent_in_roi ?? 0) * 100).toFixed(0)}%`,
       `${sm.gaze_validation_targets ?? 0} held-out targets`));
+
+    // The coverage figure belongs beside the accuracy figure, because accuracy
+    // is measured only where the model interpolates. Off-screen predictions are
+    // it extrapolating past anything it was calibrated on, and reporting one
+    // without the other overstates what the estimate covers.
+    if (sm.gaze_onscreen_rate != null) {
+      const pct = sm.gaze_onscreen_rate * 100;
+      cards.push(card('On screen', `${pct.toFixed(0)}%`,
+        'the rest is the model extrapolating',
+        pct >= 90 ? 'ok' : pct >= 70 ? 'warn' : 'bad'));
+    }
+    if (sm.gaze_n_fixations != null) {
+      cards.push(card('Fixations', `${sm.gaze_n_fixations}`,
+        `median ${Math.round(sm.gaze_median_fixation_ms ?? 0)}ms · HMM, not I-VT`));
+    }
   } else if (sm.gaze_fit_refused) {
     cards.push(card('Gaze', 'refused',
       `${sm.gaze_calibration_targets ?? 0} usable calibration targets`, 'warn'));
@@ -151,6 +166,21 @@ async function loadDetail(id) {
       and those sit between the calibration points by design. There is no
       pass/fail threshold here on purpose: §5.3 records that none is published,
       so the inclusion criterion is yours to preregister.</div>` : ''}
+
+    ${sm.gaze_onscreen_rate != null && sm.gaze_onscreen_rate < 0.9 ? `<div class="note">
+      <strong>${((1 - sm.gaze_onscreen_rate) * 100).toFixed(0)}% of predicted gaze
+      falls outside the screen.</strong> Those samples are the ridge model being
+      asked about feature values it never saw during calibration, and quadratic
+      terms diverge quickly outside their fitted range. The accuracy figure above
+      does not describe them — it is measured on targets where the features are
+      in range. Fixations are classified on the on-screen samples only.</div>` : ''}
+
+    ${sm.gaze_n_fixations != null ? `<div class="note">
+      Fixations come from a two-state HMM over angular velocity, not I-VT or
+      I-DT. §4.1: threshold detectors reach ~90–92% on static stimuli but
+      ~68–70% under real head movement at the same 30 Hz, which is the regime a
+      webcam pipeline lives in. Counts and durations are algorithm-dependent, so
+      the detector travels with them.</div>` : ''}
 
     <h2>Engine runs</h2>
     ${runsTable(d.runs)}

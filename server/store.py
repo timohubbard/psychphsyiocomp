@@ -22,7 +22,8 @@ import pyarrow.parquet as pq
 SESSION_SCOPED_METRICS = frozenset({
     "gaze_average_offset_px", "gaze_average_offset_deg", "gaze_percent_in_roi",
     "gaze_samples_per_sec", "gaze_validation_targets", "gaze_fit_refused",
-    "gaze_calibration_targets",
+    "gaze_calibration_targets", "gaze_onscreen_rate", "gaze_median_extrapolation",
+    "gaze_n_fixations", "gaze_median_fixation_ms",
 })
 
 

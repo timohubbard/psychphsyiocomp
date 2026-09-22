@@ -21,7 +21,15 @@ import numpy as np
 
 from engine_contract import Chunk, QualityRow, SignalRow
 from gaze_ridge import GateCriteria
-from gaze_stage import feature_matrix, fit_session, target_spans
+from fixations import classify as classify_fixations
+from gaze_stage import (
+    extrapolation_distance,
+    feature_matrix,
+    fit_session,
+    onscreen_mask,
+    pool_spans,
+    target_spans,
+)
 
 #: Source for the estimator's own output. Distinct from the feature engine's:
 #: the features are a measurement, the gaze coordinates are an inference from
@@ -110,16 +118,31 @@ def run_gaze(
     # Predicted gaze for every usable frame, as ordinary signals so they join
     # against everything else on the master clock.
     from gaze_stage import design_from_channels
-    pred = fit.model.predict(design_from_channels(X, list(feature_channels), use_pose=use_pose))
+    pred = fit.model.predict(
+        design_from_channels(X, list(feature_channels), use_pose=use_pose))
+
+    design = design_from_channels(X, list(feature_channels), use_pose=use_pose)
+    cal_design, _, _ = pool_spans(
+        ts, design, [s for s in spans if s.kind == "calibration_point"])
+    extrap = extrapolation_distance(design, cal_design)
+    onscreen = onscreen_mask(pred)
 
     gaze_signals = []
-    for t, (gx, gy) in zip(ts, pred):
+    for t, (gx, gy), e in zip(ts, pred, extrap):
         gaze_signals.append(SignalRow(
             stream="gaze", channel="gaze.x", native_clock_id=solution.clock_id,
             native_ts=t, value=float(gx), reliability_tier="moderate"))
         gaze_signals.append(SignalRow(
             stream="gaze", channel="gaze.y", native_clock_id=solution.clock_id,
             native_ts=t, value=float(gy), reliability_tier="low"))
+        # Emitted beside every prediction rather than folded into it. A
+        # validation score describes interpolation BETWEEN calibration points
+        # and says nothing about samples whose features left that range — and
+        # on the first real session a third of them did.
+        gaze_signals.append(SignalRow(
+            stream="gaze", channel="gaze.extrapolation",
+            native_clock_id=solution.clock_id, native_ts=t,
+            value=float(e), reliability_tier="moderate"))
 
     # Already on the master clock: the features were converted before fitting,
     # so the identity solution is the honest description of this step.
@@ -133,9 +156,21 @@ def run_gaze(
         unaligned_reason=None,
     )
 
+    # Fixations, over the on-screen samples only. Classifying an extrapolated
+    # coordinate would manufacture saccades of hundreds of degrees across a
+    # screen forty degrees wide.
+    fix_result = None
+    if onscreen.sum() >= 3 and dpp:
+        fix_result = classify_fixations(
+            ts[onscreen], pred[onscreen, 0], pred[onscreen, 1],
+            viewport_px=viewport, degrees_per_px=dpp)
+
     v = fit.validation
     writer.add_chunks(
-        [Chunk(signals=tuple(gaze_signals), quality=tuple(_validation_quality(v, ts)))],
+        [Chunk(signals=tuple(gaze_signals),
+               events=tuple(_fixation_events(fix_result, solution.clock_id)),
+               quality=tuple(_validation_quality(v, ts)
+                             + _coverage_quality(ts, onscreen, extrap, fix_result)))],
         source=ESTIMATOR_SOURCE,
         # The fit IS the parameterisation. Recording it means a re-fit appends a
         # distinguishable source instead of silently replacing this one.
@@ -156,7 +191,57 @@ def run_gaze(
         "samples_per_sec": v.samples_per_sec,
         "passed": fit.passed,
         "reasons": fit.reasons,
+        "onscreen_rate": float(onscreen.mean()),
+        "n_fixations": fix_result.n_fixations if fix_result else 0,
+        "median_fixation_ms": fix_result.median_fixation_ms if fix_result else None,
     }
+
+
+def _fixation_events(result, clock_id: str):
+    """Fixations and saccades as ordinary events on the master clock.
+
+    §4.1 warns that fixation counts and durations are algorithm-dependent, not
+    just data-dependent, so which detector produced them travels with them via
+    `source` — and the metadata records the measured properties rather than
+    leaving a consumer to recompute them from samples that may have been
+    filtered.
+    """
+    if result is None or not result.events:
+        return []
+    from engine_contract import EventRow
+
+    out = []
+    for e in result.events:
+        meta = {"n_samples": e.n_samples}
+        if e.kind == "fixation":
+            meta.update({"x": e.x, "y": e.y, "duration_ms": e.duration_ms})
+        else:
+            meta.update({"amplitude_deg": e.amplitude_deg,
+                         "peak_velocity_deg_s": e.peak_velocity_deg_s})
+        out.append(EventRow(
+            event_type=e.kind, native_clock_id=clock_id,
+            onset_native_ts=e.onset_ts, offset_native_ts=e.offset_ts,
+            stimulus_id=None, metadata=meta))
+    return out
+
+
+def _coverage_quality(ts, onscreen, extrap, fix_result):
+    """How much of the session the estimate can actually speak for."""
+    start = float(ts[0]) if len(ts) else 0.0
+    end = float(ts[-1]) if len(ts) else 0.0
+    metrics = {
+        "gaze_onscreen_rate": float(onscreen.mean()) if len(onscreen) else 0.0,
+        "gaze_median_extrapolation": float(np.nanmedian(extrap)) if len(extrap) else 0.0,
+    }
+    if fix_result and fix_result.median_fixation_ms is not None:
+        metrics["gaze_n_fixations"] = float(fix_result.n_fixations)
+        metrics["gaze_median_fixation_ms"] = float(fix_result.median_fixation_ms)
+
+    return [
+        QualityRow(stream="gaze", metric=m, window_start_native_ts=start,
+                   window_end_native_ts=end, value=v)
+        for m, v in metrics.items()
+    ]
 
 
 def _validation_quality(v, ts: np.ndarray) -> list[QualityRow]:
