@@ -187,6 +187,7 @@ async function loadDetail(id) {
     ${protocolNote(d.study_check)}
 
     ${voicePanel(d.engine_quality)}
+    ${transcriptPanel(d.engine_quality)}
     ${respirationPanel(d.engine_quality)}
 
     <h2>Engine runs</h2>
@@ -974,4 +975,53 @@ function protocolNote(check) {
       down.</div>`;
   }
   return '';
+}
+
+function transcriptPanel(eq) {
+  const s = eq?.speech;
+  if (!s) return '';
+  const m = s.metrics;
+  const rejected = m.segments_rejected ?? 0;
+  const retained = m.segments_retained ?? 0;
+  const langP = m.language_probability;
+
+  const cards = [
+    card('Segments kept', `${retained}`,
+      'passed both confidence gates'),
+    // Any non-zero value is worth a look: the conditions that produced one
+    // hallucination usually produced more, including ones that squeaked
+    // through. Not coloured red, because rejecting is the system working.
+    card('Rejected', `${rejected}`,
+      rejected ? 'dropped as probable hallucination' : 'none',
+      rejected > 0 ? 'warn' : 'ok'),
+    card('Coverage', m.speech_coverage == null ? '—'
+      : `${(m.speech_coverage * 100).toFixed(0)}%`,
+      'of the recording is retained speech'),
+    card('Language', langP == null ? '—' : `p=${fmt(langP)}`,
+      'model confidence in the language it detected',
+      langP == null ? '' : langP >= 0.7 ? 'ok' : 'warn'),
+  ];
+
+  return `
+    <h2>Transcript</h2>
+    <div class="cards">${cards.join('')}</div>
+    <div class="note">
+      This session's participant chose the <code>media_plus_transcript</code>
+      tier. No transcript exists for any other tier, and the words are stored
+      as <code>speech_segment</code> events rather than as signals — a
+      transcript is not a measurement of a quantity.
+      <strong>No word error rate is claimed.</strong> Published Whisper figures
+      come from curated corpora, not a consumer microphone in someone's home
+      after the browser's DSP; read the per-segment confidences instead of
+      taking the text flat.</div>
+    ${rejected > 0 ? `<div class="note">
+      <strong>${rejected} segment${rejected === 1 ? ' was' : 's were'} dropped
+      as probable hallucination.</strong> Whisper emits fluent, confident text
+      where there is no speech, so segments failing either the no-speech or the
+      log-probability gate are discarded. Their timing and confidence are kept
+      as <code>speech_segment_rejected</code> events; <strong>their text is
+      not</strong>, because a sentence a participant never said is not made
+      safer by being labelled. The conditions that produce one usually produce
+      more, so it is worth listening to the recording around those
+      timestamps.</div>` : ''}`;
 }
