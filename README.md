@@ -69,7 +69,9 @@ PASS. `npm run verify:gaze` → GAZE GATE PASS.
 | M2 — `face.pyfeat_aus`, per-AU reliability tiers | done |
 | M2 — inter-engine agreement + relative proportions | done |
 | M2 — a second AU engine for cross-check | **blocked, see below** |
-| M3 voice, M4 respiration | not started |
+| M3 — `voice.opensmile_egemaps` (88 eGeMAPSv02 functionals) | done |
+| M4 — `resp.motion_profiles`, waveform only | done |
+| M4 — respiration validation study against an RIP belt | not started |
 
 ### What the numbers are
 
@@ -83,6 +85,37 @@ On one real session, one participant:
 Both figures rest on **one participant and 18 targets**. That they agree is
 meaningful; they are not a validated accuracy claim, and nothing here presents
 them as one.
+
+### The number respiration does not report
+
+`resp.motion_profiles` emits a breathing *waveform* and three confidence
+channels. It does **not** emit breaths per minute, and the flag that would
+enable it defaults to off.
+
+§2.4: across two dedicated research passes, no breaths-per-minute accuracy
+figure for this class of method — webcam chest/shoulder motion against a chest
+belt, RIP or spirometry — survived adversarial checking, and one specific
+figure was explicitly refuted. A breathing rate is a number a clinician
+recognises on sight, so shipping one this project cannot defend would be the
+most damaging thing it could do.
+
+The waveform is the more useful output anyway: inhale onsets, breath-holds and
+sighs are all events on a waveform and none of them need a calibrated rate.
+Unblocking the rate takes a validation study — simultaneous webcam and RIP
+belt, Bland-Altman on 60s windows plus waveform cross-correlation, N≈30–40
+stratified on skin tone, clothing, distance and framing.
+
+Two related decisions this engine encodes:
+
+- Respiration is **not rPPG**. §2.4 corrects a common premise: iMotions'
+  respiration is chest/shoulder-motion ROI tracking band-passed to ~7.5–30
+  cycles/min, architecturally distinct from facial rPPG for heart rate and far
+  more compression-robust. They are two separate engineering problems.
+- The grid of motion profiles is **fused late, never averaged up front**.
+  §2.4's one surviving algorithmic finding is that multiple motion profiles
+  beat a single combined 1D profile, and `test_multiple_profiles_beat_a_single_combined_profile`
+  measures it rather than asserting it. The reason is phase: chest rise and
+  shoulder rotation are not in phase, so naive averaging cancels the signal.
 
 ## Core design decisions
 
@@ -352,6 +385,9 @@ packages/engine-contract/       the contract every engine implements
 engines/                        one directory per engine
   face.mediapipe_blendshapes/   reference engine, both placements
   gaze.mediapipe_features/      eye/iris features, server-batch
+  face.pyfeat_aus/              Action Units, per-AU reliability tiers
+  voice.opensmile_egemaps/      88 eGeMAPSv02 functionals, server-batch
+  resp.motion_profiles/         chest/shoulder motion — waveform, no rate
 server/
   alignment.py                  the one place clocks are reconciled
   tables.py / store.py          canonical tables: write side / read side
@@ -359,6 +395,9 @@ server/
   gaze_ridge.py / gaze_stage.py the estimator, and its join to stimulus events
   fixations.py                  two-state HMM, not I-VT
   aoi.py                        areas of interest, Holmqvist metrics
+  agreement.py                  cross-engine agreement, relative proportions
+  respiration.py                band-pass, multi-profile fusion, rate refusal
+  consent.py                    tiered consent; pipeline.py enforces retention
   app.py                        researcher app
 web/
   index.html, src/              participant capture page
@@ -376,6 +415,9 @@ silently imported the facial engine into the gaze engine's tests.
 ```bash
 npm run serve                     # participant capture page
 npm run process -- <dir> --out o/ # bundle -> canonical tables + gaze
+#   --aus    also run Action Units (slow: ~0.25s/analysed frame)
+#   --resp   also run respiration (waveform only, never a rate)
+#   --no-gaze / --no-voice   skip those stages
 npm run app                       # researcher app
 npm run check                     # licences + all tests + M0 gate
 npm run verify:gaze               # do fixations land on the right target?

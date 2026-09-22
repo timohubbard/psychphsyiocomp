@@ -42,6 +42,7 @@ from pipeline import SessionBundle, process_session  # noqa: E402
 from tables import read_session  # noqa: E402
 
 MODEL_PATH = ROOT / "models" / "face_landmarker.task"
+POSE_MODEL_PATH = ROOT / "models" / "pose_landmarker.task"
 
 
 def scan_luma(video_path: Path, max_frames: int | None = None) -> list[tuple[float, float]]:
@@ -136,6 +137,9 @@ def main() -> int:
                     help="analyse every Nth frame for AUs; AU dynamics are slow")
     ap.add_argument("--no-voice", action="store_true",
                     help="skip audio extraction and the eGeMAPS engine")
+    ap.add_argument("--resp", action="store_true",
+                    help="also run the respiration engine (waveform only — it "
+                         "does not emit a breathing rate, see its manifest)")
     args = ap.parse_args()
 
     bundle = SessionBundle.from_dir(args.bundle)
@@ -165,6 +169,14 @@ def main() -> int:
               f"(median {float(np.median(vals)):.1f})")
 
     engines = [(MediaPipeBlendshapesBatch(str(MODEL_PATH)), {})]
+
+    # Opt-in for a different reason than the AU engine below: not cost, but
+    # standing. Respiration is plausibly health data under GDPR Art. 4(15)
+    # (§6.3), so a study gets it because it asked for it, never by default.
+    if args.resp:
+        _resp = load_engine_module("resp.motion_profiles")
+        engines.append((_resp.RespirationMotionProfiles(str(POSE_MODEL_PATH)),
+                        {"analysis_fps": 10}))
 
     # Opt-in, because it is the slowest thing in the pipeline by a wide margin:
     # ~0.25s per analysed frame on CPU against a few milliseconds for the others.
@@ -226,6 +238,19 @@ def main() -> int:
             print(f"    gate         {'PASS' if g['passed'] else 'FAIL'} {g['reasons']}")
         else:
             print(f"    {g.get('refusal') or g.get('reasons')}")
+
+    if args.resp:
+        q = read_session(args.out, bundle.session_id, "quality")
+        resp_q = {r["metric"]: r["value"] for r in q.to_pylist()
+                  if r["source"].startswith("resp.")}
+        if resp_q:
+            print("\n  respiration    waveform only — NO breathing rate is emitted")
+            print(f"    ROI found    {resp_q.get('roi_found_rate', 0):.0%} of analysed frames")
+            print(f"    usable       {resp_q.get('usable_fraction', 0):.0%} of segments")
+            print(f"    analysis     {resp_q.get('analysis_fps', 0):.1f} Hz"
+                  f"   luma {resp_q.get('mean_luminance', 0):.0f}")
+            print("    rate         withheld: no validation study exists "
+                  "(see engine.manifest.json)")
 
     print("\n  M0 criterion on REAL data: "
           f"{'PASS' if len(srcs) >= 2 else 'FAIL'} "

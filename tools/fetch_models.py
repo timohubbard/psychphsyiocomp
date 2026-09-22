@@ -47,6 +47,21 @@ MODELS = [
             "re-verify before any commercial ship. Flagged, not assumed."
         ),
     ),
+    Model(
+        name="pose_landmarker",
+        url=(
+            "https://storage.googleapis.com/mediapipe-models/pose_landmarker/"
+            "pose_landmarker_lite/float16/1/pose_landmarker_lite.task"
+        ),
+        dest=MODELS_DIR / "pose_landmarker.task",
+        licence_note=(
+            "Distributed by Google with MediaPipe (library is Apache-2.0). Same "
+            "unverified-bundle caveat as the face model. Used ONLY to locate the "
+            "shoulder line for a respiration ROI — no identity, no pose "
+            "classification, and nothing about the body is retained beyond two "
+            "keypoints per frame."
+        ),
+    ),
 ]
 
 

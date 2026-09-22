@@ -1,0 +1,100 @@
+{
+  "engine_id": "resp.motion_profiles",
+  "version": "0.1.0",
+  "modality": "respiration",
+  "runtime": "python-cpu",
+  "placement": "server-batch",
+  "determinism": "deterministic",
+
+  "inputs": [
+    {
+      "kind": "video",
+      "min_fps": 5,
+      "min_resolution": { "width": 320, "height": 240 },
+      "min_roi_luminance": 30
+    }
+  ],
+
+  "params_schema": {
+    "type": "object",
+    "properties": {
+      "analysis_fps": { "type": "number", "default": 10,
+        "description": "Frames per second actually analysed. The breathing band tops out at 0.5 Hz, so 10 fps is twenty times Nyquist and the rest is cost. Recorded rather than assumed." },
+      "grid": { "type": "array", "default": [4, 4],
+        "description": "ROI subdivision. §2.4's one surviving algorithmic finding is that MULTIPLE motion profiles outperform a single combined 1D profile, so the grid exists to be kept apart and fused late." },
+      "top_k_cells": { "type": "integer", "default": 4,
+        "description": "How many cells contribute, ranked by in-band power share." },
+      "emit_rate_bpm": { "type": "boolean", "default": false,
+        "description": "OFF BY DEFAULT AND MUST STAY THAT WAY until a validation study exists. See capability_notes.no_validated_rate." }
+    },
+    "additionalProperties": false
+  },
+
+  "outputs": {
+    "signals": [
+      {
+        "channel": "respiration.waveform",
+        "unit": "normalised",
+        "nominal_rate_hz": 25,
+        "value_type": "float",
+        "reliability_tier": "low",
+        "description": "Fused chest/shoulder motion over the breathing band. The more valuable of the two possible outputs: it supports inhale-onset, breath-hold and sigh events, none of which need a calibrated rate. Tiered LOW because no verified accuracy figure exists for this method anywhere — see capability_notes."
+      },
+      {
+        "channel": "respiration.periodicity",
+        "unit": "proportion",
+        "nominal_rate_hz": 0.2,
+        "value_type": "float",
+        "reliability_tier": "moderate",
+        "description": "In-band power share of the best contributing cell. The primary confidence signal: a chest moving with a breath has most of its energy in band, a static background has none, and an arm gesture has a broadband burst."
+      },
+      {
+        "channel": "respiration.cells_used",
+        "unit": "count",
+        "nominal_rate_hz": 0.2,
+        "value_type": "float",
+        "reliability_tier": "high",
+        "description": "How many grid cells contributed to this segment. One cell is a much weaker claim than four."
+      },
+      {
+        "channel": "respiration.gross_motion",
+        "unit": "normalised",
+        "nominal_rate_hz": 0.2,
+        "value_type": "float",
+        "reliability_tier": "high",
+        "description": "Whole-ROI motion magnitude. Distinguishes breathing from a participant shifting in their seat, which dominates the ROI and makes the waveform meaningless rather than noisy."
+      }
+    ],
+    "events": [
+      { "event_type": "roi_lost", "description": "No shoulder line could be located", "has_offset": true }
+    ],
+    "quality": [
+      { "metric": "analysis_fps", "unit": "hz", "warn_below": 2,
+        "description": "Effective analysis rate. Below ~2 Hz there are too few samples per breath for the waveform shape to survive." },
+      { "metric": "roi_found_rate", "unit": "proportion", "warn_below": 0.5,
+        "description": "Fraction of analysed frames where a shoulder line was located. Most at-home framing is head-and-shoulders, so shoulder-line motion is often the only chest signal available — a different regime from the clinical chest-camera papers, and probably why no published figure transfers." },
+      { "metric": "usable_fraction", "unit": "proportion", "warn_below": 0.3,
+        "description": "Fraction of segments passing every confidence check." },
+      { "metric": "mean_luminance", "unit": "level", "warn_below": 30,
+        "description": "§2.5: the evidence base's only quantified bias mitigation, and this is another camera-based physiological measurement." }
+    ]
+  },
+
+  "license": {
+    "spdx": "Apache-2.0",
+    "commercial_use": "yes",
+    "url": "https://github.com/google-ai-edge/mediapipe",
+    "notes": "Own implementation. MediaPipe Pose (Apache-2.0) is used ONLY to locate the shoulder line for the ROI — no identity, no pose classification, and nothing about the body is retained beyond two keypoints per frame. The .task bundle's own licence line was NOT verified, same caveat as the other MediaPipe models. Dense optical flow is OpenCV's Farneback, also permissive."
+  },
+
+  "provenance": {
+    "training_datasets": [],
+    "paper_doi": null
+  },
+
+  "capability_notes": {
+    "no_validated_rate": "THIS ENGINE DOES NOT EMIT A BREATHING RATE BY DEFAULT, and the flag that enables it should stay off. §2.4: after two dedicated research passes, NO verified breaths-per-minute accuracy figure against a chest belt, RIP or spirometry survived adversarial checking — one specific figure was explicitly REFUTED. A breathing rate is a number a clinician would recognise, and emitting one this project cannot defend would be the most damaging thing it could ship. The waveform and its confidence channels are the honest output until a validation study lands: simultaneous webcam and RIP belt, Bland-Altman on 60s windows plus waveform cross-correlation, N around 30-40 stratified on skin tone, clothing, distance and framing.",
+    "not_rppg": "§2.4 corrects a common premise: iMotions' respiration is NOT rPPG. It is chest/shoulder-motion ROI tracking band-passed to roughly 7.5-30 cycles/min, architecturally distinct from and far more compression-robust than facial rPPG for heart rate. They are two separate engineering problems and this engine is only the first.",
+    "legal_risk": "§6.3: respiration output is plausibly health data under GDPR Art. 4(15) even without an identification purpose, because Art. 9's health-data limb does not carry the same identification qualifier as the biometric limb. Treat physiological outputs as HIGHER legal risk than gaze, facial or voice, pending counsel review."
+  }
+}
