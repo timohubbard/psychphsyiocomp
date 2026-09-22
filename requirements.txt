@@ -1,0 +1,14 @@
+# Server-side engine dependencies. Python 3.11+ (verified on 3.14.7).
+#
+# Install:  py -m venv .venv && .venv/Scripts/python.exe -m pip install -r requirements.txt
+# Models:   .venv/Scripts/python.exe tools/fetch_models.py
+
+mediapipe>=1.0.1        # Apache-2.0 library. .task model bundle licence NOT verified — see README.
+pyarrow>=25.0.0         # Parquet writer for the canonical tables
+pytest>=8.0             # test runner
+tzdata                  # IANA timezone DB — Windows Python does not ship it, and
+                        # pyarrow needs it to read back the tz-aware timestamps
+                        # in the runs table. Required at runtime, not just tests.
+
+# Pulled in transitively by mediapipe, pinned here for visibility:
+#   opencv-contrib-python, numpy, matplotlib, absl-py, sounddevice

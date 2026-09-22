@@ -1,0 +1,22 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+
+# Model bundles are fetched, not committed — see tools/fetch_models.py
+models/
+
+# Captured media and derived data never belong in the repo. Participant video
+# is identifiable biometric data (REPORT.md §6.4); face blurring alone does not
+# de-identify it.
+data/
+sessions/
+*.mp4
+*.webm
+*.wav
+
+# Third-party papers, kept locally but not redistributed. The research/*.md
+# passes cite each one by title and DOI, so the evidence trail survives without
+# the repo carrying someone else's copyrighted PDFs into a public history.
+research/sources/

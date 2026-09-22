@@ -1,0 +1,12 @@
+# Normalise line endings in the repo, check out native on each platform.
+# This project is authored on Windows but the venv launcher, the server and the
+# engines all have to run on Linux CI and macOS too; without this, every
+# checkout on another platform shows every file as modified.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.pdf binary
+*.task binary
+*.wasm binary
+*.parquet binary

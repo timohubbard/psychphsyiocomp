@@ -1,0 +1,86 @@
+{
+  "engine_id": "face.mediapipe_blendshapes",
+  "version": "0.1.0",
+  "modality": "face",
+  "runtime": "wasm",
+  "placement": "browser-live",
+  "determinism": "deterministic",
+
+  "inputs": [
+    {
+      "kind": "video",
+      "min_fps": 5,
+      "min_resolution": { "width": 320, "height": 240 },
+      "min_roi_luminance": 30
+    }
+  ],
+
+  "params_schema": {
+    "type": "object",
+    "properties": {
+      "min_face_detection_confidence": { "type": "number", "default": 0.5 },
+      "min_face_presence_confidence": { "type": "number", "default": 0.5 },
+      "min_tracking_confidence": { "type": "number", "default": 0.5 },
+      "output_facial_transformation_matrixes": { "type": "boolean", "default": true }
+    },
+    "additionalProperties": false
+  },
+
+  "outputs": {
+    "signals": [
+      {
+        "channel": "blendshape.*",
+        "unit": "score",
+        "nominal_rate_hz": 30,
+        "value_type": "float",
+        "range": [0, 1],
+        "reliability_tier": "moderate",
+        "description": "52 ARKit-style blendshape coefficients. NOT FACS action units. Several map near-1:1 (browDown~AU4, cheekSquint~AU6, mouthSmile~AU12) but the mapping is unvalidated, so these are emitted under blendshape.* names and must never be relabelled as AUs."
+      },
+      {
+        "channel": "head_pose.yaw",
+        "unit": "deg",
+        "nominal_rate_hz": 30,
+        "value_type": "float",
+        "reliability_tier": "high"
+      },
+      {
+        "channel": "head_pose.pitch",
+        "unit": "deg",
+        "nominal_rate_hz": 30,
+        "value_type": "float",
+        "reliability_tier": "high"
+      },
+      {
+        "channel": "head_pose.roll",
+        "unit": "deg",
+        "nominal_rate_hz": 30,
+        "value_type": "float",
+        "reliability_tier": "high"
+      }
+    ],
+    "events": [
+      { "event_type": "face_lost", "description": "Face detection dropped below presence confidence", "has_offset": true }
+    ],
+    "quality": [
+      { "metric": "achieved_fps", "unit": "hz", "warn_below": 5,
+        "description": "Measured per session, never assumed. REPORT.md §2.1 measured 9-39 fps jittered across home setups; §5.3 uses 5 Hz as a published exclusion threshold." },
+      { "metric": "face_detect_rate", "unit": "proportion", "warn_below": 0.5,
+        "description": "Fraction of frames with a face above presence confidence. §2.2 measured 43% (AFFDEX) vs 62-63% (FaceReader/Py-Feat) on identical video." },
+      { "metric": "mean_luminance", "unit": "level", "warn_below": 30,
+        "description": "§2.5: the rPPG skin-tone accuracy gap largely closes at luminance >=30 (2.25 bpm -> 0.21 bpm). The only quantified bias mitigation in the evidence base." }
+    ]
+  },
+
+  "license": {
+    "spdx": "Apache-2.0",
+    "commercial_use": "yes",
+    "url": "https://github.com/google-ai-edge/mediapipe",
+    "notes": "Apache-2.0 covers the library. The .task model bundle's own licence line was NOT verified during research — re-verify before any commercial ship. Flagged rather than assumed."
+  },
+
+  "provenance": {
+    "training_datasets": [],
+    "paper_doi": null
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "open-behavioral-platform",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Open-source webcam-based behavioral research platform — an iMotions-equivalent built from open components. Academic / non-profit build.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "node --test \"engines/**/*.test.mjs\" \"packages/**/*.test.mjs\" \"web/**/*.test.mjs\"",
+    "licenses": "node tools/license-inventory/report.mjs",
+    "licenses:json": "node tools/license-inventory/report.mjs --json",
+    "licenses:commercial-gate": "node tools/license-inventory/report.mjs --fail-on-restricted",
+    "check": "npm run licenses && npm run test:all && npm run verify:m0",
+    "test:py": "node tools/py.mjs -m pytest",
+    "test:all": "npm test && npm run test:py",
+    "models": "node tools/py.mjs tools/fetch_models.py",
+    "py": "node tools/py.mjs",
+    "verify:m0": "node tools/py.mjs server/verify_m0.py",
+    "serve": "node tools/serve.mjs"
+  }
+}

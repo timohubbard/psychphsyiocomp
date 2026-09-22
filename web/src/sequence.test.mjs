@@ -1,0 +1,210 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+
+import {
+  CALIBRATION_POINTS,
+  VALIDATION_POINTS,
+  TIMINGS,
+  buildM0Sequence,
+  clapperCount,
+  errorInDegrees,
+  estimateDurationMs,
+  evaluateCalibration,
+} from './sequence.js';
+
+// ---------------------------------------------------------------------------
+// calibration grid
+// ---------------------------------------------------------------------------
+
+test('calibration grid takes the 9->12 gain without paying for the flat part', () => {
+  // §2.1: largest single improvement is 9->12 points; 12->18 is marginal.
+  assert.ok(CALIBRATION_POINTS.length >= 12,
+    `expected >=12 points, got ${CALIBRATION_POINTS.length}`);
+  assert.ok(CALIBRATION_POINTS.length <= 18);
+});
+
+test('all calibration points sit inside the viewport', () => {
+  for (const [x, y] of CALIBRATION_POINTS) {
+    assert.ok(x >= 0 && x <= 1, `x out of range: ${x}`);
+    assert.ok(y >= 0 && y <= 1, `y out of range: ${y}`);
+  }
+});
+
+test('calibration points are distinct', () => {
+  const seen = new Set(CALIBRATION_POINTS.map(([x, y]) => `${x},${y}`));
+  assert.equal(seen.size, CALIBRATION_POINTS.length, 'duplicate calibration point');
+});
+
+test('calibration covers all four quadrants and the centre', () => {
+  const has = (pred) => CALIBRATION_POINTS.some(pred);
+  assert.ok(has(([x, y]) => x < 0.5 && y < 0.5), 'no top-left point');
+  assert.ok(has(([x, y]) => x > 0.5 && y < 0.5), 'no top-right point');
+  assert.ok(has(([x, y]) => x < 0.5 && y > 0.5), 'no bottom-left point');
+  assert.ok(has(([x, y]) => x > 0.5 && y > 0.5), 'no bottom-right point');
+  assert.ok(has(([x, y]) => x === 0.5 && y === 0.5), 'no centre point');
+});
+
+// ---------------------------------------------------------------------------
+// validation must measure generalisation, not memorisation
+// ---------------------------------------------------------------------------
+
+test('validation points are NOT a subset of calibration points', () => {
+  const calib = new Set(CALIBRATION_POINTS.map(([x, y]) => `${x},${y}`));
+  const overlap = VALIDATION_POINTS.filter(([x, y]) => calib.has(`${x},${y}`));
+  assert.equal(overlap.length, 0,
+    `validating on fitted coordinates measures memorisation: ${JSON.stringify(overlap)}`);
+});
+
+test('validation points stay inside the viewport', () => {
+  for (const [x, y] of VALIDATION_POINTS) {
+    assert.ok(x >= 0 && x <= 1 && y >= 0 && y <= 1);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// sequence structure
+// ---------------------------------------------------------------------------
+
+test('sequence bookends the session with two clappers', () => {
+  // One anchor gives offset only; two let the aligner fit clock drift.
+  const seq = buildM0Sequence();
+  assert.equal(clapperCount(seq), 2);
+  assert.equal(seq[0].type, 'sync_clapper', 'first stage must be a clapper');
+  assert.equal(seq[seq.length - 1].type, 'sync_clapper', 'last stage must be a clapper');
+});
+
+test('sequence contains every calibration and validation point', () => {
+  const seq = buildM0Sequence();
+  assert.equal(
+    seq.filter((s) => s.type === 'calibration_point').length,
+    CALIBRATION_POINTS.length,
+  );
+  assert.equal(
+    seq.filter((s) => s.type === 'validation_point').length,
+    VALIDATION_POINTS.length,
+  );
+});
+
+test('calibration precedes validation', () => {
+  const seq = buildM0Sequence();
+  const lastCalib = seq.map((s) => s.type).lastIndexOf('calibration_point');
+  const firstValid = seq.map((s) => s.type).indexOf('validation_point');
+  assert.ok(lastCalib < firstValid, 'cannot validate before calibrating');
+});
+
+test('every stage has a unique id', () => {
+  const ids = buildM0Sequence().map((s) => s.id);
+  assert.equal(new Set(ids).size, ids.length, 'duplicate stage id');
+});
+
+test('duration estimate is plausible and dominated by the fixation block', () => {
+  const total = estimateDurationMs(buildM0Sequence());
+  assert.ok(total > TIMINGS.fixationMs, 'must exceed the fixation block alone');
+  assert.ok(total < 5 * 60_000, `M0 session should stay under 5 min, got ${total}ms`);
+});
+
+// ---------------------------------------------------------------------------
+// error in degrees — refuses to guess without geometry
+// ---------------------------------------------------------------------------
+
+const GEOMETRY = {
+  viewingDistanceMm: 500,
+  pxPerMm: 4,
+  viewportWidthPx: 1280,
+  viewportHeightPx: 720,
+};
+
+test('perfect estimate yields zero error', () => {
+  const e = errorInDegrees({ x: 0.5, y: 0.5 }, { x: 0.5, y: 0.5 }, GEOMETRY);
+  assert.equal(e, 0);
+});
+
+test('error grows with displacement', () => {
+  const near = errorInDegrees({ x: 0.5, y: 0.5 }, { x: 0.52, y: 0.5 }, GEOMETRY);
+  const far = errorInDegrees({ x: 0.5, y: 0.5 }, { x: 0.6, y: 0.5 }, GEOMETRY);
+  assert.ok(far > near);
+});
+
+test('a known displacement gives the expected angle', () => {
+  // 0.5 -> 0.6 of 1280px = 128px; at 4px/mm that is 32mm; atan(32/500) ~ 3.66deg
+  const e = errorInDegrees({ x: 0.5, y: 0.5 }, { x: 0.6, y: 0.5 }, GEOMETRY);
+  assert.ok(Math.abs(e - 3.66) < 0.05, `expected ~3.66deg, got ${e}`);
+});
+
+test('returns null without viewing distance rather than assuming one', () => {
+  // §5.1: viewing distance across 1,153 online participants was mean 47.3cm
+  // with SD 8.9 — a nominal value produces a dva figure that is not a dva figure.
+  const e = errorInDegrees(
+    { x: 0.5, y: 0.5 }, { x: 0.6, y: 0.5 },
+    { ...GEOMETRY, viewingDistanceMm: null },
+  );
+  assert.equal(e, null);
+});
+
+test('returns null without pixel scale', () => {
+  const e = errorInDegrees(
+    { x: 0.5, y: 0.5 }, { x: 0.6, y: 0.5 },
+    { ...GEOMETRY, pxPerMm: null },
+  );
+  assert.equal(e, null);
+});
+
+test('closer viewing distance means larger angular error for the same pixels', () => {
+  const near = errorInDegrees({ x: 0.5, y: 0.5 }, { x: 0.6, y: 0.5 },
+    { ...GEOMETRY, viewingDistanceMm: 300 });
+  const far = errorInDegrees({ x: 0.5, y: 0.5 }, { x: 0.6, y: 0.5 },
+    { ...GEOMETRY, viewingDistanceMm: 700 });
+  assert.ok(near > far, 'angular error must scale with viewing distance');
+});
+
+// ---------------------------------------------------------------------------
+// calibration gate
+// ---------------------------------------------------------------------------
+
+const CRITERIA = { maxMeanErrorDeg: 3.0, minPointsMeasured: 8 };
+
+test('good calibration passes', () => {
+  const r = evaluateCalibration([1.0, 1.2, 0.9, 1.5, 1.1, 1.3, 1.0, 1.4], CRITERIA);
+  assert.ok(r.pass);
+  assert.ok(r.meanErrorDeg < 3.0);
+});
+
+test('poor calibration fails with the threshold named', () => {
+  const r = evaluateCalibration([4.0, 5.0, 4.5, 6.0, 5.5, 4.2, 5.1, 4.8], CRITERIA);
+  assert.equal(r.pass, false);
+  assert.equal(r.reason, 'error_above_threshold');
+  assert.ok(r.detail.includes('3'), 'detail should name the threshold');
+});
+
+test('too few measured points fails distinctly from being inaccurate', () => {
+  // A tracker that lost the face is a different problem from one that is
+  // merely imprecise, and the retry advice differs.
+  const r = evaluateCalibration([1.0, 1.2, null, null, null, null, null, null], CRITERIA);
+  assert.equal(r.pass, false);
+  assert.equal(r.reason, 'insufficient_points');
+  assert.equal(r.meanErrorDeg, null);
+});
+
+test('nulls are excluded from the mean rather than counted as zero', () => {
+  const withNulls = evaluateCalibration(
+    [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, null, null], CRITERIA);
+  assert.ok(Math.abs(withNulls.meanErrorDeg - 2.0) < 1e-9,
+    `nulls must not drag the mean down, got ${withNulls.meanErrorDeg}`);
+});
+
+test('non-finite values are treated as unmeasured', () => {
+  const r = evaluateCalibration(
+    [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, Infinity, NaN], CRITERIA);
+  assert.ok(Number.isFinite(r.meanErrorDeg));
+  assert.ok(Math.abs(r.meanErrorDeg - 1.0) < 1e-9);
+});
+
+test('the gate carries no default threshold of its own', () => {
+  // §5.3: jsPsych publishes no pass/fail cutoff, so shipping one here would be
+  // inventing a standard. The caller must pre-register it.
+  assert.throws(
+    () => evaluateCalibration([1, 2, 3], undefined),
+    /Cannot read|undefined/,
+    'criteria must be required, not defaulted',
+  );
+});

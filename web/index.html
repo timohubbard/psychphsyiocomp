@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session capture</title>
+<style>
+  :root {
+    --bg: #101216;
+    --fg: #e8eaed;
+    --muted: #9aa0a6;
+    --accent: #4c8dff;
+    --ok: #5cb85c;
+    --warn: #e0a800;
+    --bad: #d9534f;
+    --panel: #181b21;
+    --border: #262a31;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background: var(--bg); color: var(--fg);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  #app { height: 100%; display: flex; flex-direction: column; }
+
+  .panel {
+    max-width: 640px; margin: auto; padding: 32px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 24px 0 8px; font-weight: 600; }
+  p { color: var(--muted); margin: 0 0 16px; }
+
+  button {
+    background: var(--accent); color: #fff; border: 0;
+    padding: 11px 20px; border-radius: 6px; font-size: 15px; cursor: pointer;
+  }
+  button:disabled { background: #3a4048; cursor: not-allowed; }
+  button.secondary { background: transparent; border: 1px solid var(--border); color: var(--fg); }
+
+  /* Stimulus surface — deliberately bare. Anything decorative here competes
+     with the stimulus for attention and pollutes the gaze signal. */
+  #stage {
+    flex: 1; position: relative; background: #7f7f7f;
+    display: none; cursor: none;
+  }
+  #stage.active { display: block; }
+  #target {
+    position: absolute; width: 26px; height: 26px; margin: -13px 0 0 -13px;
+    border-radius: 50%; background: #111;
+    box-shadow: 0 0 0 5px #fff, 0 0 0 7px #111;
+    transition: opacity .12s;
+  }
+  #target .inner {
+    position: absolute; inset: 9px; border-radius: 50%; background: #fff;
+  }
+  #fixation {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    font-size: 44px; color: #111; display: none;
+  }
+  #flash {
+    position: absolute; inset: 0; background: #fff;
+    display: none; z-index: 10;
+  }
+  #stageText {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+    max-width: 30em; text-align: center; color: #111; font-size: 18px;
+    display: none;
+  }
+
+  #hud {
+    position: fixed; right: 12px; bottom: 12px; z-index: 20;
+    background: rgba(16,18,22,.94); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px; font-size: 12px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    color: var(--muted); display: none; min-width: 210px;
+  }
+  #hud.visible { display: block; }
+  #hud .row { display: flex; justify-content: space-between; gap: 14px; }
+  #hud .v { color: var(--fg); }
+  #hud .v.ok { color: var(--ok); }
+  #hud .v.warn { color: var(--warn); }
+  #hud .v.bad { color: var(--bad); }
+
+  #preview { width: 100%; border-radius: 8px; background: #000; transform: scaleX(-1); }
+  .checks { list-style: none; padding: 0; margin: 16px 0 0; }
+  .checks li { display: flex; justify-content: space-between; padding: 7px 0;
+               border-bottom: 1px solid var(--border); }
+  .checks .state { font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .note { font-size: 13px; color: var(--muted); border-left: 2px solid var(--border);
+          padding-left: 12px; margin-top: 18px; }
+  code { background: #22262d; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- Consent and setup -->
+  <div class="panel" id="setupPanel">
+    <h1>Session capture</h1>
+    <p>This records video and audio from your camera and microphone.</p>
+
+    <div class="note" id="consentNote">
+      Your recording is processed to derive gaze, facial-movement and voice
+      measurements. Video and audio are identifiable data — face blurring alone
+      does not anonymise a recording. You can stop at any time, and nothing is
+      uploaded until you choose to finish.
+    </div>
+
+    <h2>Camera check</h2>
+    <video id="preview" autoplay muted playsinline></video>
+    <ul class="checks">
+      <li><span>Camera and microphone</span><span class="state" id="chkStream">—</span></li>
+      <li><span>Lighting</span><span class="state" id="chkLight">—</span></li>
+      <li><span>Frame rate</span><span class="state" id="chkFps">—</span></li>
+      <li><span>Audio processing disabled</span><span class="state" id="chkAudio">—</span></li>
+    </ul>
+
+    <div class="note">
+      Lighting is checked because measurement accuracy depends on it, and that
+      dependence is not evenly distributed — camera-based physiological signals
+      degrade more for darker skin tones in dim light, and the gap largely
+      closes under good lighting. Facing a window or lamp rather than sitting
+      with one behind you makes the measurement fairer, not just cleaner.
+    </div>
+
+    <p style="margin-top:22px">
+      <button id="btnEnable">Enable camera</button>
+      <button id="btnStart" class="secondary" disabled>Begin session</button>
+    </p>
+  </div>
+
+  <!-- Stimulus surface -->
+  <div id="stage">
+    <div id="flash"></div>
+    <div id="target"><div class="inner"></div></div>
+    <div id="fixation">+</div>
+    <div id="stageText"></div>
+  </div>
+
+  <!-- Completion -->
+  <div class="panel" id="donePanel" style="display:none">
+    <h1>Session complete</h1>
+    <p>Nothing has left your machine. Download the bundle to hand to the
+       processing pipeline.</p>
+    <ul class="checks" id="summary"></ul>
+    <p style="margin-top:22px">
+      <button id="btnDownload">Download session bundle</button>
+    </p>
+    <div class="note">
+      Run it through the pipeline with:
+      <br><code>node tools/py.mjs server/verify_m0.py</code>
+    </div>
+  </div>
+
+</div>
+
+<div id="hud">
+  <div class="row"><span>fps</span><span class="v" id="hudFps">—</span></div>
+  <div class="row"><span>face</span><span class="v" id="hudFace">—</span></div>
+  <div class="row"><span>luma</span><span class="v" id="hudLuma">—</span></div>
+  <div class="row"><span>stage</span><span class="v" id="hudStage">—</span></div>
+</div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>

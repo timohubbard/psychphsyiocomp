@@ -1,0 +1,9 @@
+{
+  "name": "@platform/engine-contract",
+  "version": "0.1.0",
+  "description": "Engine contract types — single source of truth",
+  "type": "module",
+  "main": "src/manifest.ts",
+  "types": "src/manifest.ts",
+  "license": "MIT"
+}
