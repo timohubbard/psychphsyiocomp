@@ -288,6 +288,17 @@ def main() -> int:
         stages.append(("transcript", _transcript_stage_factory(
             WHISPER_DIR, {"model_size": args.whisper_model})))
 
+    # A rerun replaces the session's tables wholesale (tables.CanonicalWriter),
+    # so a stage left off this time loses its earlier output. Said up front,
+    # because a rerun "just to refresh the transcript" would otherwise quietly
+    # drop fifteen minutes of AU inference.
+    existing = sorted(p.name.split("=", 1)[1] for p in
+                      (args.out / f"session_id={bundle.session_id}").glob("stream=*")
+                      if any(p.glob("*.parquet")))
+    if existing:
+        print(f"\n  replacing existing output for this session (streams: "
+              f"{', '.join(existing)}) — stages not run now will be absent")
+
     summary = process_session(bundle, engines, args.out, video_luma=luma,
                               extra_stages=stages)
 

@@ -24,10 +24,11 @@
  * Needs `npm run serve` running.
  */
 
-import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+
+import { launch } from './cdp.mjs';
 
 const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, all) => {
   if (a.startsWith('--')) acc.push([a.slice(2), all[i + 1]?.startsWith('--') || all[i + 1] === undefined ? true : all[i + 1]]);
@@ -36,49 +37,24 @@ const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, all) =>
 const STUDY = args.study ?? 'au-expressions';
 const PORT = Number(args.port ?? 5173);
 const OUT = resolve(args.out ?? join('tempdata', `smoke-${STUDY}`));
-const DEBUG_PORT = 9333;
 const TIMEOUT_MS = Number(args['timeout-s'] ?? 900) * 1000;
 
-const CHROME_CANDIDATES = [
-  process.env.CHROME,
-  'C:/Program Files/Google/Chrome/Application/chrome.exe',
-  'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  '/usr/bin/google-chrome',
-].filter(Boolean);
 
 function log(msg) { console.log(`  ${msg}`); }
 
 async function main() {
-  const chrome = CHROME_CANDIDATES.find((p) => existsSync(p));
-  if (!chrome) throw new Error('no Chrome found; set CHROME=<path>');
-
   rmSync(OUT, { recursive: true, force: true });
   mkdirSync(OUT, { recursive: true });
-  const profile = resolve('tempdata', 'chrome-smoke-profile');
-  rmSync(profile, { recursive: true, force: true });
 
-  const proc = spawn(chrome, [
-    ...(args.headed ? [] : ['--headless=new']),
-    `--remote-debugging-port=${DEBUG_PORT}`,
-    `--user-data-dir=${profile}`,
-    '--use-fake-device-for-media-stream',
-    '--use-fake-ui-for-media-stream',
-    '--autoplay-policy=no-user-gesture-required',
-    // A backgrounded tab suspends rAF and rVFC entirely (measured on this
-    // project), and the clapper waits on a painted frame.
-    '--disable-background-timer-throttling',
-    '--disable-renderer-backgrounding',
-    '--disable-backgrounding-occluded-windows',
-    '--window-size=1280,800',
-    'about:blank',
-  ], { stdio: 'ignore' });
+  const { proc, page, browser } = await launch({
+    headed: !!args.headed, profileName: 'chrome-smoke-profile',
+    extraArgs: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
+  });
 
   try {
-    const page = await connect();
     await page.send('Page.enable');
     await page.send('Runtime.enable');
-    await page.browser.send('Browser.setDownloadBehavior', {
+    await browser.send('Browser.setDownloadBehavior', {
       behavior: 'allow', downloadPath: OUT, eventsEnabled: true,
     });
 
@@ -101,19 +77,8 @@ async function main() {
     log(`opening ${url}`);
     await page.send('Page.navigate', { url });
 
-    const js = async (expr) => {
-      const r = await page.send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true });
-      if (r.exceptionDetails) throw new Error(`page threw: ${r.exceptionDetails.text}`);
-      return r.result.value;
-    };
-    const until = async (expr, what, ms = 30_000) => {
-      const end = Date.now() + ms;
-      while (Date.now() < end) {
-        if (await js(expr).catch(() => false)) return;
-        await sleep(250);
-      }
-      throw new Error(`timed out waiting for ${what}`);
-    };
+    const js = (expr) => page.js(expr);
+    const until = (expr, what, ms) => page.until(expr, what, ms);
 
     await until(`document.getElementById('protocolLine')?.textContent.includes('${STUDY}')`,
       `the protocol line to name ${STUDY}`);
@@ -228,49 +193,6 @@ function printReport({ facts, failures }) {
   console.log('  ' + '-'.repeat(60));
   console.log(failures.length ? `  FAIL\n${failures.map((f) => `    - ${f}`).join('\n')}` : '  PASS');
   console.log();
-}
-
-/** Attach to the first page target and to the browser, over CDP. */
-async function connect() {
-  let version;
-  for (let i = 0; i < 60 && !version; i += 1) {
-    try { version = await (await fetch(`http://127.0.0.1:${DEBUG_PORT}/json/version`)).json(); } catch { await sleep(250); }
-  }
-  if (!version) throw new Error('Chrome did not open its debugging port');
-  const targets = await (await fetch(`http://127.0.0.1:${DEBUG_PORT}/json/list`)).json();
-  const pageTarget = targets.find((t) => t.type === 'page');
-  const page = await cdp(pageTarget.webSocketDebuggerUrl);
-  page.browser = await cdp(version.webSocketDebuggerUrl);
-  return page;
-}
-
-function cdp(wsUrl) {
-  const ws = new WebSocket(wsUrl);
-  let id = 0;
-  const pending = new Map();
-  const handlers = new Map();
-  ws.onmessage = (m) => {
-    const msg = JSON.parse(m.data);
-    if (msg.id && pending.has(msg.id)) {
-      const { ok, fail } = pending.get(msg.id);
-      pending.delete(msg.id);
-      if (msg.error) fail(new Error(`${msg.error.message} (${msg.error.code})`));
-      else ok(msg.result);
-    } else if (msg.method) {
-      for (const h of handlers.get(msg.method) ?? []) h(msg.params);
-    }
-  };
-  const open = new Promise((ok, fail) => { ws.onopen = ok; ws.onerror = fail; });
-  return {
-    async send(method, params = {}) {
-      await open;
-      id += 1;
-      const myId = id;
-      ws.send(JSON.stringify({ id: myId, method, params }));
-      return new Promise((ok, fail) => pending.set(myId, { ok, fail }));
-    },
-    on(method, h) { handlers.set(method, [...(handlers.get(method) ?? []), h]); },
-  };
 }
 
 if (process.argv[1]?.replace(/\\/g, '/').endsWith('tools/smoke_capture.mjs')) {
