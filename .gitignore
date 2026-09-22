@@ -10,11 +10,22 @@ models/
 # Captured media and derived data never belong in the repo. Participant video
 # is identifiable biometric data (REPORT.md §6.4); face blurring alone does not
 # de-identify it.
+#
+# The DERIVED data is covered too, and deliberately so. An extension-based rule
+# caught capture.webm but not the session.json and browser_chunks.json beside
+# it — and a chunks file is hundreds of thousands of facial-measurement rows,
+# which is behavioural biometric data whether or not a face is visible in it.
+# Ignoring the container, not the extension, is the rule that actually holds.
 data/
 sessions/
+tempdata/
+captures/
 *.mp4
 *.webm
 *.wav
+session.json
+browser_chunks.json
+*.parquet
 
 # Third-party papers, kept locally but not redistributed. The research/*.md
 # passes cite each one by title and DOI, so the evidence trail survives without
