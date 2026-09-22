@@ -65,7 +65,7 @@ PASS. `npm run verify:gaze` → GAZE GATE PASS.
 | AOIs, Holmqvist metrics, and an in-app editor | done |
 | Researcher app — scanpath, AOI editor | done |
 | Eval harness — kappa, human ceiling, refusals | done |
-| Human-annotation UI for collecting the reference labels | not started |
+| Human-annotation UI for collecting the reference labels | done, playback unverified |
 | L2CS-Net fine-tune | not started |
 | M2 — `face.pyfeat_aus`, per-AU reliability tiers | done |
 | M2 — inter-engine agreement + relative proportions | done |
@@ -223,6 +223,61 @@ Refusals throughout, in the project's usual shape: too few items, a single
 category both coders used for everything, ragged rater lists, an unknown
 ceiling statistic. A `Refusal` is falsy, so a caller cannot use one as a score
 by accident.
+
+### Collecting the human labels
+
+`web/researcher/annotate.html` is the coding arm. A coder picks a codebook, a
+session and a rater ID, then answers one categorical question per moment. The
+interaction is deliberately that small, because this is the reference standard
+everything else is measured against and anything that biases a coder biases
+every accuracy figure downstream.
+
+Four things it will not do, each because doing it inflates the ceiling
+silently rather than visibly:
+
+- **Show another rater's labels.** Independence is what every agreement
+  coefficient assumes. There is no API route that would return them, so this
+  is enforced rather than observed.
+- **Show the engine's prediction.** A coder who can see what the model said is
+  scoring the model's confidence, and the resulting agreement is circular.
+- **Preselect anything, or offer "unsure".** A default is the answer a tired
+  coder gives, and one that matches the majority manufactures agreement.
+- **Let a coder skip ahead to the easy items.** They can stop and resume; a
+  ceiling measured on the easy half is not the ceiling.
+
+Labels are filed per (codebook version, session, rater) — never merged at
+write time, because merging destroys the disagreement the reference standard
+exists to measure and it cannot be recovered afterwards. Codebooks are hashed
+over their categories *and* their item list: the hash is the directory
+annotations are filed under, so leaving items out meant two coders who coded
+different moments would pool as though they had coded the same ones. A test
+caught that.
+
+An item any rater left blank is dropped from the matrix rather than imputed.
+Filling it with the majority would manufacture agreement out of someone's
+uncertainty.
+
+The app serves recordings for this with `--media <dir>`, and refuses with a
+**403 rather than a 404** when the consent tier did not retain the recording —
+"the participant said no" and "the file is missing" are different facts and a
+UI that showed one message for both would teach people to treat a refusal as a
+glitch.
+
+**Playback is remuxed before it is served.** A MediaRecorder WebM has no
+duration in its header and no cue index, so Chrome sits at `readyState 0` with
+nothing buffered rather than failing — it looks like a slow network. A
+stream-copy remux fixes it in 0.2 s for a 119 MB capture and is cached beside
+the source. This is the same fact that made `describe_video` measure FPS from
+packet timestamps rather than trust `CAP_PROP_FRAME_COUNT`, which returned
+INT64_MIN on that file.
+
+> **Unverified:** video playback in the annotation page has not been confirmed
+> end to end. The browser used for testing refuses to load *any* media element
+> — audio stalls identically on a 4 MB static file — so this is an environment
+> limitation rather than a known defect, but it does mean nobody has watched a
+> frame play in this UI yet. Everything around it is verified: the route's
+> bytes and range handling, the consent refusal, the remux producing a real
+> 3m50s duration, and the full keyboard coding flow for two raters.
 
 ## Core design decisions
 
@@ -505,6 +560,7 @@ server/
   aoi.py                        areas of interest, Holmqvist metrics
   agreement.py                  cross-engine agreement, relative proportions
   evaluation.py                 engine vs humans, and the ceiling humans set
+  annotation_store.py           codebooks and labels; raters kept apart
   respiration.py                band-pass, multi-profile fusion, rate refusal
   consent.py                    tiered consent; pipeline.py enforces retention
   study.py                      protocol validation + hash (mirrors study.js)
@@ -531,6 +587,7 @@ npm run process -- <dir> --out o/ # bundle -> canonical tables + gaze
 #   --resp   also run respiration (waveform only, never a rate)
 #   --no-gaze / --no-voice   skip those stages
 npm run app                       # researcher app
+#   --media <dir>   serve session recordings to the annotation page
 npm run check                     # licences + all tests + M0 gate
 npm run verify:gaze               # do fixations land on the right target?
 npm run verify:m0                 # M0 gate on a synthetic clip

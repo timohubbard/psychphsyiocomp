@@ -35,6 +35,30 @@ browser_chunks.json
 !out/aoi_sets/
 !out/aoi_sets/*.json
 
+# Codebooks are the same kind of thing: the categories a coder chooses between
+# and the moments they are asked about. Configuration, versioned, part of the
+# method — a kappa is not interpretable without the definitions it was made
+# against.
+!out/codebooks/
+!out/codebooks/*.json
+
+# The ANNOTATIONS themselves are NOT. A label is a judgement a named coder made
+# about a named participant's recording, and the pair is more identifying than
+# either half. They stay local, like the measurements they describe.
+#
+# Spelled out rather than left to the rules above, because nothing above would
+# have caught them: the ignores in this section match `*.parquet`,
+# `session.json` and `browser_chunks.json` by name, and an annotation file is
+# none of those. That is the same extension-versus-container mistake recorded
+# further up, one directory over.
+out/annotations/
+
+# Playback remuxes are derived copies of participant video, so they fall under
+# the same rule as the source — the extension differs, which is exactly the
+# gap that let session.json through once already.
+*.playback.webm
+*.playback.mp4
+
 # Third-party papers, kept locally but not redistributed. The research/*.md
 # passes cite each one by title and DOI, so the evidence trail survives without
 # the repo carrying someone else's copyrighted PDFs into a public history.

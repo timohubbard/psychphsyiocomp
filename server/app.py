@@ -32,6 +32,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "packages" / "engine-contract" / "python"))
 sys.path.insert(0, str(ROOT / "server"))
 
+import annotation_store  # noqa: E402
 import aoi_store  # noqa: E402
 from aoi import AOI, AOISet, analyse  # noqa: E402
 from fixations import classify  # noqa: E402
@@ -47,6 +48,30 @@ from store import (  # noqa: E402
 )
 
 WEB_DIR = ROOT / "web" / "researcher"
+
+#: Returned by a route that has already written the response itself.
+SENT = object()
+
+
+def _find_media(media_root: Path, session_id: str) -> Path | None:
+    """Locate a session's recording under a bundle root.
+
+    Matches on the session.json rather than on a directory name, because a
+    bundle directory is named by whoever downloaded it and the session id is
+    the only thing that is actually the session's.
+    """
+    for manifest in sorted(Path(media_root).glob("*/session.json")):
+        try:
+            if json.loads(manifest.read_text(encoding="utf-8")).get(
+                    "session_id") != session_id:
+                continue
+        except (json.JSONDecodeError, OSError):
+            continue
+        for name in ("capture.webm", "capture.mp4"):
+            candidate = manifest.parent / name
+            if candidate.exists():
+                return candidate
+    return None
 STUDIES_ROOT = ROOT / "studies"
 
 
@@ -77,8 +102,19 @@ def _opt_float(values):
 
 
 class Handler(SimpleHTTPRequestHandler):
-    def __init__(self, *args, data_root: Path, **kwargs):
+    # HTTP/1.1, not the stdlib's HTTP/1.0 default. Chrome's media stack will
+    # not stream ranged video over 1.0: the annotation page's <video> sat at
+    # readyState 0 with nothing buffered for fifteen seconds while `curl`
+    # fetched the same 118 MB file without complaint. Safe here because every
+    # response this handler writes sets an accurate Content-Length, which is
+    # what 1.1 keep-alive requires — `_json` and `_send_file` both do, and
+    # SimpleHTTPRequestHandler does for static files.
+    protocol_version = "HTTP/1.1"
+
+    def __init__(self, *args, data_root: Path, media_root: Path | None = None,
+                 **kwargs):
         self.data_root = data_root
+        self.media_root = media_root
         super().__init__(*args, directory=str(WEB_DIR), **kwargs)
 
     # -- routing -----------------------------------------------------------
@@ -92,6 +128,14 @@ class Handler(SimpleHTTPRequestHandler):
 
         try:
             payload = self._route(path, query)
+            if payload is SENT:
+                return None
+        except PermissionError as exc:
+            # Distinct from 404 on purpose: "the participant said no" is a
+            # different fact from "the file is missing", and a UI that showed
+            # the same message for both would teach people to treat a refusal
+            # as a glitch.
+            return self._json({"error": "refused", "detail": str(exc)}, status=403)
         except FileNotFoundError as exc:
             return self._json({"error": "not_found", "detail": str(exc)}, status=404)
         except ValueError as exc:
@@ -136,6 +180,9 @@ class Handler(SimpleHTTPRequestHandler):
             return {**scanpath(self.data_root, parts[2], num("start"), num("end")),
                     "phases": phases(self.data_root, parts[2])}
 
+        if len(parts) == 4 and parts[:2] == ["api", "sessions"] and parts[3] == "media":
+            return self._media(parts[2])
+
         if len(parts) == 4 and parts[:2] == ["api", "sessions"] and parts[3] == "export":
             return self._export(parts[2], query)
 
@@ -147,6 +194,38 @@ class Handler(SimpleHTTPRequestHandler):
             # one is to read the disclosure a participant was shown.
             study = load_study(STUDIES_ROOT, parts[2])
             return {"study": study, "content_hash": study_hash(study)}
+
+        if parts == ["api", "codebooks"]:
+            return {"codebooks": annotation_store.list_codebooks(self.data_root)}
+
+        if len(parts) == 3 and parts[:2] == ["api", "codebooks"]:
+            return annotation_store.load_codebook(
+                self.data_root, parts[2],
+                (query.get("version") or [None])[0])
+
+        # /api/annotations/<codebook>/<session>/<rater>?version=<hash>
+        #
+        # One rater's OWN labels, for resuming their own work. There is no
+        # route that serves a coder somebody else's labels: independence is
+        # what every agreement coefficient rests on, and a coder who can see
+        # the last one's choices is not a second observation.
+        if len(parts) == 5 and parts[:2] == ["api", "annotations"]:
+            _, _, codebook_id, sess, rater = parts
+            return {"annotation": annotation_store.load_annotation(
+                self.data_root, codebook_id=codebook_id,
+                content_hash=(query.get("version") or [""])[0],
+                session_id=sess, rater_id=rater)}
+
+        if len(parts) == 3 and parts[:2] == ["api", "annotation-progress"]:
+            # Who has coded this session and how far they got — no labels.
+            return {"raters": annotation_store.raters_for(
+                self.data_root,
+                codebook_id=(query.get("codebook") or [""])[0],
+                content_hash=(query.get("version") or [""])[0],
+                session_id=parts[2])}
+
+        if len(parts) == 3 and parts[:2] == ["api", "reliability"]:
+            return self._reliability(parts[2], query)
 
         if parts == ["api", "aoi-sets"]:
             return {"sets": aoi_store.list_sets(self.data_root)}
@@ -163,8 +242,20 @@ class Handler(SimpleHTTPRequestHandler):
         return None
 
     def do_POST(self):  # noqa: N802
-        """The only write path, and only for AOI definitions."""
+        """The write paths, and there are only three.
+
+        All three write CONFIGURATION or JUDGEMENT, never measurement. An AOI
+        is a question asked of the data afterwards; a codebook is the same; an
+        annotation is a person's answer. Nothing here can alter a row the
+        pipeline wrote, because a UI that could edit a measurement could
+        quietly un-record a refusal.
+        """
         parsed = urlparse(self.path)
+
+        if parsed.path == "/api/codebooks":
+            return self._post_codebook()
+        if parsed.path == "/api/annotations":
+            return self._post_annotation()
         if parsed.path != "/api/aoi-sets":
             return self._json({"error": "not_found", "detail": parsed.path}, status=404)
 
@@ -182,6 +273,160 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json({"error": "bad_request", "detail": str(exc)}, status=400)
 
         return self._json(aoi_store.save(self.data_root, aoi_set))
+
+    def _media(self, session_id: str):
+        """Stream a session's recording, for the annotation page.
+
+        Two refusals before a byte is served, and they are different things:
+
+        - The consent tier did not retain media. In practice the file is
+          already gone — `enforce_consent` deleted it after the engines ran —
+          but the check runs on the tier rather than on the filesystem, because
+          "the file happens to be missing" and "the participant said no" are
+          not the same fact and should not produce the same message.
+        - No media root was configured. The canonical tables do not record
+          where a bundle lives, and inventing a path would be how a UI starts
+          reading files nobody pointed it at.
+        """
+        detail = session_detail(self.data_root, session_id)
+        tier = (detail.get("meta") or {}).get("consent_tier")
+
+        # A session with NO recorded tier serves, matching `enforce_consent`:
+        # there, a missing tier keeps the media, because acting on an absent
+        # field is not recoverable. The pilots captured before tiered consent
+        # existed are all in this state, and the recording is on the
+        # researcher's own disk either way — this route is not a new
+        # disclosure, it is a local file being read locally.
+        if tier is not None and tier not in ("media_retained", "media_plus_transcript"):
+            raise PermissionError(
+                f"consent tier {tier!r} did not retain this recording")
+
+        if self.media_root is None:
+            raise FileNotFoundError(
+                "no media root configured; start the app with --media <dir>")
+
+        path = _find_media(self.media_root, session_id)
+        if path is None:
+            raise FileNotFoundError(f"no recording found for {session_id}")
+
+        # Remuxed once, cached beside the source. A MediaRecorder WebM has no
+        # duration and no cue index, and Chrome responds to that by waiting
+        # forever at readyState 0 rather than failing — which looks like a slow
+        # network and is not.
+        from engine_contract import prepare_playback
+        self._send_file(prepare_playback(path))
+        return SENT
+
+    def _send_file(self, path: Path):
+        """Serve a file, honouring a Range request so the video can seek.
+
+        Without Range the browser downloads the whole recording before it can
+        show the first frame, and a coder stepping through forty moments would
+        wait for it once per page load.
+        """
+        size = path.stat().st_size
+        ctype = {".webm": "video/webm", ".mp4": "video/mp4",
+                 ".wav": "audio/wav"}.get(path.suffix.lower(),
+                                          "application/octet-stream")
+        rng = self.headers.get("Range")
+        start, end = 0, size - 1
+        status = 200
+
+        if rng and rng.startswith("bytes="):
+            raw = rng.split("=", 1)[1].split(",")[0]
+            lo, _, hi = raw.partition("-")
+            if lo:
+                start = int(lo)
+                end = int(hi) if hi else size - 1
+            elif hi:
+                start = max(size - int(hi), 0)
+            start = max(0, min(start, size - 1))
+            end = max(start, min(end, size - 1))
+            status = 206
+
+        length = end - start + 1
+        self.send_response(status)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(length))
+        self.send_header("Accept-Ranges", "bytes")
+        if status == 206:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.end_headers()
+
+        with path.open("rb") as fh:
+            fh.seek(start)
+            remaining = length
+            while remaining > 0:
+                chunk = fh.read(min(64 * 1024, remaining))
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                remaining -= len(chunk)
+
+    def _body(self) -> dict:
+        length = int(self.headers.get("Content-Length") or 0)
+        return json.loads(self.rfile.read(length) or b"{}")
+
+    def _post_codebook(self):
+        try:
+            return self._json(annotation_store.save_codebook(
+                self.data_root, self._body()))
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            return self._json({"error": "bad_request", "detail": str(exc)}, status=400)
+
+    def _post_annotation(self):
+        try:
+            body = self._body()
+            return self._json(annotation_store.save_annotation(
+                self.data_root,
+                codebook_id=str(body["codebook_id"]),
+                content_hash=str(body["content_hash"]),
+                session_id=str(body["session_id"]),
+                rater_id=str(body["rater_id"]),
+                labels=body["labels"]))
+        except (KeyError, TypeError, ValueError, FileNotFoundError,
+                json.JSONDecodeError) as exc:
+            return self._json({"error": "bad_request", "detail": str(exc)}, status=400)
+
+    def _reliability(self, session_id: str, query):
+        """Inter-rater agreement, and an engine's score against the ceiling.
+
+        Returns the refusal verbatim when there is not enough to compute one.
+        A UI showing "—" where a refusal belongs teaches people the number is
+        merely missing.
+        """
+        from evaluation import cohens_kappa, evaluate_against, reference_from
+
+        codebook_id = (query.get("codebook") or [""])[0]
+        version = (query.get("version") or [""])[0]
+        use = (query.get("use") or ["raw"])[0]
+
+        matrix = annotation_store.label_matrix(
+            self.data_root, codebook_id=codebook_id,
+            content_hash=version, session_id=session_id)
+
+        out = {"matrix": {k: v for k, v in matrix.items() if k != "labels"},
+               "n_raters": len(matrix["raters"])}
+
+        ref = reference_from(matrix["labels"], use=use)
+        if not ref:
+            out["refusal"] = {"reason": ref.reason, "detail": ref.detail}
+            return out
+
+        out["reference"] = ref.as_dict()
+
+        # Pairwise kappa between the first two raters, for the prevalence and
+        # bias indices — the ceiling alone does not say whether a low number
+        # is the task or the base rate.
+        if len(matrix["labels"]) >= 2:
+            k = cohens_kappa(matrix["labels"][0], matrix["labels"][1])
+            out["kappa"] = k.as_dict() if k else {"refusal": k.reason}
+
+        # An engine arm would be scored here. Until a channel is mapped onto a
+        # codebook's categories there is nothing to score, and inventing a
+        # mapping in the UI is how a result stops being attributable.
+        out["engine"] = None
+        return out
 
     def _aoi_analysis(self, session_id: str, query):
         """Run a saved AOI set against a session's fixations."""
@@ -298,10 +543,14 @@ def main() -> int:
     ap.add_argument("--data", type=Path, default=ROOT / "out",
                     help="directory holding session_id=* folders")
     ap.add_argument("--port", type=int, default=5174)
+    ap.add_argument("--media", type=Path, default=None,
+                    help="directory holding capture bundles, so the annotation "
+                         "page can play a session's recording back")
     args = ap.parse_args()
 
     data_root = args.data.resolve()
-    handler = partial(Handler, data_root=data_root)
+    media_root = args.media.resolve() if args.media else None
+    handler = partial(Handler, data_root=data_root, media_root=media_root)
 
     # Localhost only. This serves participant-derived measurements, and binding
     # it to every interface would publish them to the network by default.
@@ -316,6 +565,7 @@ def main() -> int:
     n = len(list_sessions(data_root))
     print(f"\n  researcher app   http://localhost:{args.port}/")
     print(f"  reading          {data_root}")
+    print(f"  media            {media_root or 'not configured (--media)'}")
     print(f"  sessions found   {n}\n")
     if n == 0:
         print("  No processed sessions. Run:")

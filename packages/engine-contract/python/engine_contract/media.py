@@ -263,3 +263,44 @@ def describe_audio(
         sample_rate_hz=float(info.samplerate) if info.samplerate else None,
         channels=int(info.channels) if info.channels else None,
     )
+
+
+def prepare_playback(video_path: str | Path,
+                     out_path: str | Path | None = None) -> Path:
+    """Remux a MediaRecorder WebM into one a browser can seek.
+
+    A `<video>` element cannot play back what MediaRecorder wrote. The file has
+    no duration in its header and no cue index, because the recorder is writing
+    a live stream and does not know how long it will be — ffmpeg reports
+    ``Duration: N/A``, and Chrome sits at ``readyState 0`` with nothing
+    buffered indefinitely rather than failing, so it looks like a slow network
+    rather than an unseekable file.
+
+    This is the same fact that made `describe_video` measure FPS from packet
+    timestamps instead of trusting ``CAP_PROP_FRAME_COUNT``, which returned
+    INT64_MIN on the same recording.
+
+    Stream copy, so it is lossless and quick — 0.2 s for a 119 MB, 3m50s
+    capture, because no frame is decoded. The output is cached beside the
+    source: the annotation page can ask for the same session forty times while
+    a coder steps through it.
+    """
+    import subprocess
+
+    src = Path(video_path)
+    dst = Path(out_path) if out_path else src.with_suffix(".playback.webm")
+
+    if dst.exists() and dst.stat().st_mtime >= src.stat().st_mtime:
+        return dst
+
+    cmd = [
+        ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-y",
+        "-i", str(src),
+        "-c", "copy",              # no re-encode; only the container is rebuilt
+        str(dst),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0 or not dst.exists():
+        raise OSError(f"could not remux {src} for playback: "
+                      f"{result.stderr.strip()[:300]}")
+    return dst

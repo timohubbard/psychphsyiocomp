@@ -22,6 +22,7 @@ from engine_contract.media import (
     describe_video,
     extract_audio,
     mean_luma,
+    prepare_playback,
     sha256_of,
 )
 
@@ -30,6 +31,7 @@ __all__ = [
     "describe_video",
     "extract_audio",
     "mean_luma",
+    "prepare_playback",
     "sha256_of",
     "Chunk",
     "Eligibility",
