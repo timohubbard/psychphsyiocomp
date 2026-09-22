@@ -74,6 +74,46 @@ def scan_luma(video_path: Path, max_frames: int | None = None) -> list[tuple[flo
     return out
 
 
+def _voice_stage(writer, bundle, solution):
+    """Extract audio and run the eGeMAPS engine.
+
+    A stage rather than an engine entry because the audio has to be produced
+    first, and `process_session` hands engines the video descriptor.
+    """
+    import uuid
+    from datetime import datetime, timezone
+
+    from engine_contract import describe_audio
+
+    wav = bundle.ensure_audio()
+    if wav is None:
+        return {"status": "no_audio"}
+
+    engine = load_engine_module("voice.opensmile_egemaps").OpenSmileEGeMAPS()
+    media = describe_audio(wav, bundle.metadata.get("applied_audio_constraints"))
+
+    started = datetime.now(timezone.utc)
+    eligibility = engine.probe(media)
+    run_id = str(uuid.uuid4())
+
+    if not eligibility.eligible:
+        writer.add_run(run_id=run_id, manifest=engine.manifest, source=engine.source,
+                       params={}, media_sha256=media.sha256, started=started,
+                       ended=datetime.now(timezone.utc), status="ineligible",
+                       eligibility=eligibility, solution=solution)
+        return {"status": "ineligible", "reasons": list(eligibility.reasons)}
+
+    chunks = list(engine.run(media, {}))
+    rows = writer.add_chunks(chunks, source=engine.source, params={}, solution=solution)
+    writer.add_run(run_id=run_id, manifest=engine.manifest, source=engine.source,
+                   params={}, media_sha256=media.sha256, started=started,
+                   ended=datetime.now(timezone.utc), status="ok",
+                   eligibility=eligibility, solution=solution)
+
+    quality = {q.metric: q.value for c in chunks for q in c.quality}
+    return {"status": "ok", "rows": rows, **quality}
+
+
 def _gaze_stage(writer, bundle, solution):
     """Feature engine plus estimator, as one pipeline stage."""
     from gaze_pipeline import run_gaze
@@ -94,6 +134,8 @@ def main() -> int:
                     help="also run the Py-Feat Action Unit engine (slow: ~0.25s/frame)")
     ap.add_argument("--au-stride", type=int, default=15,
                     help="analyse every Nth frame for AUs; AU dynamics are slow")
+    ap.add_argument("--no-voice", action="store_true",
+                    help="skip audio extraction and the eGeMAPS engine")
     args = ap.parse_args()
 
     bundle = SessionBundle.from_dir(args.bundle)
@@ -132,8 +174,14 @@ def main() -> int:
         _pyfeat = load_engine_module("face.pyfeat_aus")
         engines.append((_pyfeat.PyFeatAUs(),
                         {"frame_stride": args.au_stride, "batch_size": 8}))
+    stages = []
+    if not args.no_gaze:
+        stages.append(("gaze", _gaze_stage))
+    if not args.no_voice:
+        stages.append(("voice", _voice_stage))
+
     summary = process_session(bundle, engines, args.out, video_luma=luma,
-                              extra_stages=None if args.no_gaze else [_gaze_stage])
+                              extra_stages=stages)
 
 
     print("\n  " + "-" * 72)
@@ -152,6 +200,17 @@ def main() -> int:
 
     aligned = pc.sum(pc.invert(pc.is_null(sig.column("master_ts")))).as_py() or 0
     print(f"  aligned rows     {aligned} / {sig.num_rows}")
+
+    v = summary.get("voice")
+    if v:
+        print(f"\n  voice          status={v['status']}")
+        if v["status"] == "ok":
+            preserved = v.get("speech_content_preserved")
+            print(f"    rows         {v.get('rows', 0)}")
+            print(f"    voiced       {v.get('voiced_fraction', 0):.1%} of windows")
+            print(f"    speech kept  {'yes' if preserved else 'NO — valence unavailable'}")
+        else:
+            print(f"    {v.get('reasons') or v['status']}")
 
     g = summary.get("gaze")
     if g:

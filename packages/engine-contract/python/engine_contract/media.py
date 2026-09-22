@@ -162,3 +162,102 @@ def describe_video(path: str | Path) -> MediaDescriptor:
     )
 
 
+
+
+# ---------------------------------------------------------------------------
+# audio
+# ---------------------------------------------------------------------------
+
+#: Sample rate audio is extracted at.
+#:
+#: 16 kHz, not the 48 kHz the browser captured. Every speech model this project
+#: is likely to use — openSMILE's eGeMAPS, wav2vec2, WavLM, Whisper — expects
+#: 16 kHz, and resampling once here beats each engine doing it differently. The
+#: discarded band is above 8 kHz, which carries no F0 and little of the
+#: formant structure these features are built from.
+AUDIO_SAMPLE_RATE = 16000
+
+
+def ffmpeg_exe() -> str:
+    """Path to a working ffmpeg.
+
+    Prefers the binary bundled by `imageio-ffmpeg`, installed by pip, over a
+    system one. A research instrument that depends on whatever ffmpeg happens
+    to be on PATH is a reproducibility problem: codec support and default
+    behaviour vary between builds, and audio extraction is not somewhere to
+    inherit that variance.
+    """
+    try:
+        import imageio_ffmpeg
+
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except ImportError:
+        import shutil
+
+        found = shutil.which("ffmpeg")
+        if not found:
+            raise RuntimeError(
+                "no ffmpeg available. pip install imageio-ffmpeg, which bundles one."
+            )
+        return found
+
+
+def extract_audio(
+    video_path: str | Path, out_path: str | Path | None = None,
+    *, sample_rate: int = AUDIO_SAMPLE_RATE, mono: bool = True,
+) -> Path | None:
+    """Decode a container's audio track to WAV. Returns None if it has none.
+
+    Mono by default. The browser captures stereo from a single microphone, so
+    the two channels carry the same signal plus independent noise; averaging
+    them is the honest reduction, and every speech feature set expects one
+    channel anyway.
+
+    Returning None rather than raising is deliberate: a session recorded without
+    a microphone is a legitimate session, and the voice engines should record
+    themselves as ineligible rather than the pipeline failing.
+    """
+    import subprocess
+
+    src = Path(video_path)
+    dst = Path(out_path) if out_path else src.with_suffix(".audio.wav")
+
+    cmd = [
+        ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-y",
+        "-i", str(src),
+        "-vn",                       # drop video
+        "-ac", "1" if mono else "2",
+        "-ar", str(sample_rate),
+        "-c:a", "pcm_s16le",
+        str(dst),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+
+    if result.returncode != 0 or not dst.exists() or dst.stat().st_size == 0:
+        return None
+    return dst
+
+
+def describe_audio(
+    path: str | Path, applied_constraints: dict[str, bool] | None = None,
+) -> MediaDescriptor:
+    """Build a MediaDescriptor for an audio file.
+
+    ``applied_constraints`` is what ``getUserMedia`` ACTUALLY applied, carried
+    through from the capture manifest rather than re-derived — it cannot be
+    recovered from the waveform, and §2.3 makes it decisive: valence from voice
+    is covertly a speech-content model, so noise suppression that degrades
+    intelligibility deletes the capability rather than merely adding noise.
+    """
+    import soundfile as sf
+
+    p = Path(path)
+    info = sf.info(str(p))
+
+    return MediaDescriptor(
+        path=str(p),
+        kind="audio",
+        sha256=sha256_of(p),
+        duration_s=float(info.duration) if info.duration else None,
+        applied_audio_constraints=applied_constraints,
+    )

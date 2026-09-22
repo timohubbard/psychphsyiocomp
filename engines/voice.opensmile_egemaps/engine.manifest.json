@@ -1,0 +1,77 @@
+{
+  "engine_id": "voice.opensmile_egemaps",
+  "version": "0.1.0",
+  "modality": "voice",
+  "runtime": "python-cpu",
+  "placement": "server-batch",
+  "determinism": "deterministic",
+
+  "inputs": [
+    {
+      "kind": "audio",
+      "min_duration_s": 1.0,
+      "required_audio_constraints": {
+        "noiseSuppression": false,
+        "autoGainControl": false
+      }
+    }
+  ],
+
+  "params_schema": {
+    "type": "object",
+    "properties": {
+      "window_s": { "type": "number", "default": 3.0,
+        "description": "Analysis window. eGeMAPS functionals are statistics over a window; too short and F0 statistics are unstable, too long and a window spans several utterances." },
+      "hop_s": { "type": "number", "default": 1.0,
+        "description": "Window step. Overlapping so a short utterance is not split across a boundary and lost from both sides." }
+    },
+    "additionalProperties": false
+  },
+
+  "outputs": {
+    "signals": [
+      {
+        "channel": "voice.*",
+        "unit": "egemaps",
+        "nominal_rate_hz": 1,
+        "value_type": "float",
+        "reliability_tier": "moderate",
+        "description": "The 88 eGeMAPSv02 functionals — F0, loudness, spectral, and voice-quality statistics over each window. Named exactly as openSMILE names them, never renamed to something friendlier, because the mapping from a functional to a psychological construct is the part that is contested."
+      },
+      {
+        "channel": "voice.voiced_fraction",
+        "unit": "proportion",
+        "nominal_rate_hz": 1,
+        "value_type": "float",
+        "reliability_tier": "high",
+        "description": "Fraction of the window carrying voiced speech. Gates everything else: F0 statistics over a silent window are computed from nothing and are not a quiet voice."
+      }
+    ],
+    "events": [],
+    "quality": [
+      { "metric": "speech_content_preserved", "unit": "bool", "warn_below": 1,
+        "description": "Whether getUserMedia's DSP was successfully disabled. §2.3: transformer SER's valence performance is driven by implicit LINGUISTIC content, not prosody — re-synthesising utterances from transcripts left high-valence correlation nearly intact, and freezing the transformer collapsed it to near zero. So noise suppression that degrades intelligibility does not add noise to valence, it deletes the mechanism. Recorded per session because it decides which channels a later valence engine may run at all." },
+      { "metric": "voiced_fraction", "unit": "proportion", "warn_below": 0.05,
+        "description": "Session-wide proportion of voiced speech. A session where nobody spoke produces 88 features per window that describe silence." },
+      { "metric": "achieved_window_rate", "unit": "hz",
+        "description": "Analysis windows per second. Set by hop_s, recorded rather than assumed." }
+    ]
+  },
+
+  "license": {
+    "spdx": "openSMILE-research",
+    "commercial_use": "no",
+    "url": "https://github.com/audeering/opensmile",
+    "notes": "VERBATIM from the openSMILE licence: 'It is not allowed to use the open-source version of openSMILE for any sort of commercial product.' Research and academic use is permitted, which is what this build is. Commercial licensing goes through audEERING. This is the first genuinely restricted engine in the project — `npm run licenses:commercial-gate` now exits non-zero, which is correct and expected for an academic build."
+  },
+
+  "provenance": {
+    "training_datasets": [],
+    "paper_doi": "10.1109/TAFFC.2015.2457417"
+  },
+
+  "capability_notes": {
+    "cannot_support_valence": "This engine emits hand-crafted acoustic features and CANNOT support valence, at any accuracy, ever. §2.3: Wagner et al. 2023 (IEEE TPAMI) showed transformer SER's valence performance is driven by implicit linguistic content learned during fine-tuning — the model transcribes internally and infers from the words. A pipeline that keeps only eGeMAPS-style features has discarded exactly the thing that made that result good. Arousal from acoustics is comparatively robust and is what these features are for. Any valence channel must come from a separate engine operating on the waveform, and must be labelled as lexical rather than prosodic.",
+    "absolute_performance": "§2.3: best-in-challenge 8-class SER (Odyssey 2024, MSP-Podcast, 31 teams) reached Macro-F1 0.357 against chance 0.125. Cross-corpus degradation was 11% arousal, 21% dominance, 30% valence. Any new deployment population is a domain shift; in-corpus numbers do not transfer."
+  }
+}

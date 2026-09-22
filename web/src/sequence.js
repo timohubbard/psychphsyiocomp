@@ -46,6 +46,54 @@ export const VALIDATION_POINTS = [
   [0.2, 0.2], [0.8, 0.2], [0.45, 0.55], [0.2, 0.8], [0.8, 0.8],
 ];
 
+/**
+ * Read-aloud passage.
+ *
+ * Original text, deliberately. The passages speech research usually reaches for
+ * — Rainbow, Grandfather — are of uncertain copyright status, and a research
+ * instrument that ships one is asking every user to inherit that uncertainty.
+ * This one is written for the same job: roughly 30 seconds at a normal pace,
+ * broad phonetic coverage including all the English vowels and the fricatives
+ * and plosives that voice-quality features depend on, and neutral content that
+ * does not itself induce an affective response.
+ *
+ * Researchers should substitute their own. The stage takes the text as data.
+ */
+export const DEFAULT_PASSAGE = [
+  'The old harbour wakes slowly on a grey morning.',
+  'Fishing boats push through thin fog while gulls argue above the quay.',
+  'A baker unlocks her shop, and the smell of warm bread drifts along the street.',
+  'Three children chase each other past the chandlery, shouting about nothing at all.',
+  'By nine the sun has burned the mist away, and the water turns a sharp blue.',
+  'Someone is painting a hull red; someone else is mending a torn yellow sail.',
+  'It is an ordinary day, and the whole town seems glad of it.',
+].join(' ');
+
+/**
+ * Why voice needs its own stage at all.
+ *
+ * The M0 sequence asked the participant to follow dots and rest their eyes, and
+ * nothing else. Running the voice engine over the first real session produced
+ * exactly what that deserves: a voiced fraction of zero, because nobody had
+ * spoken. Acoustic features cannot be recovered from a recording of a silent
+ * room, and no amount of engine work changes that — the speech has to be
+ * elicited during capture or it does not exist.
+ */
+export const SPEECH_TIMINGS = {
+  /** Read-aloud window. Long enough for stable eGeMAPS statistics. */
+  readMs: 45_000,
+  /** Free-response window. */
+  freeMs: 30_000,
+  /** Silence before and after, so onset and offset are unambiguous. */
+  speechPadMs: 1200,
+};
+
+/** Free-response prompts, neutral by design. */
+export const DEFAULT_PROMPTS = [
+  'Describe the room you are sitting in, in as much detail as you can.',
+  'Talk about how you usually get from home to somewhere you go often.',
+];
+
 export const TIMINGS = {
   /** How long the flash stays up. Long enough to survive a dropped frame. */
   clapperFlashMs: 200,
@@ -88,6 +136,7 @@ export const TIMINGS = {
   /** Sampling window per validation point. */
   validationDwellMs: 1500,
   fixationMs: 60_000,
+  ...SPEECH_TIMINGS,
 };
 
 /**
@@ -197,6 +246,28 @@ export function buildM0Sequence(seed = (Date.now() >>> 0)) {
       ] },
     { type: 'fixation', id: 'fixation_1', durationMs: TIMINGS.fixationMs },
 
+    { type: 'instruction', id: 'speech_intro',
+      title: 'Now we need to hear your voice',
+      lines: [
+        'Two short speaking tasks. Nothing is judged and nobody listens live.',
+        'First you will read a short passage aloud from the screen.',
+        'Then you will be asked to talk for half a minute about an everyday topic.',
+        'Speak at a normal volume and pace, as if to someone across the table.',
+        'If you stumble, just carry on — it does not matter.',
+      ] },
+    { type: 'speech_read', id: 'speech_read_1',
+      text: DEFAULT_PASSAGE, durationMs: SPEECH_TIMINGS.readMs },
+
+    { type: 'instruction', id: 'speech_free_intro',
+      title: 'Now in your own words',
+      lines: [
+        'A prompt will appear. Talk about it for about thirty seconds.',
+        'There is no right answer and you will not be cut off mid-sentence.',
+        'If you run out of things to say, describing what you can see is fine.',
+      ] },
+    { type: 'speech_free', id: 'speech_free_1',
+      prompt: DEFAULT_PROMPTS[0], durationMs: SPEECH_TIMINGS.freeMs },
+
     { type: 'instruction', id: 'clapper_2_intro',
       title: 'One more flash, then you are done',
       lines: [
@@ -237,6 +308,10 @@ export function estimateDurationMs(sequence) {
         break;
       case 'fixation':
         total += stage.durationMs ?? TIMINGS.fixationMs;
+        break;
+      case 'speech_read':
+      case 'speech_free':
+        total += (stage.durationMs ?? 0) + 2 * TIMINGS.speechPadMs;
         break;
       case 'instruction':
         // Genuinely participant-paced now, so any number here is an allowance

@@ -335,3 +335,59 @@ test('the sequence presents points in shuffled order', () => {
   const shown = seq.filter((s) => s.type === 'calibration_point').map((s) => [s.x, s.y]);
   assert.deepEqual(shown, seededShuffle(CALIBRATION_POINTS, 4242));
 });
+
+
+// ---------------------------------------------------------------------------
+// speech elicitation
+// ---------------------------------------------------------------------------
+
+test('the sequence asks the participant to speak', () => {
+  // Running the voice engine over the first real session produced a voiced
+  // fraction of ZERO, because the sequence only ever asked people to follow
+  // dots and rest their eyes. Acoustic features cannot be recovered from a
+  // recording of a silent room — the speech has to be elicited during capture
+  // or it does not exist.
+  const kinds = buildM0Sequence().map((s) => s.type);
+  assert.ok(kinds.includes('speech_read'), 'no read-aloud task');
+  assert.ok(kinds.includes('speech_free'), 'no free-speech task');
+});
+
+test('both speaking tasks are introduced before they start', () => {
+  const seq = buildM0Sequence();
+  for (const kind of ['speech_read', 'speech_free']) {
+    const at = seq.findIndex((s) => s.type === kind);
+    const before = seq.slice(0, at).reverse().find((s) => s.type === 'instruction');
+    assert.ok(before, `${kind} has no preceding instruction`);
+  }
+});
+
+test('the read-aloud passage is long enough for stable statistics', () => {
+  // eGeMAPS functionals are statistics over a window; a two-sentence passage
+  // gives too few voiced frames for F0 spread to mean anything.
+  const stage = buildM0Sequence().find((s) => s.type === 'speech_read');
+  assert.ok(stage.text.length > 250, `passage is only ${stage.text.length} chars`);
+  assert.ok(stage.durationMs >= 30_000, 'read window under 30s');
+});
+
+test('speech stages carry an explicit duration', () => {
+  // The voice engine windows by time, so a stage without one would be analysed
+  // against a default that nothing recorded.
+  for (const s of buildM0Sequence().filter((x) => x.type.startsWith('speech_'))) {
+    assert.ok(Number.isFinite(s.durationMs) && s.durationMs > 0, s.id);
+  }
+});
+
+test('speech padding exists so onset and offset are unambiguous', () => {
+  // A participant who starts talking the instant text appears puts the first
+  // syllables in the same analysis window as the stage transition.
+  assert.ok(TIMINGS.speechPadMs >= 500);
+});
+
+test('the duration estimate accounts for the speaking tasks', () => {
+  const total = estimateDurationMs(buildM0Sequence());
+  const speech = buildM0Sequence()
+    .filter((s) => s.type.startsWith('speech_'))
+    .reduce((n, s) => n + s.durationMs, 0);
+  assert.ok(total > TIMINGS.fixationMs + speech,
+    'estimate does not include the speech stages');
+});

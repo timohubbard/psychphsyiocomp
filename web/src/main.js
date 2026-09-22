@@ -309,6 +309,8 @@ async function runStage(stage) {
     case 'calibration_point':
     case 'validation_point': return runPoint(stage);
     case 'fixation':       return runFixation(stage);
+    case 'speech_read':
+    case 'speech_free':    return runSpeech(stage);
     default:
       console.warn('unknown stage', stage);
       return undefined;
@@ -468,6 +470,59 @@ async function runFixation(stage) {
   ui.progress.style.display = 'none';
   state.recorder.closeEvent('fixation', stage.id);
   ui.fixation.style.display = 'none';
+}
+
+/**
+ * A speaking task.
+ *
+ * The padding either side is not politeness. The voice engine analyses windows
+ * and needs an unambiguous onset and offset, and a participant who starts
+ * talking the instant text appears puts the first syllables in the same window
+ * as the transition. §2.3 makes intelligible speech the whole point, so the
+ * cheapest thing that protects it is a moment of silence at each end.
+ *
+ * Events bracket the speech itself rather than the stage, so the analysis
+ * window is the speech and not the reading-the-instructions time before it.
+ */
+async function runSpeech(stage) {
+  ui.target.style.opacity = '0';
+  ui.fixation.style.display = 'none';
+
+  const body = stage.text ?? stage.prompt ?? '';
+  ui.stageText.innerHTML = `
+    <h2 class="instr-title">${stage.type === 'speech_read'
+      ? 'Read this aloud' : 'Talk about this'}</h2>
+    <p class="speech-body">${body}</p>
+    <p class="instr-continue" id="speechStatus">get ready…</p>`;
+  ui.stageText.style.display = 'block';
+
+  state.recorder.logEvent(stage.type, { id: stage.id }, stage.id);
+  await wait(TIMINGS.speechPadMs);
+
+  const durationMs = stage.durationMs ?? TIMINGS.freeMs;
+  const endsAt = now() + durationMs;
+
+  // The speech span itself. A voice engine that analysed the whole stage would
+  // include the silence either side and dilute every window statistic.
+  state.recorder.logEvent('speech_active', {
+    id: stage.id, kind: stage.type, duration_ms: durationMs,
+  }, stage.id);
+
+  const status = document.getElementById('speechStatus');
+  const tick = setInterval(() => {
+    const left = Math.max(0, Math.ceil((endsAt - now()) / 1000));
+    if (status) status.textContent = `speaking — ${left}s left`;
+  }, 250);
+
+  await wait(durationMs);
+  clearInterval(tick);
+
+  state.recorder.closeEvent('speech_active', stage.id);
+  if (status) status.textContent = 'thank you';
+
+  await wait(TIMINGS.speechPadMs);
+  state.recorder.closeEvent(stage.type, stage.id);
+  ui.stageText.style.display = 'none';
 }
 
 // ---------------------------------------------------------------------------

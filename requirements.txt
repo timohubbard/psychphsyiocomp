@@ -34,3 +34,18 @@ scikit-learn<1.8        # 1.7.2 verified
 # py-feat can read video directly, but that path needs torchcodec + FFmpeg
 # shared libraries. The engine decodes with OpenCV instead, which is already a
 # dependency, and feeds frames as tensors.
+
+# --- M3: voice ---------------------------------------------------------------
+opensmile>=2.6.0        # RESTRICTED. Verbatim from the openSMILE licence: "It is
+                        # not allowed to use the open-source version of openSMILE
+                        # for any sort of commercial product." Academic use is
+                        # permitted, which is this build. This is the first
+                        # genuinely restricted engine, so
+                        # `npm run licenses:commercial-gate` now exits non-zero —
+                        # correct and expected, not a failure.
+
+imageio-ffmpeg>=0.6.0   # Bundles a static ffmpeg, used to demux the audio track
+                        # out of the MediaRecorder WebM. Preferred over a system
+                        # ffmpeg on purpose: codec support and defaults vary
+                        # between builds, and audio extraction is not somewhere
+                        # to inherit that variance.

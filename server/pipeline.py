@@ -82,6 +82,25 @@ class SessionBundle:
             metadata=meta,
         )
 
+    def ensure_audio(self) -> Path | None:
+        """Extract the audio track to WAV, once, returning None if there is none.
+
+        Done here rather than in the voice engine because engines take a
+        MediaDescriptor and do not own file layout — and because several voice
+        engines will eventually want the same WAV rather than each decoding the
+        container again.
+        """
+        if self.audio_path and Path(self.audio_path).exists():
+            return Path(self.audio_path)
+        if not self.video_path:
+            return None
+
+        from engine_contract.media import extract_audio
+
+        self.audio_path = extract_audio(
+            self.video_path, Path(self.video_path).with_suffix(".audio.wav"))
+        return self.audio_path
+
     def sync_marker_ts(self) -> float | None:
         """When the capture page drew the sync flash, on the master clock."""
         for e in self.events:
@@ -285,8 +304,8 @@ def process_session(
 
     # Stages that are not engines: they need the master clock, which engines
     # are forbidden to know about. The gaze estimator is the first of these.
-    for stage in (extra_stages or []):
-        summary["gaze"] = stage(writer, bundle, registry.solve("video_pts"))
+    for name, stage in (extra_stages or []):
+        summary[name] = stage(writer, bundle, registry.solve("video_pts"))
 
     paths = writer.close()
     summary["sources"] = sorted(summary["sources"])
