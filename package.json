@@ -24,6 +24,7 @@
     "verify:m0": "node tools/py.mjs server/verify_m0.py",
     "serve": "node tools/serve.mjs",
     "app": "node tools/py.mjs server/app.py --data out",
-    "process": "node tools/py.mjs server/process_bundle.py"
+    "process": "node tools/py.mjs server/process_bundle.py",
+    "verify:gaze": "node tools/py.mjs server/verify_gaze.py --data out"
   }
 }
