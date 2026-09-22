@@ -7,10 +7,15 @@ of its reproducibility story: every package added here is one a replication
 attempt three years from now has to resolve, and a session browser does not
 justify that cost. pyarrow is already required to read the tables at all.
 
-Read-only by design. Nothing this server exposes can modify a session, because
-the canonical tables are append-only and the thing that appends to them is the
-pipeline. A UI that could edit measurements would be a UI that could quietly
-un-record a refusal.
+Read-only about MEASUREMENTS. Nothing this server exposes can modify a session,
+because the canonical tables are append-only and the thing that appends to them
+is the pipeline. A UI that could edit a measurement would be a UI that could
+quietly un-record a refusal.
+
+AOI definitions are the one exception, and they are not measurements. An AOI is
+a question someone decided to ask of the data afterwards, stored separately, and
+versioned immutably — see aoi_store. The session data it is asked about stays
+untouched either way.
 """
 
 from __future__ import annotations
@@ -27,9 +32,24 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "packages" / "engine-contract" / "python"))
 sys.path.insert(0, str(ROOT / "server"))
 
-from store import channel_series, list_sessions, phases, scanpath, session_detail  # noqa: E402
+import aoi_store  # noqa: E402
+from aoi import AOI, AOISet, analyse  # noqa: E402
+from fixations import classify  # noqa: E402
+from store import (  # noqa: E402
+    channel_series,
+    list_sessions,
+    phases,
+    scanpath,
+    session_detail,
+)
 
 WEB_DIR = ROOT / "web" / "researcher"
+
+
+def _opt_float(values):
+    """First value of a query param as a float, or None if absent."""
+    v = (values or [None])[0]
+    return float(v) if v is not None else None
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -90,7 +110,85 @@ class Handler(SimpleHTTPRequestHandler):
         if len(parts) == 4 and parts[:2] == ["api", "sessions"] and parts[3] == "export":
             return self._export(parts[2], query)
 
+        if parts == ["api", "aoi-sets"]:
+            return {"sets": aoi_store.list_sets(self.data_root)}
+
+        if len(parts) == 4 and parts[:2] == ["api", "aoi-sets"] and parts[3] == "history":
+            return {"versions": aoi_store.history(self.data_root, parts[2])}
+
+        if len(parts) == 4 and parts[:2] == ["api", "sessions"] and parts[3] == "aoi":
+            return self._aoi_analysis(parts[2], query)
+
         return None
+
+    def do_POST(self):  # noqa: N802
+        """The only write path, and only for AOI definitions."""
+        parsed = urlparse(self.path)
+        if parsed.path != "/api/aoi-sets":
+            return self._json({"error": "not_found", "detail": parsed.path}, status=404)
+
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+            aoi_set = AOISet(
+                name=str(body["name"]), version="pending",
+                aois=tuple(AOI(aoi_id=str(a["aoi_id"]), shape=a["shape"],
+                               coords=tuple(float(c) for c in a["coords"]),
+                               label=a.get("label"))
+                           for a in body["aois"]),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            return self._json({"error": "bad_request", "detail": str(exc)}, status=400)
+
+        return self._json(aoi_store.save(self.data_root, aoi_set))
+
+    def _aoi_analysis(self, session_id: str, query):
+        """Run a saved AOI set against a session's fixations."""
+        name = (query.get("set") or [None])[0]
+        if not name:
+            raise ValueError("set is required")
+        pad_deg = float((query.get("pad_deg") or ["4.5"])[0])
+
+        aoi_set = aoi_store.load(self.data_root, name,
+                                 (query.get("version") or [None])[0])
+
+        d = session_detail(self.data_root, session_id)
+        m = d["meta"]
+        if not m.get("px_per_mm") or not m.get("viewing_distance_mm"):
+            return {"refusal": "no_geometry", "provenance": aoi_set.provenance()}
+
+        import math
+        dpp = math.degrees(math.atan2(1.0 / m["px_per_mm"], m["viewing_distance_mm"]))
+        viewport = (float(m["screen_width_px"]), float(m["screen_height_px"]))
+
+        sp = scanpath(self.data_root, session_id,
+                      _opt_float(query.get("start")), _opt_float(query.get("end")))
+
+        class _F:
+            kind = "fixation"
+
+            def __init__(self, f):
+                self.x, self.y = f["x"], f["y"]
+                self.onset_ts = f["t"]
+                self.offset_ts = f["t"] + f["duration_ms"]
+
+        result = analyse([_F(f) for f in sp["fixations"]], aoi_set,
+                         pad_deg=pad_deg, degrees_per_px=dpp, viewport_px=viewport)
+
+        return {
+            "refusal": result.refusal,
+            "hit_rate": result.hit_rate,
+            "n_fixations": result.n_fixations,
+            "n_hits": result.n_hits,
+            "pad_deg": result.pad_deg,
+            "pad_x": result.pad_x,
+            "pad_y": result.pad_y,
+            "provenance": result.provenance,
+            "aois": [{"aoi_id": a.aoi_id, "shape": a.shape,
+                      "coords": list(a.coords), "label": a.label}
+                     for a in aoi_set.aois],
+            "metrics": {k: vars(v) for k, v in result.metrics.items()},
+        }
 
     def _export(self, session_id: str, query):
         """CSV of one channel. Streams as a download rather than JSON."""

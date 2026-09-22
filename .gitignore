@@ -27,6 +27,14 @@ session.json
 browser_chunks.json
 *.parquet
 
+# AOI definitions are the deliberate exception. They are study CONFIGURATION,
+# not participant data — boundaries someone chose to ask a question with — and
+# §4.2 makes them part of the method: the same gaze data moved 77%->88%->93%
+# purely from refining them. A result is not reproducible without them, so they
+# are versionable on purpose while the measurements beside them are not.
+!out/aoi_sets/
+!out/aoi_sets/*.json
+
 # Third-party papers, kept locally but not redistributed. The research/*.md
 # passes cite each one by title and DOI, so the evidence trail survives without
 # the repo carrying someone else's copyrighted PDFs into a public history.

@@ -195,13 +195,22 @@ async function loadDetail(id) {
     <div class="scroll">${eventsTable(d.events)}</div>
 
     <div id="scanpath"></div>
+    <div id="aoi"></div>
     <div id="plot"></div>`;
 
   [...document.querySelectorAll('tr.clickable')].forEach((tr) => {
     tr.addEventListener('click', () => plotChannel(id, tr.dataset.channel, tr.dataset.source));
   });
 
-  if (sm.gaze_n_fixations) showScanpath(id).catch(() => {});
+  if (sm.gaze_n_fixations) {
+    showScanpath(id).catch(() => {});
+    // Padding is specified in degrees, so the editor needs this session's own
+    // geometry to draw the padded outline at the size it actually tests against.
+    if (m.px_per_mm && m.viewing_distance_mm) {
+      aoiState.dpp = Math.atan2(1 / m.px_per_mm, m.viewing_distance_mm) * 180 / Math.PI;
+    }
+    showAoi(id).catch(() => {});
+  }
 }
 
 function card(k, v, note, cls = '') {
@@ -440,4 +449,232 @@ async function showScanpath(sessionId, window = null, phaseKey = null) {
       showScanpath(sessionId, win, key).catch(() => {});
     });
   });
+}
+
+// ---------------------------------------------------------------------------
+// AOI editor
+//
+// Drawn directly on the scanpath, because an AOI is a claim about where gaze
+// went and the only way to judge it is to see both at once. §4.2 found hit
+// rates moving 77% -> 88% -> 93% purely from refining the same boundaries on
+// the same data, so the editor shows the PADDED outline as well as the drawn
+// one — the padding is what a fixation is actually tested against, and it is
+// usually far larger than people expect.
+// ---------------------------------------------------------------------------
+
+const aoiState = { list: [], armed: false, setName: '', pad: 4.5, fixations: [], dpp: 0.0236 };
+
+async function showAoi(sessionId) {
+  const host = $('aoi');
+  if (!host) return;
+
+  const [{ sets }, sp] = await Promise.all([
+    api('/api/aoi-sets'),
+    loadScanpath(sessionId),
+  ]);
+  aoiState.fixations = sp.fixations;
+
+  const options = sets.map((s) =>
+    `<option value="${s.name}">${s.name} · v${s.version} · ${s.n_aois} AOIs</option>`).join('');
+
+  host.innerHTML = `
+    <h2>Areas of interest</h2>
+    <p class="aoi-bar">
+      <select id="aoiSet">
+        <option value="">— new set —</option>${options}
+      </select>
+      <button id="aoiDraw">Draw rectangle</button>
+      <button id="aoiClear">Clear</button>
+      <label>pad <input id="aoiPad" type="number" step="0.5" min="0" max="15"
+        value="${aoiState.pad}">°</label>
+      <button id="aoiSave">Save set</button>
+      <span id="aoiMsg"></span>
+    </p>
+    <div class="card">
+      <div id="aoiCanvas"></div>
+      <div class="n" id="aoiCaption" style="margin-top:8px"></div>
+    </div>
+    <div id="aoiMetrics"></div>`;
+
+  $('aoiDraw').addEventListener('click', () => {
+    aoiState.armed = true;
+    $('aoiMsg').textContent = 'drag on the image to draw';
+  });
+  $('aoiClear').addEventListener('click', () => {
+    aoiState.list = [];
+    renderAoiCanvas(sessionId);
+  });
+  $('aoiPad').addEventListener('change', (e) => {
+    aoiState.pad = Math.max(0, Number(e.target.value) || 0);
+    renderAoiCanvas(sessionId);
+  });
+  $('aoiSet').addEventListener('change', (e) => loadAoiSet(sessionId, e.target.value));
+  $('aoiSave').addEventListener('click', () => saveAoiSet(sessionId));
+
+  if (aoiState.setName) $('aoiSet').value = aoiState.setName;
+  renderAoiCanvas(sessionId);
+}
+
+function renderAoiCanvas(sessionId) {
+  const w = 900;
+  const h = Math.round(w * (1067 / 1707));
+  const X = (v) => v * w;
+  const Y = (v) => v * h;
+
+  const dots = (aoiState.fixations || []).map((f) =>
+    `<circle cx="${X(f.x)}" cy="${Y(f.y)}" r="3" fill="rgba(76,141,255,.55)"/>`).join('');
+
+  // Anisotropic, because the screen is not square: the same angular budget is a
+  // different fraction of each axis.
+  const padX = (aoiState.pad / aoiState.dpp) / 1707;
+  const padY = (aoiState.pad / aoiState.dpp) / 1067;
+
+  const shapes = aoiState.list.map((a) => {
+    const [x0, y0, x1, y1] = a.coords;
+    const lx = Math.min(x0, x1);
+    const hx = Math.max(x0, x1);
+    const ly = Math.min(y0, y1);
+    const hy = Math.max(y0, y1);
+    return `
+      <rect x="${X(lx - padX)}" y="${Y(ly - padY)}"
+        width="${X(hx - lx + 2 * padX)}" height="${Y(hy - ly + 2 * padY)}"
+        fill="rgba(224,168,0,.10)" stroke="#e0a800" stroke-width="1"
+        stroke-dasharray="4 3"/>
+      <rect x="${X(lx)}" y="${Y(ly)}" width="${X(hx - lx)}" height="${Y(hy - ly)}"
+        fill="rgba(92,184,92,.14)" stroke="#5cb85c" stroke-width="1.5"/>
+      <text x="${X(lx) + 6}" y="${Y(ly) + 15}" fill="#cfd4da" font-size="12">${a.aoi_id}</text>`;
+  }).join('');
+
+  $('aoiCanvas').innerHTML = `
+    <svg id="aoiSvg" viewBox="0 0 ${w} ${h}" width="100%"
+      style="background:#7f7f7f;border-radius:8px;cursor:crosshair">
+      ${dots}${shapes}
+    </svg>`;
+
+  $('aoiCaption').innerHTML = aoiState.list.length
+    ? `<span style="color:var(--ok)">■</span> drawn boundary ·
+       <span style="color:var(--warn)">■</span> padded to ${aoiState.pad}°, which is what a
+       fixation is actually tested against · blue dots are fixations`
+    : 'Draw a rectangle to begin. Fixations are shown so you can see what you are enclosing.';
+
+  wireAoiDrawing(sessionId);
+  if (aoiState.list.length) runAoiAnalysis(sessionId);
+}
+
+function wireAoiDrawing(sessionId) {
+  const svg = $('aoiSvg');
+  if (!svg) return;
+  let start = null;
+
+  const at = (ev) => {
+    const r = svg.getBoundingClientRect();
+    return [(ev.clientX - r.left) / r.width, (ev.clientY - r.top) / r.height];
+  };
+
+  svg.addEventListener('mousedown', (ev) => {
+    if (!aoiState.armed) return;
+    start = at(ev);
+  });
+
+  svg.addEventListener('mouseup', (ev) => {
+    if (!start) return;
+    const [x0, y0] = start;
+    const [x1, y1] = at(ev);
+    start = null;
+
+    // A click rather than a drag: too small to be a boundary anyone meant.
+    if (Math.abs(x1 - x0) < 0.01 || Math.abs(y1 - y0) < 0.01) return;
+
+    aoiState.list.push({
+      aoi_id: `aoi_${aoiState.list.length + 1}`,
+      shape: 'rect',
+      coords: [x0, y0, x1, y1],
+      label: null,
+    });
+    aoiState.armed = false;
+    $('aoiMsg').textContent = '';
+    renderAoiCanvas(sessionId);
+  });
+}
+
+async function runAoiAnalysis(sessionId) {
+  if (!aoiState.setName) {
+    // Say so rather than leaving an empty panel, which looks like a zero result.
+    $('aoiMetrics').innerHTML = `<div class="note">Save the set to compute dwell
+      times, entry times and hit rate against this session.</div>`;
+    return;
+  }
+
+  const r = await api(`/api/sessions/${encodeURIComponent(sessionId)}/aoi`
+    + `?set=${encodeURIComponent(aoiState.setName)}&pad_deg=${aoiState.pad}`);
+
+  if (r.refusal) {
+    $('aoiMetrics').innerHTML = `<div class="note">AOI analysis refused:
+      <strong>${r.refusal}</strong>. Without geometry a pixel tolerance is a
+      different angular tolerance for every participant, so hit rates would not
+      be comparable across a study.</div>`;
+    return;
+  }
+
+  const rows = Object.values(r.metrics).map((m) => `<tr>
+    <td>${m.aoi_id}</td>
+    <td>${m.n_fixations}</td>
+    <td>${m.n_dwells}</td>
+    <td>${Math.round(m.total_dwell_ms)}</td>
+    <td>${m.first_fixation_duration_ms == null ? '—' : Math.round(m.first_fixation_duration_ms)}</td>
+    <td>${m.entry_time_ms == null ? '—' : Math.round(m.entry_time_ms)}</td>
+    <td>${m.first_pass_dwell_ms == null ? '—' : Math.round(m.first_pass_dwell_ms)}</td>
+    <td>${m.second_pass_dwell_ms == null ? '—' : Math.round(m.second_pass_dwell_ms)}</td>
+  </tr>`).join('');
+
+  $('aoiMetrics').innerHTML = `
+    <div class="card" style="margin-top:12px">
+      <div class="k">hit rate</div>
+      <div class="v">${(r.hit_rate * 100).toFixed(0)}%</div>
+      <div class="n">${r.n_hits} of ${r.n_fixations} fixations · padded
+        ${r.pad_deg}° · set <code>${r.provenance.aoi_set}</code>
+        v${r.provenance.aoi_version} · hash
+        <code>${r.provenance.aoi_content_hash}</code></div>
+    </div>
+    <table style="margin-top:12px"><thead><tr>
+      <th>AOI</th><th>fixations</th><th>dwells</th><th>total dwell ms</th>
+      <th>first fix ms</th><th>entry ms</th><th>1st pass ms</th><th>2nd pass ms</th>
+    </tr></thead><tbody>${rows}</tbody></table>
+    <div class="note">Six separately-operationalised measures, per Holmqvist —
+      §4.1 treats these as distinct constructs, not synonyms. An AOI never looked
+      at reports — rather than 0, because a zero entry time would read as "looked
+      at immediately". The hash above identifies the exact boundaries these
+      numbers came from; §4.2 measured a 77→88→93 swing from refining the same
+      definitions on the same data.</div>`;
+}
+
+async function loadAoiSet(sessionId, name) {
+  aoiState.setName = name;
+  if (!name) {
+    aoiState.list = [];
+    renderAoiCanvas(sessionId);
+    return;
+  }
+
+  const r = await api(`/api/sessions/${encodeURIComponent(sessionId)}/aoi`
+    + `?set=${encodeURIComponent(name)}&pad_deg=${aoiState.pad}`);
+  aoiState.list = (r.aois || []).filter((a) => a.shape === 'rect');
+  renderAoiCanvas(sessionId);
+}
+
+async function saveAoiSet(sessionId) {
+  const name = aoiState.setName || prompt('Name for this AOI set:', 'panels');
+  if (!name || !aoiState.list.length) return;
+
+  const res = await fetch('/api/aoi-sets', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, aois: aoiState.list }),
+  }).then((r) => r.json());
+
+  aoiState.setName = name;
+  await showAoi(sessionId);
+  $('aoiMsg').textContent = res.written
+    ? `saved as v${res.version} · ${res.content_hash}`
+    : 'unchanged — nothing written';
 }

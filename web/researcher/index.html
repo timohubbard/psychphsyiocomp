@@ -74,6 +74,14 @@
   button:hover { border-color: var(--accent); }
   svg { display: block; }
   .tier-low { color: var(--warn); } .tier-high { color: var(--ok); }
+
+  .aoi-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 12px; }
+  .aoi-bar select, .aoi-bar input {
+    background: var(--panel); color: var(--fg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 9px; font: inherit; font-size: 12px;
+  }
+  .aoi-bar input { width: 62px; }
+  .aoi-bar label, .aoi-bar span { color: var(--muted); font-size: 12px; }
 </style>
 </head>
 <body>
