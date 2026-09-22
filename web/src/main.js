@@ -29,6 +29,7 @@ const ui = {
   btnEnable: el('btnEnable'), btnStart: el('btnStart'), btnDownload: el('btnDownload'),
   chkStream: el('chkStream'), chkLight: el('chkLight'),
   chkFps: el('chkFps'), chkAudio: el('chkAudio'),
+  progress: el('progress'),
   hud: el('hud'), hudFps: el('hudFps'), hudFace: el('hudFace'),
   hudLuma: el('hudLuma'), hudStage: el('hudStage'),
 };
@@ -39,6 +40,7 @@ const state = {
   chunks: [],
   videoBlob: null,
   rafHandle: null,
+  frameLoopKind: null,
   geometry: null,
   quality: { fps: null, faceRate: null, luma: null },
 };
@@ -172,21 +174,77 @@ function setMetric(node, value, format, classify) {
   node.className = `v ${classify(value)}`;
 }
 
-/** Feed frames to the live engine. Purely for feedback — not the record. */
+/**
+ * Feed frames to the live engine. Purely for feedback — not the record.
+ *
+ * Driven by `requestVideoFrameCallback`, which fires once per frame the video
+ * element actually presents, NOT by `requestAnimationFrame`, which fires once
+ * per display refresh.
+ *
+ * The distinction is not cosmetic. The first real capture ran a 30fps camera on
+ * a ~70Hz display, and the rAF pump pushed every camera frame 2.35 times:
+ *
+ *   - `achieved_fps` reported **70.8** for a camera delivering **30.1**. That is
+ *     the number written to the quality rows and the `sessions` row, and the one
+ *     §5.3's 5Hz exclusion threshold is evaluated against — so the pre-registered
+ *     exclusion variable was measuring the monitor, not the camera.
+ *   - 606,906 signal rows instead of ~258,000, and a 109MB chunks file for an
+ *     82MB video.
+ *   - Duplicate inference on identical pixels, which MediaPipe's VIDEO-mode
+ *     temporal smoothing then made *non-identical*, so the redundancy was
+ *     invisible in the output. Nothing downstream could have detected it.
+ *
+ * rVFC also hands us `presentedFrames`, which is how a dropped frame becomes
+ * observable rather than merely absent.
+ */
 function startPreviewLoop() {
-  const pump = () => {
-    if (ui.preview.readyState >= 2 && state.engine) {
+  const video = ui.preview;
+  const hasRvfc = typeof video.requestVideoFrameCallback === 'function';
+
+  const process = () => {
+    if (video.readyState >= 2 && state.engine) {
       try {
         const ts = stamp();
-        state.engine.pushFrame(ui.preview, ts);
+        state.engine.pushFrame(video, ts);
         state.recorder?.noteFrame(ts.native_ts);
       } catch (err) {
         console.warn('frame dropped', err);
       }
     }
+  };
+
+  if (hasRvfc) {
+    const onFrame = () => {
+      process();
+      state.rafHandle = video.requestVideoFrameCallback(onFrame);
+    };
+    state.frameLoopKind = 'requestVideoFrameCallback';
+    state.rafHandle = video.requestVideoFrameCallback(onFrame);
+    return;
+  }
+
+  // Fallback for browsers without rVFC. `currentTime` only advances when a new
+  // frame is presented, so it still gates on real frames rather than refreshes
+  // — just with rAF's polling granularity instead of an exact callback.
+  let lastMediaTime = -1;
+  const pump = () => {
+    if (video.currentTime !== lastMediaTime) {
+      lastMediaTime = video.currentTime;
+      process();
+    }
     state.rafHandle = requestAnimationFrame(pump);
   };
+  state.frameLoopKind = 'rAF+currentTime';
   state.rafHandle = requestAnimationFrame(pump);
+}
+
+/** Stop the frame loop, whichever kind was started. */
+function stopPreviewLoop() {
+  if (state.frameLoopKind === 'requestVideoFrameCallback') {
+    ui.preview.cancelVideoFrameCallback?.(state.rafHandle);
+  } else {
+    cancelAnimationFrame(state.rafHandle);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -284,15 +342,59 @@ async function runClapper(stage) {
   await wait(TIMINGS.clapperFlashMs);
   ui.flash.style.display = 'none';
   state.recorder.closeEvent('sync_clapper', stage.id);
+
+  // Let the flash actually reach the recording before anything stops it. The
+  // camera lags the screen by more than a frame, so a clapper at the end of a
+  // sequence is otherwise cut off mid-plateau — see TIMINGS.clapperPostrollMs.
+  await wait(TIMINGS.clapperPostrollMs);
 }
 
+/**
+ * Show an instruction and wait for the participant, not for a timer.
+ *
+ * The dwell time is recorded. It is the cheapest available signal that someone
+ * actually read the screen rather than pressing through it, and a run of
+ * near-instant dismissals is worth knowing about when interpreting that
+ * participant's data later.
+ */
 async function runInstruction(stage) {
   ui.target.style.opacity = '0';
-  ui.stageText.textContent = stage.text;
+  ui.fixation.style.display = 'none';
+
+  const lines = stage.lines ?? [stage.text];
+  ui.stageText.innerHTML = `
+    ${stage.title ? `<h2 class="instr-title">${stage.title}</h2>` : ''}
+    <ul class="instr-lines">${lines.map((l) => `<li>${l}</li>`).join('')}</ul>
+    <p class="instr-continue">Press <kbd>space</kbd> when you are ready</p>`;
   ui.stageText.style.display = 'block';
-  state.recorder.logEvent('instruction', { text: stage.text }, stage.id);
-  await wait(4000);
+
+  const shownAt = now();
+  state.recorder.logEvent('instruction', { id: stage.id, title: stage.title ?? null }, stage.id);
+
+  await wait(TIMINGS.instructionMinMs);
+  await waitForContinue();
+
+  state.recorder.closeEvent('instruction', stage.id);
+  state.recorder.logEvent('instruction_dwell', {
+    id: stage.id, dwell_ms: Math.round(now() - shownAt),
+  }, stage.id);
+
   ui.stageText.style.display = 'none';
+}
+
+/** Resolve on space or a click anywhere. */
+function waitForContinue() {
+  return new Promise((resolve) => {
+    const done = (ev) => {
+      if (ev.type === 'keydown' && ev.code !== 'Space') return;
+      if (ev.type === 'keydown') ev.preventDefault();
+      window.removeEventListener('keydown', done);
+      window.removeEventListener('click', done);
+      resolve();
+    };
+    window.addEventListener('keydown', done);
+    window.addEventListener('click', done);
+  });
 }
 
 /**
@@ -304,6 +406,15 @@ async function runInstruction(stage) {
  */
 async function runPoint(stage) {
   ui.stageText.style.display = 'none';
+
+  // Knowing how many are left is the difference between a short task and an
+  // indefinite one. Kept in a corner, dim, and well away from every calibration
+  // coordinate, so it cannot become a competing fixation target.
+  if (stage.index && stage.total) {
+    ui.progress.textContent = `${stage.index} of ${stage.total}`;
+    ui.progress.style.display = 'block';
+  }
+
   ui.target.style.left = `${stage.x * 100}%`;
   ui.target.style.top = `${stage.y * 100}%`;
   ui.target.style.opacity = '1';
@@ -325,13 +436,32 @@ async function runPoint(stage) {
   state.recorder.closeEvent(`${stage.type}_sampling`, stage.id);
   state.recorder.closeEvent(stage.type, stage.id);
   ui.target.style.opacity = '0';
+  if (stage.index === stage.total) ui.progress.style.display = 'none';
 }
 
 async function runFixation(stage) {
   ui.target.style.opacity = '0';
+  ui.stageText.style.display = 'none';
   ui.fixation.style.display = 'block';
-  state.recorder.logEvent('fixation', null, stage.id);
-  await wait(stage.durationMs ?? TIMINGS.fixationMs);
+
+  const durationMs = stage.durationMs ?? TIMINGS.fixationMs;
+  state.recorder.logEvent('fixation', { duration_ms: durationMs }, stage.id);
+
+  // A minute of staring at a cross with no feedback is indistinguishable from a
+  // frozen page. The countdown is deliberately small, dim and in a corner: it
+  // has to be findable if you go looking, without competing with the cross for
+  // the gaze it is the whole point of this stage to hold.
+  const endsAt = now() + durationMs;
+  ui.progress.style.display = 'block';
+  const tick = setInterval(() => {
+    const left = Math.max(0, Math.ceil((endsAt - now()) / 1000));
+    ui.progress.textContent = `${left}s`;
+  }, 250);
+
+  await wait(durationMs);
+
+  clearInterval(tick);
+  ui.progress.style.display = 'none';
   state.recorder.closeEvent('fixation', stage.id);
   ui.fixation.style.display = 'none';
 }
@@ -341,7 +471,7 @@ async function runFixation(stage) {
 // ---------------------------------------------------------------------------
 
 async function finish() {
-  cancelAnimationFrame(state.rafHandle);
+  stopPreviewLoop();
 
   const tail = await state.engine.flush(stamp());
   if (tail) onEngineOutput(tail);
@@ -374,7 +504,8 @@ function renderSummary() {
       : 'unavailable — dva cannot be computed'],
     ['Events logged', String(manifest.events.length)],
     ['Live signal rows', String(signalRows)],
-    ['Achieved fps', manifest.achieved_fps ? manifest.achieved_fps.toFixed(1) : '—'],
+    ['Achieved fps', manifest.achieved_fps
+      ? `${manifest.achieved_fps.toFixed(1)} (${state.frameLoopKind})` : '—'],
     ['Video size', state.videoBlob ? `${(state.videoBlob.size / 1e6).toFixed(1)} MB` : '—'],
     ['Clock resolution', manifest.clock.measured_resolution_ms !== null
       ? `${manifest.clock.measured_resolution_ms.toFixed(3)} ms` : '—'],

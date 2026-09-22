@@ -49,10 +49,40 @@ export const VALIDATION_POINTS = [
 export const TIMINGS = {
   /** How long the flash stays up. Long enough to survive a dropped frame. */
   clapperFlashMs: 200,
+  /**
+   * Keep recording after the flash goes down.
+   *
+   * The camera sees the flash LATER than the browser draws it — measured at
+   * ~54ms end to end on a real capture (display latency, then exposure, then
+   * the encoder's own timestamping). Stopping the recorder the instant the
+   * flash ends therefore truncates it in the video.
+   *
+   * That is not hypothetical. The first real session's closing clapper landed
+   * three frames from the end of the file: the flash began and the recording
+   * stopped mid-plateau, leaving it undetectable. The bookend anchor exists
+   * precisely so the aligner can fit a RATE rather than just an offset
+   * (consumer clocks differ by tens of ppm), and losing it silently costs
+   * exactly the thing two clappers were for.
+   */
+  clapperPostrollMs: 600,
   /** Settle time before the flash, so the baseline luminance is stable. */
   clapperPrerollMs: 1500,
   /** Time to saccade to a newly-appeared target before sampling starts. */
   saccadeMs: 800,
+  /**
+   * Minimum time an instruction stays up before it can be dismissed.
+   *
+   * Instructions are self-paced — they wait for the participant rather than
+   * expiring on a timer. The previous 4-second auto-advance meant a slower
+   * reader simply missed them, with no way to get them back, and §5.1
+   * attributes roughly half of a documented 46-66% attrition to avoidable
+   * instruction and validation failure. A participant who did not finish
+   * reading is exactly that kind of avoidable loss.
+   *
+   * The floor exists only to stop a reflexive keypress skipping a screen before
+   * it has been seen at all.
+   */
+  instructionMinMs: 1200,
   /** Sampling window per calibration point. */
   calibrationDwellMs: 1200,
   /** Sampling window per validation point. */
@@ -60,21 +90,78 @@ export const TIMINGS = {
   fixationMs: 60_000,
 };
 
-/** Build the M0 sequence as a list of stage descriptors. */
+/**
+ * Build the M0 sequence as a list of stage descriptors.
+ *
+ * Every stage a participant could be confused by is preceded by an instruction,
+ * and each one says what will happen, what to do, and how long it lasts. That
+ * last part matters more than it looks: the fixation stage is sixty seconds of
+ * staring at a cross, and a participant who does not know it is sixty seconds
+ * has no way to tell it apart from the page having frozen.
+ */
 export function buildM0Sequence() {
   return [
+    { type: 'instruction', id: 'intro',
+      title: 'Here is what happens next',
+      lines: [
+        'Four short parts, about four minutes in total.',
+        '1. The screen flashes white once. This syncs the recording — it is expected.',
+        '2. A dot appears in 13 places. Look at each one.',
+        '3. The same again in 5 more places, to check the first part worked.',
+        '4. A cross in the middle. Rest your eyes on it for one minute.',
+        'Please keep your head still and stay roughly where you are now throughout.',
+      ] },
+
+    { type: 'instruction', id: 'clapper_intro',
+      title: 'The screen will flash',
+      lines: [
+        'In a moment the whole screen turns white for a split second.',
+        'Nothing is required from you — just keep looking at the screen.',
+        'This lets us line the video up with what was on screen, to the frame.',
+      ] },
     { type: 'sync_clapper', id: 'clapper_1' },
+
     { type: 'instruction', id: 'calib_intro',
-      text: 'Follow the dot with your eyes. Keep your head still.' },
+      title: 'Follow the dot',
+      lines: [
+        'A dot will appear, hold still for a moment, then jump somewhere else.',
+        'Look straight at the centre of each dot and keep looking until it moves.',
+        'Move your EYES, not your head — try to keep your head still.',
+        '13 dots, about 30 seconds.',
+      ] },
     ...CALIBRATION_POINTS.map((p, i) => ({
       type: 'calibration_point', id: `calib_${i}`, x: p[0], y: p[1],
+      index: i + 1, total: CALIBRATION_POINTS.length,
     })),
+
     { type: 'instruction', id: 'valid_intro',
-      text: 'Once more — the same again, to check the calibration held.' },
+      title: 'Once more, to check it worked',
+      lines: [
+        'The same task again, in 5 new places.',
+        'This one measures how well the first part went, so it is worth the same care.',
+        '5 dots, about 10 seconds.',
+      ] },
     ...VALIDATION_POINTS.map((p, i) => ({
       type: 'validation_point', id: `valid_${i}`, x: p[0], y: p[1],
+      index: i + 1, total: VALIDATION_POINTS.length,
     })),
+
+    { type: 'instruction', id: 'fixation_intro',
+      title: 'Now just rest your eyes',
+      lines: [
+        'A cross will appear in the middle of the screen.',
+        'Look at it and let your face relax. There is nothing to do and nothing to press.',
+        'This lasts one minute. A countdown will show how long is left.',
+        'Blinking is completely fine — please do not try to hold your eyes open.',
+      ] },
     { type: 'fixation', id: 'fixation_1', durationMs: TIMINGS.fixationMs },
+
+    { type: 'instruction', id: 'clapper_2_intro',
+      title: 'One more flash, then you are done',
+      lines: [
+        'The screen flashes white once more to close the recording.',
+        'Again, nothing is required — keep looking at the screen.',
+      ] },
     { type: 'sync_clapper', id: 'clapper_2' },
   ];
 }
@@ -98,7 +185,8 @@ export function estimateDurationMs(sequence) {
   for (const stage of sequence) {
     switch (stage.type) {
       case 'sync_clapper':
-        total += TIMINGS.clapperPrerollMs + TIMINGS.clapperFlashMs;
+        total += TIMINGS.clapperPrerollMs + TIMINGS.clapperFlashMs
+          + TIMINGS.clapperPostrollMs;
         break;
       case 'calibration_point':
         total += TIMINGS.saccadeMs + TIMINGS.calibrationDwellMs;
@@ -110,7 +198,10 @@ export function estimateDurationMs(sequence) {
         total += stage.durationMs ?? TIMINGS.fixationMs;
         break;
       case 'instruction':
-        total += 4000; // participant-paced in practice; a rough allowance
+        // Genuinely participant-paced now, so any number here is an allowance
+        // rather than a duration. Six seconds is a reasonable reading estimate
+        // for these screens and keeps the participant-facing estimate honest.
+        total += 6000;
         break;
       default:
         break;

@@ -67,10 +67,72 @@ test('validation points stay inside the viewport', () => {
 
 test('sequence bookends the session with two clappers', () => {
   // One anchor gives offset only; two let the aligner fit clock drift.
+  //
+  // Bookending is a property of the MEASURED span, not of array index 0. The
+  // clappers must enclose every stage that produces data; instruction screens
+  // may sit outside them, and have to, because a participant reading one is not
+  // yet doing anything worth anchoring.
   const seq = buildM0Sequence();
   assert.equal(clapperCount(seq), 2);
-  assert.equal(seq[0].type, 'sync_clapper', 'first stage must be a clapper');
-  assert.equal(seq[seq.length - 1].type, 'sync_clapper', 'last stage must be a clapper');
+
+  const measured = seq
+    .map((s, i) => ({ ...s, i }))
+    .filter((s) => s.type !== 'instruction');
+
+  assert.equal(measured[0].type, 'sync_clapper',
+    'the first stage that produces data must be a clapper');
+  assert.equal(measured[measured.length - 1].type, 'sync_clapper',
+    'the last stage that produces data must be a clapper');
+});
+
+test('every stage a participant could be confused by is introduced', () => {
+  // The first real participant — who wrote the software — reported not knowing
+  // what was being asked of them. Before this, the whole session carried two
+  // one-line instructions that auto-dismissed after four seconds, and the
+  // 60-second fixation had none at all: a cross appeared and nothing else
+  // happened for a minute, which is indistinguishable from a frozen page.
+  const seq = buildM0Sequence();
+  const needsIntro = new Set(['sync_clapper', 'calibration_point', 'validation_point', 'fixation']);
+
+  const introduced = new Set();
+  let sawInstructionSince = null;
+  for (const stage of seq) {
+    if (stage.type === 'instruction') { sawInstructionSince = stage.id; continue; }
+    if (needsIntro.has(stage.type)) {
+      if (sawInstructionSince) introduced.add(stage.type);
+      // A run of points is introduced once, not per point.
+      if (stage.index === undefined || stage.index === stage.total) sawInstructionSince = null;
+    }
+  }
+
+  for (const t of needsIntro) {
+    assert.ok(introduced.has(t), `${t} is not preceded by an instruction`);
+  }
+});
+
+test('instructions are self-paced, not on a timer', () => {
+  // A fixed dwell silently excludes anyone who reads slower than it.
+  assert.ok(TIMINGS.instructionMinMs > 0, 'a minimum read time must exist');
+  assert.ok(TIMINGS.instructionMinMs < 3000,
+    'the minimum is an anti-skip floor, not a substitute for waiting');
+});
+
+test('instruction screens carry real content, not a single line', () => {
+  const intros = buildM0Sequence().filter((s) => s.type === 'instruction');
+  assert.ok(intros.length >= 4, `expected an intro per phase, got ${intros.length}`);
+  for (const s of intros) {
+    assert.ok(s.title, `instruction ${s.id} has no title`);
+    assert.ok(Array.isArray(s.lines) && s.lines.length >= 2,
+      `instruction ${s.id} should say what happens, what to do, and how long`);
+  }
+});
+
+test('the fixation intro tells the participant how long it lasts', () => {
+  // The single worst gap found: a minute of staring with no stated duration.
+  const intro = buildM0Sequence().find((s) => s.id === 'fixation_intro');
+  assert.ok(intro, 'fixation has no introduction');
+  assert.ok(intro.lines.some((l) => /minute|second/i.test(l)),
+    'the fixation intro must state its duration');
 });
 
 test('sequence contains every calibration and validation point', () => {

@@ -16,8 +16,11 @@
 import {
   CARD_WIDTH_MM,
   CARD_HEIGHT_MM,
+  EDGE_SATURATION_FRACTION,
+  VIEWING_DISTANCE_BOUNDS_MM,
   pxPerMmFromCard,
   checkCardPlausible,
+  viewingDistanceMmFromBlindSpot,
   deriveGeometry,
 } from './chinrest.js';
 
@@ -44,8 +47,14 @@ export async function runVirtualChinrest(host, hooks = {}) {
 
   try {
     const cardWidthPx = await runCardTask(root, hooks);
-    const blindSpotDistancesPx = await runBlindSpotTask(root, pxPerMmFromCard(cardWidthPx));
-    return deriveGeometry({ cardWidthPx, blindSpotDistancesPx });
+    const blind = await runBlindSpotTask(root, pxPerMmFromCard(cardWidthPx));
+    return deriveGeometry({
+      cardWidthPx,
+      blindSpotDistancesPx: blind.distancesPx,
+      // How far the dot COULD have travelled. Without this the geometry cannot
+      // tell a blind spot from the left edge of the screen.
+      blindSpotMaxTravelPx: blind.maxTravelPx,
+    });
   } finally {
     root.remove();
   }
@@ -72,8 +81,16 @@ function runCardTask(root, hooks) {
     root.innerHTML = `
       <div class="cr-panel">
         <h1>Screen size check</h1>
-        <p>Hold a bank card, library card or driving licence against the screen.
-           Drag the corner until the outline is exactly the same size as your card.</p>
+        <p>We need to know how big your screen actually is. Screens report their
+           size in pixels, and pixels are different physical sizes on different
+           displays — so the only reliable way is to compare against something
+           of a known size. Bank cards are identical worldwide.</p>
+        <ol class="cr-steps">
+          <li>Find a <strong>bank card, library card or driving licence</strong>.</li>
+          <li><strong>Hold it flat against the screen</strong>, over the outline below.</li>
+          <li>Drag the blue corner until the outline is <strong>exactly</strong> the
+              same size as your card. Use the arrow keys for fine adjustment.</li>
+        </ol>
         <div class="cr-cardwrap">
           <div class="cr-card" id="crCard"><div class="cr-grip" id="crGrip"></div></div>
         </div>
@@ -169,100 +186,214 @@ function runCardTask(root, hooks) {
 // ---------------------------------------------------------------------------
 
 /**
- * Map the blind spot, `BLIND_SPOT_REPS` times.
+ * Map the blind spot, `BLIND_SPOT_REPS` times, after one practice round.
  *
  * The participant covers their right eye, fixates the cross with the left, and
  * presses space when the moving dot disappears. The dot travels left from the
- * cross, so it moves into the temporal field of the open eye.
+ * cross, into the temporal field of the open eye, which is where the optic disc
+ * projects.
  *
- * We cannot verify that they covered an eye or held fixation. The only
- * available evidence is whether the repetitions agree — which is why
- * `deriveGeometry` refuses on wide spread rather than averaging it away.
+ * The practice round is not politeness. This is the least intuitive thing the
+ * whole session asks of anyone — it requires trusting that a dot in plain view
+ * will vanish — and the first real participant, who had built the software,
+ * still got it wrong: every mark landed at the end of the dot's travel, meaning
+ * the dot never entered the blind spot at all. That failure is invisible to the
+ * participant and produces a confident, wrong measurement.
+ *
+ * One practice repetition with honest feedback catches it while it is still
+ * fixable, which is the same argument §5.1 makes for validating the card task at
+ * entry rather than counting the loss at analysis.
  */
-function runBlindSpotTask(root, pxPerMm) {
+async function runBlindSpotTask(root, pxPerMm) {
+  await showBlindSpotIntro(root);
+
+  // Practice until it works, or until they choose to move on regardless.
+  for (;;) {
+    const practice = await runBlindSpotRep(root, { practice: true });
+    const verdict = judgePractice(practice, pxPerMm);
+    const choice = await showPracticeResult(root, verdict);
+    if (choice === 'continue') break;
+  }
+
+  const distancesPx = [];
+  let maxTravelPx = null;
+  for (let i = 0; i < BLIND_SPOT_REPS; i += 1) {
+    const rep = await runBlindSpotRep(root, {
+      practice: false, index: i + 1, total: BLIND_SPOT_REPS,
+    });
+    distancesPx.push(rep.offsetPx);
+    maxTravelPx = rep.maxTravelPx;
+  }
+  return { distancesPx, maxTravelPx };
+}
+
+function showBlindSpotIntro(root) {
   return new Promise((resolve) => {
     root.innerHTML = `
       <div class="cr-panel">
-        <h1>Distance check</h1>
-        <p><strong>Cover your right eye</strong> with your hand and look at the
-           black cross with your left eye. A dot will move across the screen.
-           Press <strong>space</strong> the moment it disappears.</p>
-        <p>Keep your head still and do not follow the dot with your eye.</p>
-        <button id="crBsStart">Start</button>
+        <h1>Finding your blind spot</h1>
+        <p>Everyone has a small gap in their vision where the optic nerve leaves
+           the eye. You never notice it, because the other eye covers it and your
+           brain fills in the rest. Finding it tells us how far you are sitting
+           from the screen, which we need in order to interpret everything else.</p>
+        <ol class="cr-steps">
+          <li><strong>Cup your right hand over your right eye.</strong> Not fingers
+              across it — properly covered, so it sees nothing at all.</li>
+          <li><strong>Look straight at the black cross</strong> with your left eye,
+              and keep looking at it.</li>
+          <li>A dot will move slowly left. <strong>Do not follow it</strong> — keep
+              staring at the cross and watch the dot out of the corner of your eye.</li>
+          <li>At some point the dot will <strong>completely disappear</strong>.
+              That is your blind spot.
+              <strong>Press space the moment it vanishes.</strong></li>
+        </ol>
+        <p class="cr-hint">It really does disappear, and it is sudden and obvious
+           when it happens. If it never disappears, your right eye is probably not
+           fully covered, or your gaze is drifting to follow the dot.</p>
+        <p>We will do one practice first. That one does not count.</p>
+        <button id="crBsStart">Start practice</button>
+      </div>`;
+    root.querySelector('#crBsStart').addEventListener('click', resolve, { once: true });
+  });
+}
+
+/** One repetition. Resolves with the offset in px, or NaN if the dot ran off. */
+function runBlindSpotRep(root, { practice, index, total }) {
+  return new Promise((resolve) => {
+    const label = practice ? 'practice' : `${index} of ${total}`;
+    root.innerHTML = `
+      <div class="cr-field" id="crField">
+        <div class="cr-cross" id="crCross">+</div>
+        <div class="cr-ball" id="crBall"></div>
+        <div class="cr-count" id="crCount">${label}</div>
+        <div class="cr-remind" id="crRemind">
+          right eye covered &middot; look at the cross &middot; space when the dot vanishes
+        </div>
       </div>`;
 
-    root.querySelector('#crBsStart').addEventListener('click', () => {
-      root.innerHTML = `
-        <div class="cr-field" id="crField">
-          <div class="cr-cross" id="crCross">+</div>
-          <div class="cr-ball" id="crBall"></div>
-          <div class="cr-count" id="crCount"></div>
-        </div>`;
+    const field = root.querySelector('#crField');
+    const cross = root.querySelector('#crCross');
+    const ball = root.querySelector('#crBall');
 
-      const field = root.querySelector('#crField');
-      const cross = root.querySelector('#crCross');
-      const ball = root.querySelector('#crBall');
-      const count = root.querySelector('#crCount');
+    const rect = field.getBoundingClientRect();
+    // The cross sits far right so the dot has as much room as possible to
+    // travel left. Travel is the binding constraint on what this task can
+    // measure at all: the blind spot sits at d*tan(13.5deg) from fixation, so
+    // the furthest measurable distance is (travel / pxPerMm) / tan(13.5deg).
+    //
+    // At 0.75 on a 1707px screen at 5.48 px/mm that ceiling was 97cm — and a
+    // real participant hit it, producing four agreeing marks nine pixels from
+    // the edge and a confident, meaningless 96.6cm. 0.9 lifts the ceiling to
+    // ~116cm and costs nothing; the dot only ever needs room on its left.
+    const crossX = rect.width * 0.9;
+    const crossY = rect.height * 0.5;
+    cross.style.left = `${crossX}px`;
+    cross.style.top = `${crossY}px`;
 
-      const rect = field.getBoundingClientRect();
-      // The cross sits right of centre so the dot has room to travel left
-      // through the full plausible blind-spot eccentricity at close distances.
-      const crossX = rect.width * 0.75;
-      const crossY = rect.height * 0.5;
-      cross.style.left = `${crossX}px`;
-      cross.style.top = `${crossY}px`;
+    let ballX = crossX - 20;
+    ball.style.top = `${crossY}px`;
+    ball.style.left = `${ballX}px`;
+    ball.style.display = 'block';
 
-      const distances = [];
-      let ballX = crossX;
-      let raf = null;
+    let raf = null;
+    const finish = (offsetPx) => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('keydown', onKey);
+      ball.style.display = 'none';
+      resolve({ offsetPx, maxTravelPx: crossX });
+    };
 
-      const startRep = () => {
-        count.textContent = `${distances.length + 1} of ${BLIND_SPOT_REPS}`;
-        ballX = crossX - 20;
-        ball.style.top = `${crossY}px`;
-        ball.style.display = 'block';
-        step();
-      };
+    const step = () => {
+      ballX -= BALL_SPEED_PX;
+      ball.style.left = `${ballX}px`;
+      if (ballX < 0) {
+        // Ran the full width without being marked: the dot never vanished.
+        finish(NaN);
+        return;
+      }
+      raf = requestAnimationFrame(step);
+    };
 
-      const step = () => {
-        ballX -= BALL_SPEED_PX;
-        ball.style.left = `${ballX}px`;
+    const onKey = (ev) => {
+      if (ev.code !== 'Space') return;
+      ev.preventDefault();
+      finish(crossX - ballX);
+    };
 
-        // Ran off the edge without a keypress: the dot never vanished, or the
-        // participant missed it. Record NaN so `summariseBlindSpotReps` counts
-        // it as rejected rather than letting a short run look like a full one.
-        if (ballX < 0) {
-          distances.push(NaN);
-          nextRep();
-          return;
-        }
-        raf = requestAnimationFrame(step);
-      };
+    window.addEventListener('keydown', onKey);
+    raf = requestAnimationFrame(step);
+  });
+}
 
-      const nextRep = () => {
-        cancelAnimationFrame(raf);
-        ball.style.display = 'none';
-        if (distances.length >= BLIND_SPOT_REPS) {
-          window.removeEventListener('keydown', onKey);
-          resolve(distances);
-          return;
-        }
-        setTimeout(startRep, 600);
-      };
+/**
+ * What the practice repetition tells us, in participant terms.
+ *
+ * Each failure mode gets its own wording, because they need different fixes and
+ * a generic "try again" tells the participant nothing they can act on.
+ */
+function judgePractice({ offsetPx, maxTravelPx }, pxPerMm) {
+  if (!Number.isFinite(offsetPx)) {
+    return {
+      ok: false,
+      title: 'The dot never disappeared',
+      detail: 'It ran all the way off the edge of the screen without being marked.',
+    };
+  }
+  if (offsetPx >= maxTravelPx * EDGE_SATURATION_FRACTION) {
+    return {
+      ok: false,
+      title: 'That was right at the edge',
+      detail: 'You marked the dot just as it was about to leave the screen, which '
+        + 'usually means it never actually vanished into your blind spot.',
+    };
+  }
 
-      const onKey = (ev) => {
-        if (ev.code !== 'Space') return;
-        ev.preventDefault();
-        if (ball.style.display === 'none') return;
-        distances.push(crossX - ballX);
-        nextRep();
-      };
+  const mm = viewingDistanceMmFromBlindSpot(offsetPx, pxPerMm);
+  if (mm < VIEWING_DISTANCE_BOUNDS_MM.min) {
+    return {
+      ok: false,
+      title: 'That was very early',
+      detail: 'The dot had barely started moving. Wait for it to actually vanish — '
+        + 'it takes a few seconds, and it is unmistakable when it happens.',
+    };
+  }
+  return {
+    ok: true,
+    title: 'That looks right',
+    detail: `That puts you about ${Math.round(mm / 10)}cm from the screen, which is `
+      + 'a normal sitting distance. Now the same thing five more times.',
+  };
+}
 
-      window.addEventListener('keydown', onKey);
-      startRep();
-    });
+function showPracticeResult(root, verdict) {
+  return new Promise((resolve) => {
+    const tips = verdict.ok ? '' : `
+      <ul class="cr-steps">
+        <li>Is your right eye <strong>completely</strong> covered? Cup your palm over it.</li>
+        <li>Are you staring at the cross the whole time? Glancing at the dot is
+            very tempting, and it is what stops the dot disappearing.</li>
+        <li>Sitting closer helps. About an arm's length from the screen works well.</li>
+      </ul>`;
 
-    void pxPerMm; // conversion happens in deriveGeometry, on raw pixels
+    root.innerHTML = `
+      <div class="cr-panel">
+        <h1>${verdict.title}</h1>
+        <p>${verdict.detail}</p>
+        ${tips}
+        <p class="cr-actions">
+          <button id="crAgain" class="${verdict.ok ? 'cr-secondary' : ''}">
+            Try the practice again
+          </button>
+          <button id="crGo" class="${verdict.ok ? '' : 'cr-secondary'}">
+            ${verdict.ok ? 'Start the real thing' : 'Continue anyway'}
+          </button>
+        </p>
+      </div>`;
+
+    root.querySelector('#crAgain')
+      .addEventListener('click', () => resolve('again'), { once: true });
+    root.querySelector('#crGo')
+      .addEventListener('click', () => resolve('continue'), { once: true });
   });
 }
 
@@ -291,4 +422,13 @@ export const CHINREST_CSS = `
            border-radius: 50%; background: #111; display: none; }
 .cr-count { position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%);
             color: #333; font-size: 13px; }
+/* A standing reminder of the three things people forget mid-task. Dim and at
+   the top, well away from the cross and the dot's path. */
+.cr-remind { position: absolute; left: 50%; top: 18px; transform: translateX(-50%);
+             color: #4a4a4a; font-size: 12px; letter-spacing: .02em; }
+.cr-steps { margin: 18px 0; padding-left: 22px; }
+.cr-steps li { margin-bottom: 10px; line-height: 1.5; color: var(--fg); }
+.cr-hint { font-size: 14px; border-left: 2px solid var(--border); padding-left: 12px; }
+.cr-actions { display: flex; gap: 10px; margin: 22px 0 0; }
+.cr-secondary { background: transparent; border: 1px solid var(--border); color: var(--fg); }
 `;
