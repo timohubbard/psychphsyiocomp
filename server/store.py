@@ -398,3 +398,43 @@ def phases(root: str | Path, session_id: str) -> list[dict[str, Any]]:
            for k, v in spans.items()]
     out.sort(key=lambda p: p["start"])
     return out
+
+
+def agreement_report(root: str | Path, session_id: str,
+                     max_channels: int = 60) -> dict[str, Any]:
+    """Per-channel agreement between sources, and what kind of comparison it is.
+
+    §2.2: engine choice alone swung valid-face-frame yield 43%->63% and
+    expression counts 3-4x on identical video, with between-engine agreement at
+    r = 0.37-0.75. That spread is the free uncertainty estimate, and a channel
+    produced by one engine has none — which this reports explicitly rather than
+    by omission.
+
+    Filtering happens in Arrow rather than by materialising every row as a dict.
+    A session is ~800,000 rows and the alternative is slow enough that the app
+    would feel broken.
+    """
+    from agreement import agreement_for_channel, summarise
+
+    d = Path(root) / f"session_id={session_id}"
+    signals = _read_partitioned(d, "signals")
+    if signals is None or not signals.num_rows:
+        return {"channels": [], "summary": summarise([])}
+
+    channels = sorted(pc.unique(signals.column("channel")).to_pylist())[:max_channels]
+
+    results: list[Any] = []
+    for ch in channels:
+        sub = signals.filter(pc.equal(signals.column("channel"), ch))
+        rows = sub.select(["channel", "source", "master_ts", "value"]).to_pylist()
+        results.extend(agreement_for_channel(rows, ch))
+
+    return {
+        "channels": [{
+            "channel": a.channel, "source_a": a.source_a, "source_b": a.source_b,
+            "r": a.r, "n": a.n_overlapping, "verdict": a.verdict,
+            "kind": a.kind, "detail": a.detail,
+            "sd_a": a.sd_a, "sd_b": a.sd_b,
+        } for a in results],
+        "summary": summarise(results),
+    }

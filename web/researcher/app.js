@@ -194,6 +194,7 @@ async function loadDetail(id) {
     <h2>Events <span class="pill">${d.events.length}</span></h2>
     <div class="scroll">${eventsTable(d.events)}</div>
 
+    <div id="agreement"></div>
     <div id="scanpath"></div>
     <div id="aoi"></div>
     <div id="plot"></div>`;
@@ -201,6 +202,8 @@ async function loadDetail(id) {
   [...document.querySelectorAll('tr.clickable')].forEach((tr) => {
     tr.addEventListener('click', () => plotChannel(id, tr.dataset.channel, tr.dataset.source));
   });
+
+  showAgreement(id).catch(() => {});
 
   if (sm.gaze_n_fixations) {
     showScanpath(id).catch(() => {});
@@ -677,4 +680,110 @@ async function saveAoiSet(sessionId) {
   $('aoiMsg').textContent = res.written
     ? `saved as v${res.version} · ${res.content_hash}`
     : 'unchanged — nothing written';
+}
+
+// ---------------------------------------------------------------------------
+// Engine agreement
+//
+// §2.2 is the reason this panel exists: engine choice alone swung valid-frame
+// yield 43%->63% and expression counts 3-4x on IDENTICAL video, with
+// between-engine agreement at r = 0.37-0.75. That spread is the free
+// uncertainty estimate — the only empirical handle on how much of a result is
+// the face and how much is the detector.
+//
+// A channel with one engine has none of that, and the panel says so rather than
+// showing an empty table. "No disagreement measured" and "no disagreement" are
+// different claims, and a blank space reads as the second.
+// ---------------------------------------------------------------------------
+
+async function showAgreement(sessionId) {
+  const host = $('agreement');
+  if (!host) return;
+  host.innerHTML = '<h2>Engine agreement</h2><div class="empty">computing…</div>';
+
+  const r = await api(`/api/sessions/${encodeURIComponent(sessionId)}/agreement`);
+  const s = r.summary;
+  const [lo, hi] = s.published_range;
+
+  const cards = [];
+
+  // Between engines first, because it is the one the evidence speaks to — and
+  // the one that is usually absent.
+  if (s.between_engines.n > 0) {
+    const med = s.between_engines.median_r;
+    cards.push(card('Between engines', fmt(med),
+      `${s.between_engines.n} channels · §2.2 measured ${lo}–${hi}`,
+      med >= hi ? 'ok' : med >= lo ? 'warn' : 'bad'));
+  } else {
+    cards.push(card('Between engines', 'none',
+      'no second engine — see below', 'warn'));
+  }
+
+  if (s.between_placements.n > 0) {
+    // Read differently from the above. Same model, same pixels: these SHOULD
+    // agree closely, so a low value is a placement bug rather than the
+    // uncertainty §2.2 describes.
+    const med = s.between_placements.median_r;
+    cards.push(card('Between placements', fmt(med),
+      `${s.between_placements.n} channels · same engine, so expect high`,
+      med >= 0.8 ? 'ok' : 'warn'));
+    cards.push(card('Worst placement pair', fmt(s.between_placements.min_r),
+      'same model on the same pixels', s.between_placements.min_r >= 0.5 ? '' : 'bad'));
+  }
+
+  if (s.n_single_source) {
+    cards.push(card('Single-source channels', String(s.n_single_source),
+      'no uncertainty estimate available'));
+  }
+
+  if (s.n_low_variance) {
+    // Excluded rather than counted as disagreement. Correlating a channel that
+    // never moved measures noise against noise, and folding those in drags the
+    // median toward zero with channels that had nothing to say.
+    cards.push(card('Barely moved', String(s.n_low_variance),
+      'excluded — nothing to agree about'));
+  }
+
+  const worst = r.channels
+    .filter((c) => c.verdict === 'ok')
+    .sort((a, b) => a.r - b.r)
+    .slice(0, 12);
+
+  host.innerHTML = `
+    <h2>Engine agreement</h2>
+    <div class="cards">${cards.join('')}</div>
+
+    ${s.between_engines.n === 0 ? `<div class="note">
+      <strong>No channel here was produced by two different engines</strong>, so the
+      inter-engine spread §2.2 measured at r = ${lo}–${hi} — which is the free
+      uncertainty estimate for facial measurement — is unavailable for this
+      session. Not measuring the disagreement does not remove it. §2.2's
+      instruction is explicit: never single-engine on facial, and treat no
+      engine's absolute output as ground truth.</div>` : ''}
+
+    ${s.between_placements.n > 0 ? `<div class="note">
+      The figures above are <strong>between placements</strong> — the same engine
+      run in the browser and again server-side over the stored video. They are
+      not comparable to §2.2's inter-engine range, and should sit much higher:
+      one model, the same pixels. A low value here is a placement bug, not
+      measurement uncertainty.</div>` : ''}
+
+    ${worst.length ? `
+      <table style="margin-top:12px"><thead><tr>
+        <th>channel</th><th>kind</th><th>r</th><th>n</th>
+      </tr></thead><tbody>${worst.map((c) => `<tr>
+        <td>${c.channel}</td>
+        <td class="txt">${c.kind}</td>
+        <td class="${c.r < 0.5 ? 'tier-low' : ''}">${fmt(c.r, 3)}</td>
+        <td>${c.n}</td>
+      </tr>`).join('')}</tbody></table>
+      <div class="note">Weakest agreement first — the informative end. A channel
+        two sources disagree about is one no single number should be quoted for.
+        ${s.n_low_variance ? `<br><br><strong>${s.n_low_variance} channels are
+        excluded above</strong> because they barely moved. Measured on this
+        session, <code>blendshape.jawRight</code> correlated at r = 0.065
+        between two placements of the same engine on the same pixels — which
+        looks alarming until you see its sd was 0.010 and the participant never
+        moved their jaw sideways. Both engines correctly reported nothing.
+        Correlating noise against noise is not a disagreement.` : ''}</div>` : ''}`;
 }

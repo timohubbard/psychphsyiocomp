@@ -36,6 +36,7 @@ import aoi_store  # noqa: E402
 from aoi import AOI, AOISet, analyse  # noqa: E402
 from fixations import classify  # noqa: E402
 from store import (  # noqa: E402
+    agreement_report,
     channel_series,
     list_sessions,
     phases,
@@ -115,6 +116,9 @@ class Handler(SimpleHTTPRequestHandler):
 
         if len(parts) == 4 and parts[:2] == ["api", "aoi-sets"] and parts[3] == "history":
             return {"versions": aoi_store.history(self.data_root, parts[2])}
+
+        if len(parts) == 4 and parts[:2] == ["api", "sessions"] and parts[3] == "agreement":
+            return agreement_report(self.data_root, parts[2])
 
         if len(parts) == 4 and parts[:2] == ["api", "sessions"] and parts[3] == "aoi":
             return self._aoi_analysis(parts[2], query)
