@@ -95,12 +95,21 @@ class ClockRegistry:
     master_clock_id: str
     _anchors: list[Anchor] = field(default_factory=list)
     _known_clocks: set[str] = field(default_factory=set)
+    #: Why a clock has no anchors, when the evidence was examined and rejected.
+    #: "no anchors" alone cannot distinguish "nothing to look at" from "found
+    #: something and refused it", and the second is the one worth reading.
+    _refusals: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._known_clocks.add(self.master_clock_id)
 
     def register_clock(self, clock_id: str) -> None:
         self._known_clocks.add(clock_id)
+
+    def refuse(self, clock_id: str, reason: str) -> None:
+        """Record why ``clock_id`` was left without anchors."""
+        self._known_clocks.add(clock_id)
+        self._refusals[clock_id] = reason
 
     def add_anchor(self, anchor: Anchor) -> None:
         if anchor.uncertainty_ms < 0:
@@ -150,6 +159,7 @@ class ClockRegistry:
                 unaligned_reason=(
                     f"no anchors linking '{clock_id}' to master "
                     f"'{self.master_clock_id}'; master_ts left NULL"
+                    + (f" — {self._refusals[clock_id]}" if clock_id in self._refusals else "")
                 ),
             )
 
@@ -389,6 +399,104 @@ def detect_clappers_in_luma(
 
     merged.sort(key=lambda c: c[2], reverse=True)
     return merged
+
+
+#: How far from its expected position a flash may be and still be accepted.
+#:
+#: The video's PTS starts at 0 when MediaRecorder starts, and the page logs
+#: `recording_start` on the master clock at that moment — so a flash drawn at
+#: master time E is expected at video time E - recording_start. Measured on the
+#: real M0 pilot: the flash landed 29 ms after that expectation. The tolerance
+#: is ~50x that, because recorder start-up latency varies by machine and
+#: browser, and it is still two orders of magnitude tighter than what it has
+#: to reject: on a fake-camera session the detector's strongest "flash" sat 92
+#: seconds from any flash the page drew, and was accepted as an anchor.
+EXPECTED_POSITION_TOLERANCE_MS = 1500.0
+
+#: Two matched flashes must be as far apart in video time as the page drew them
+#: in master time. Consumer clocks drift by tens of ppm — 100 ppm over a
+#: ten-minute session is 60 ms — plus a frame of detection jitter at each end.
+SPACING_TOLERANCE_MS = 150.0
+
+
+def match_clappers(
+    clapper_master_ts: list[float],
+    recording_start_master_ts: float | None,
+    candidates: list[tuple[float, float, float]],
+    *,
+    position_tolerance_ms: float = EXPECTED_POSITION_TOLERANCE_MS,
+    spacing_tolerance_ms: float = SPACING_TOLERANCE_MS,
+) -> tuple[list[tuple[float, float, float]], str | None]:
+    """Pair each drawn flash with the detected flash that IS it.
+
+    Returns ``([(video_ts, master_ts, uncertainty_ms), ...], refusal_reason)``.
+
+    The previous rule took the single strongest detection and paired it with
+    the FIRST clapper, always. That fails two ways: a fake or flashless video's
+    strongest bump is accepted as an anchor, and a session whose closing flash
+    is brighter than its opening one is aligned to the wrong event — every
+    video row shifted by the whole session length, reported as aligned. It
+    also meant the second clapper was never used, so the rate fit that two
+    bookend clappers exist to enable never happened.
+
+    With ``recording_start_master_ts`` each flash has an expected video
+    position, and only a detection near it is accepted. Without it (older
+    bundles), only the unambiguous cases pass: one drawn flash and exactly one
+    detection, or two detections whose spacing matches the drawn spacing.
+    """
+    events = sorted(clapper_master_ts)
+    if not events:
+        return [], "no sync_clapper event on the master clock"
+    if not candidates:
+        return [], "no flash found in the video's luminance"
+
+    if recording_start_master_ts is not None:
+        used: set[int] = set()
+        matched: list[tuple[float, float, float]] = []
+        for e in events:
+            expected = e - recording_start_master_ts
+            best = None
+            for j, (vts, unc, score) in enumerate(candidates):
+                if j in used or abs(vts - expected) > position_tolerance_ms:
+                    continue
+                key = (abs(vts - expected), -score)
+                if best is None or key < best[0]:
+                    best = (key, j)
+            if best is not None:
+                used.add(best[1])
+                vts, unc, _ = candidates[best[1]]
+                matched.append((vts, e, unc))
+        if not matched:
+            nearest = min(abs(c[0] - (events[0] - recording_start_master_ts)) for c in candidates)
+            return [], (f"{len(candidates)} flash-like event(s) in the video, none within "
+                        f"{position_tolerance_ms:.0f} ms of where a drawn flash must appear "
+                        f"(nearest {nearest / 1000:.1f} s away)")
+    else:
+        if len(events) == 1 and len(candidates) == 1:
+            vts, unc, _ = candidates[0]
+            matched = [(vts, events[0], unc)]
+        else:
+            matched = []
+            by_time = sorted(candidates, key=lambda c: c[0])
+            span = events[-1] - events[0]
+            for i, a in enumerate(by_time):
+                for b in by_time[i + 1:]:
+                    if len(events) >= 2 and abs((b[0] - a[0]) - span) <= spacing_tolerance_ms:
+                        matched = [(a[0], events[0], a[1]), (b[0], events[-1], b[1])]
+                        break
+                if matched:
+                    break
+            if not matched:
+                return [], (f"{len(events)} drawn flash(es) and {len(candidates)} detection(s) "
+                            "with no recording_start to place them, and no pair whose spacing "
+                            "matches the drawn spacing — ambiguous, so refused")
+
+    if len(matched) >= 2:
+        (v1, e1, _), (v2, e2, _) = matched[0], matched[-1]
+        if abs((v2 - v1) - (e2 - e1)) > spacing_tolerance_ms:
+            return [], (f"matched flashes are {v2 - v1:.0f} ms apart in the video but "
+                        f"{e2 - e1:.0f} ms apart as drawn — inconsistent, so refused")
+    return matched, None
 
 
 def detect_clapper_in_luma(

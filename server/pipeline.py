@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from alignment import Anchor, ClockRegistry, detect_clapper_in_luma
+from alignment import Anchor, ClockRegistry, detect_clappers_in_luma, match_clappers
 from study import verify_session_study
 from engine_contract import Engine, MediaDescriptor
 from tables import CanonicalWriter, SessionContext
@@ -172,22 +172,26 @@ def build_registry(
     """
     reg = ClockRegistry(master_clock_id=MASTER_CLOCK)
 
-    marker_master_ts = bundle.sync_marker_ts()
-    if marker_master_ts is None or not video_luma:
+    claps = [float(e["onset_native_ts"]) for e in bundle.events
+             if e.get("event_type") == "sync_clapper"]
+    if not claps or not video_luma:
         return reg
 
-    detected = detect_clapper_in_luma(video_luma)
-    if detected is None:
+    rec_start = next((float(e["onset_native_ts"]) for e in bundle.events
+                      if e.get("event_type") == "recording_start"), None)
+    matched, refusal = match_clappers(claps, rec_start, detect_clappers_in_luma(video_luma))
+    if refusal:
+        reg.refuse("video_pts", refusal)
         return reg
 
-    video_ts, uncertainty = detected
-    reg.add_anchor(
-        Anchor(
-            clock_a="video_pts", ts_a=video_ts,
-            clock_b=MASTER_CLOCK, ts_b=marker_master_ts,
-            uncertainty_ms=uncertainty, label="sync_clapper",
+    for video_ts, master_ts, uncertainty in matched:
+        reg.add_anchor(
+            Anchor(
+                clock_a="video_pts", ts_a=video_ts,
+                clock_b=MASTER_CLOCK, ts_b=master_ts,
+                uncertainty_ms=uncertainty, label="sync_clapper",
+            )
         )
-    )
     return reg
 
 

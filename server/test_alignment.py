@@ -20,6 +20,7 @@ from alignment import (
     ClockRegistry,
     detect_clapper_in_luma,
     detect_clappers_in_luma,
+    match_clappers,
 )
 
 MASTER = "performance.now"
@@ -329,3 +330,79 @@ def test_one_flash_yields_one_detection_not_a_run():
     """Overlapping matched-filter windows are the same event, not several."""
     series = _with_flash(_flat_luma(n=120, value=185.0), at=50, rise=9.0, span=7)
     assert len(detect_clappers_in_luma(series)) == 1
+
+
+# ---------------------------------------------------------------------------
+# pairing drawn flashes with detected ones
+# ---------------------------------------------------------------------------
+# Real M0 pilot: recording_start 11849 ms, clappers drawn at 125435 and
+# 241726, and the video flash landed 29 ms after its expected position.
+
+REC, E1, E2 = 11849.0, 125435.0, 241726.0
+
+
+def _cand(video_ts, score=10.0):
+    return (video_ts, 33.0, score)
+
+
+def test_both_clappers_are_matched_and_both_become_anchors():
+    """The second clapper used to be ignored, so the rate fit two bookend
+    clappers exist for never happened."""
+    matched, why = match_clappers([E1, E2], REC,
+                                  [_cand(E1 - REC + 29), _cand(E2 - REC + 31)])
+    assert why is None
+    assert [m[1] for m in matched] == [E1, E2]
+
+
+def test_a_brighter_closing_flash_is_not_paired_with_the_opening_event():
+    """The old rule took the strongest detection and paired it with the FIRST
+    clapper. A brighter closing flash shifted every video row by the whole
+    session, reported as aligned."""
+    matched, why = match_clappers([E1, E2], REC,
+                                  [_cand(E2 - REC + 30, score=50.0),
+                                   _cand(E1 - REC + 30, score=9.0)])
+    assert why is None
+    for video_ts, master_ts, _ in matched:
+        assert abs((master_ts - REC) - video_ts) < 100
+
+
+def test_a_flash_nowhere_near_where_one_was_drawn_is_refused():
+    """Measured: on a fake-camera session the strongest 'flash' sat 92 s from
+    any drawn flash and was accepted as an anchor."""
+    matched, why = match_clappers([11635.0, 250616.0], 778.0, [_cand(102697.0)])
+    assert matched == []
+    assert "92" in why or "91" in why
+
+
+def test_one_flash_found_of_two_still_anchors_the_offset():
+    matched, why = match_clappers([E1, E2], REC, [_cand(E1 - REC + 29)])
+    assert why is None and len(matched) == 1
+
+
+def test_matched_flashes_with_the_wrong_spacing_are_refused():
+    matched, why = match_clappers([E1, E2], REC,
+                                  [_cand(E1 - REC + 29), _cand(E2 - REC + 900)])
+    assert matched == []
+    assert "inconsistent" in why
+
+
+def test_without_recording_start_a_lone_flash_for_a_lone_event_is_accepted():
+    """Older bundles: the unambiguous case still aligns."""
+    matched, why = match_clappers([1000.0], None, [_cand(400.0)])
+    assert why is None and matched == [(400.0, 1000.0, 33.0)]
+
+
+def test_without_recording_start_a_pair_is_accepted_only_on_matching_spacing():
+    good, why = match_clappers([E1, E2], None,
+                               [_cand(5000.0), _cand(5000.0 + (E2 - E1) + 20), _cand(9000.0)])
+    assert why is None and [m[0] for m in good] == [5000.0, 5000.0 + (E2 - E1) + 20]
+    bad, why = match_clappers([E1, E2], None, [_cand(5000.0), _cand(9000.0)])
+    assert bad == [] and "ambiguous" in why
+
+
+def test_a_refusal_reason_reaches_the_unaligned_stream():
+    reg = ClockRegistry(master_clock_id="m")
+    reg.refuse("video_pts", "flash not where drawn")
+    sol = reg.solve("video_pts")
+    assert not sol.aligned
+    assert "flash not where drawn" in sol.unaligned_reason
