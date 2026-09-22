@@ -31,6 +31,9 @@ CONSENT_TIER_IDS = ("features_only", "media_retained", "media_plus_transcript")
 #: Mirrors MODALITIES in web/src/study.js.
 MODALITY_IDS = ("gaze", "face", "voice", "respiration")
 
+#: Mirrors AUDIO_MODALITIES in web/src/study.js: modalities that need the microphone.
+AUDIO_MODALITY_IDS = ("voice",)
+
 #: BIPA's 3-year outer bound, mirroring MAX_RETENTION_DAYS.
 MAX_RETENTION_DAYS = 3 * 365
 
@@ -111,6 +114,12 @@ def validate_study(study: Any) -> Verdict:
 
     if "tasks" in study and not isinstance(study["tasks"], list):
         reasons.append("tasks must be a list when present")
+
+    # Mirrors study.js: a transcript tier with no microphone offers a choice
+    # that cannot happen and records consent to transcribe a silent session.
+    if (isinstance(tiers, list) and "media_plus_transcript" in tiers
+            and isinstance(mods, list) and not any(m in AUDIO_MODALITY_IDS for m in mods)):
+        reasons.append("media_plus_transcript is offered but no modality records audio")
 
     return Verdict(not reasons, tuple(reasons))
 

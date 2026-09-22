@@ -67,6 +67,16 @@ export const CONSENT_TIERS = [
     ],
     consequence:
       'Researchers can improve the analysis and re-run it on your recording.',
+    // What this tier says when the study records no audio. Telling a
+    // participant their audio is kept when no microphone is ever opened is a
+    // disclosure of a different protocol — see `tierCopy`.
+    withoutAudio: {
+      summary: 'Your video is stored so the analysis can be re-run. No audio is recorded.',
+      keeps: [
+        'Everything above, plus the original video.',
+        'This is identifiable data. Blurring a face does not change that.',
+      ],
+    },
   },
   {
     id: 'media_plus_transcript',
@@ -130,6 +140,20 @@ export function validateConsent(record) {
 }
 
 /**
+ * A tier's wording as shown for a study that does or does not record audio.
+ *
+ * The consent record stores exactly this, so what was agreed to is what was
+ * on screen: recording the canonical audio wording for a participant who was
+ * shown the video-only wording would misstate their consent in the other
+ * direction.
+ */
+export function tierCopy(tier, { audio = true } = {}) {
+  if (!tier) return tier;
+  const { withoutAudio, ...base } = tier;
+  return audio || !withoutAudio ? base : { ...base, ...withoutAudio };
+}
+
+/**
  * The record written into the session manifest.
  *
  * Carries what was disclosed, not just what was agreed. A tier alone cannot be
@@ -137,8 +161,8 @@ export function validateConsent(record) {
  * knowing what they were told retention meant.
  */
 export function consentRecord({ tier, retentionDays, secondaryUse, contact,
-                                irbReference = null, studyId }) {
-  const chosen = CONSENT_TIERS.find((t) => t.id === tier);
+                                irbReference = null, studyId, audio = true }) {
+  const chosen = tierCopy(CONSENT_TIERS.find((t) => t.id === tier), { audio });
   return {
     tier,
     understood: true,
@@ -252,6 +276,7 @@ export function runConsent(host, protocol) {
         contact: disclosure.contact,
         irbReference: disclosure.irbReference,
         studyId,
+        audio: activity.audio,
       });
       record.understood = understood;
 

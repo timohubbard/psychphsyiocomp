@@ -28,7 +28,7 @@
  * because it said so, never because the engine was installed.
  */
 
-import { CONSENT_TIERS, MAX_RETENTION_DAYS } from './consent.js';
+import { CONSENT_TIERS, MAX_RETENTION_DAYS, tierCopy } from './consent.js';
 import { activitiesFor } from './sequence.js';
 
 /** Every modality this platform can collect, and what it costs to say yes. */
@@ -163,6 +163,14 @@ export function validateStudy(study) {
     reasons.push('tasks must be a list when present');
   }
 
+  // A transcript tier with no microphone offers the participant a choice that
+  // cannot happen, and records a consent to transcription for a session with
+  // no audio. Mirrored in server/study.py.
+  if (Array.isArray(tiers) && tiers.includes('media_plus_transcript')
+      && Array.isArray(mods) && !mods.some((m) => AUDIO_MODALITIES.includes(m))) {
+    reasons.push('media_plus_transcript is offered but no modality records audio');
+  }
+
   return { valid: reasons.length === 0, reasons };
 }
 
@@ -225,7 +233,8 @@ export function needsAudio(study) {
 /** The consent tiers this study offers, in the canonical order. */
 export function offeredTiers(study) {
   const offered = new Set(study.consent_tiers ?? []);
-  return CONSENT_TIERS.filter((t) => offered.has(t.id));
+  const audio = needsAudio(study);
+  return CONSENT_TIERS.filter((t) => offered.has(t.id)).map((t) => tierCopy(t, { audio }));
 }
 
 /**
@@ -350,6 +359,7 @@ export function protocolFor(study) {
     // What the participant is told happens, derived from the protocol rather
     // than written beside it — see `activitiesFor`.
     activity: {
+      audio,
       devices: audio ? 'camera and microphone' : 'camera',
       records: audio ? 'video and audio' : 'video only — no audio',
       doing: activitiesFor(study),

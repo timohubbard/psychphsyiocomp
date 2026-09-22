@@ -346,3 +346,31 @@ test('joinAnd reads as a sentence', async () => {
   assert.equal(joinAnd(['a', 'b']), 'a and b');
   assert.equal(joinAnd(['a', 'b', 'c']), 'a, b and c');
 });
+
+test('a transcript tier needs a microphone (mirrors server/study.py)', async () => {
+  const { validateStudy } = await import('./study.js');
+  const fs = await import('node:fs/promises');
+  const s = JSON.parse(await fs.readFile('studies/au-expressions.json', 'utf8'));
+  s.consent_tiers = ['media_retained', 'media_plus_transcript'];
+  const v = validateStudy(s);
+  assert.equal(v.valid, false);
+  assert.ok(v.reasons.some((r) => r.includes('no modality records audio')));
+});
+
+test('a study without audio is not told its audio is kept', async () => {
+  const fs = await import('node:fs/promises');
+  const { protocolFor } = await import('./study.js');
+  const { consentRecord } = await import('./consent.js');
+  const s = JSON.parse(await fs.readFile('studies/au-expressions.json', 'utf8'));
+  const [tier] = protocolFor(s).tiers;
+  assert.doesNotMatch(tier.summary + tier.keeps.join(' '), /audio are|video and audio|voice is itself/);
+  assert.match(tier.summary, /No audio is recorded/);
+  // The record stores what was shown, not the canonical audio wording.
+  const rec = consentRecord({ tier: 'media_retained', retentionDays: 30, secondaryUse: 'x',
+    contact: 'y', studyId: s.study_id, audio: false });
+  assert.deepEqual(rec.disclosed.keeps, tier.keeps);
+  // And a study with audio still says so.
+  const m0 = JSON.parse(await fs.readFile('studies/m0.json', 'utf8'));
+  const kept = protocolFor(m0).tiers.find((t) => t.id === 'media_retained');
+  assert.match(kept.summary, /video and audio/);
+});

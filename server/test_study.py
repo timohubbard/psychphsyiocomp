@@ -293,3 +293,17 @@ def test_the_capture_page_index_is_not_listed_as_a_study():
     assert "index" not in ids
     assert {"m0", "au-expressions"} <= ids
     assert all(r["valid"] for r in rows)
+
+
+def test_a_transcript_tier_needs_a_microphone():
+    """Mirrors study.js. Offering transcription in a face-only study records a
+    consent to transcribe a session that has no audio."""
+    from study import validate_study
+    s = study()
+    s["modalities"] = ["face"]
+    s["consent_tiers"] = ["features_only", "media_plus_transcript"]
+    v = validate_study(s)
+    assert not v.ok
+    assert any("no modality records audio" in r for r in v.reasons)
+    s["modalities"] = ["face", "voice"]
+    assert validate_study(s).ok
