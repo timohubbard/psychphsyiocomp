@@ -263,6 +263,41 @@ function nonEmpty(v) {
  * this, and should not — the alternative is a participant consenting to a
  * protocol nobody can reconstruct.
  */
+/**
+ * The study a URL asks for, or null when it asks for none.
+ *
+ * Null, not a default. The page used to fall back to `m0` here, and a session
+ * meant for `au-expressions` ran the full gaze pilot instead: nothing on screen
+ * named the protocol, so four minutes of calibration were recorded before
+ * anyone could notice. A missing choice is shown as a choice.
+ */
+export function studyIdFromUrl(search) {
+  const id = new URLSearchParams(search ?? '').get('study');
+  return id && id.trim() ? id.trim() : null;
+}
+
+/**
+ * The studies a researcher can pick from when the URL names none.
+ *
+ * A list, because a static host cannot enumerate a directory. A test keeps it
+ * equal to `studies/*.json`, so a study cannot exist without being offered or
+ * be offered without existing.
+ */
+export async function loadStudyIndex({ base = '/studies' } = {}) {
+  const res = await fetch(`${base}/index.json`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`no study index at ${base}/index.json (HTTP ${res.status})`);
+  const index = await res.json();
+  if (!Array.isArray(index?.studies)) throw new Error('study index has no "studies" list');
+  return index.studies;
+}
+
+/** One line naming the protocol, for the operator to check before starting. */
+export function describeStudy(study) {
+  const kinds = (study.tasks ?? []).map((t) => t.type).filter((t) => t !== 'chinrest');
+  return `${study.name} — ${study.study_id} v${study.version}`
+    + (kinds.length ? ` · ${kinds.join(', ')}` : '');
+}
+
 export async function loadStudy(studyId, { base = '/studies' } = {}) {
   if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(studyId ?? '')) {
     throw new Error(`not a usable study id: ${studyId}`);

@@ -19,7 +19,10 @@ import { MediaPipeBlendshapesLive } from '../../engines/face.mediapipe_blendshap
 import { runVirtualChinrest, CHINREST_CSS } from './chinrest-ui.js';
 import { stimulusSizeErrorFraction } from './chinrest.js';
 import { retainsMedia, runConsent } from './consent.js';
-import { loadStudy, needsAudio, protocolFor, studyProvenance } from './study.js';
+import {
+  describeStudy, loadStudy, loadStudyIndex, needsAudio, protocolFor,
+  studyIdFromUrl, studyProvenance,
+} from './study.js';
 
 const el = (id) => document.getElementById(id);
 
@@ -78,8 +81,13 @@ ui.btnEnable.addEventListener('click', async () => {
     // it: what the participant is told, which tiers they may choose from, and
     // whether the microphone is requested at all. There is no fallback — a
     // session run under a protocol nobody can reconstruct is not salvageable.
-    const studyId = new URLSearchParams(location.search).get('study') || 'm0';
-    if (!state.study) state.study = await loadStudy(studyId);
+    // Normally already loaded by `prepareStudy` on page load, so the operator
+    // could read which protocol this is before pressing anything.
+    if (!state.study) {
+      const studyId = studyIdFromUrl(location.search);
+      if (!studyId) throw new Error('no study chosen — pick one above');
+      state.study = await loadStudy(studyId);
+    }
 
     // Consent second, still before the camera is ever requested. A permission
     // prompt that appears before the participant has been told what happens to
@@ -131,6 +139,49 @@ ui.btnEnable.addEventListener('click', async () => {
     if (!state.study) showSetupError(err);
   }
 });
+
+/**
+ * Resolve the protocol on page load, and name it on screen.
+ *
+ * Before this, the study was loaded on the first click and a URL without
+ * `?study=` silently became `m0`. A session meant for `au-expressions` ran the
+ * whole gaze pilot, and nothing visible said so until the calibration dots
+ * appeared. Now the protocol is named under the title before anything is
+ * enabled, and a URL that names none gets a chooser rather than a guess.
+ */
+async function prepareStudy() {
+  const line = document.getElementById('protocolLine');
+  const studyId = studyIdFromUrl(location.search);
+
+  if (!studyId) {
+    ui.btnEnable.disabled = true;
+    line.innerHTML = '<strong>No study chosen.</strong> Pick the protocol to run:';
+    try {
+      const ids = await loadStudyIndex();
+      const studies = await Promise.all(ids.map((id) => loadStudy(id).catch(() => null)));
+      line.insertAdjacentHTML('beforeend', ids.map((id, i) => {
+        const s = studies[i];
+        const label = s ? describeStudy(s) : `${id} (could not be loaded)`;
+        return `<a class="study-choice" href="?study=${encodeURIComponent(id)}">${label}</a>`;
+      }).join(''));
+    } catch (err) {
+      line.insertAdjacentHTML('beforeend',
+        ` <span class="cr-error">${String(err?.message ?? err)}</span>`);
+    }
+    return;
+  }
+
+  try {
+    state.study = await loadStudy(studyId);
+    line.innerHTML = `Protocol: <strong>${describeStudy(state.study)}</strong>`;
+  } catch (err) {
+    ui.btnEnable.disabled = true;
+    line.textContent = 'Protocol: could not be loaded';
+    showSetupError(err);
+  }
+}
+
+prepareStudy();
 
 /**
  * A full-stop error screen for a protocol that could not be loaded.

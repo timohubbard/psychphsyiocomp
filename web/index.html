@@ -87,6 +87,13 @@
   /* The hold cue has to be unmissable in peripheral vision: the participant
      is attending to their own face, not reading the card. */
   .expr-status.expr-now { color: #0a6b2d; font-weight: 700; font-size: 19px; }
+  /* The protocol line is for whoever runs the session: it has to be read
+     before "Enable camera", so it sits under the title, not in a footer. */
+  .protocol {
+    margin: -4px 0 14px; padding: 8px 12px; border-radius: 8px;
+    background: #e8f0fe; color: #1a3a6b; font-size: 14px;
+  }
+  .study-choice { display: block; margin: 8px 0; }
   kbd {
     background: #fff; border: 1px solid #bcc3cc; border-bottom-width: 2px;
     border-radius: 4px; padding: 2px 7px; font-family: inherit; font-size: 13px;
@@ -130,6 +137,7 @@
   <!-- Consent and setup -->
   <div class="panel" id="setupPanel">
     <h1>Session capture</h1>
+    <p class="protocol" id="protocolLine">Protocol: loading…</p>
     <p>This records video and audio from your camera and microphone.</p>
 
     <div class="note" id="consentNote">

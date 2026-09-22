@@ -274,3 +274,48 @@ test('non-ASCII disclosure text is not escaped before hashing', async () => {
   assert.ok(!payload.includes('\\u'));
   assert.equal((await contentHash(s)).length, 16);
 });
+
+// ---------------------------------------------------------------------------
+// choosing a study: never by default
+// ---------------------------------------------------------------------------
+
+test('a URL without ?study= chooses nothing, rather than m0', async () => {
+  // It used to default to m0, and a session meant for au-expressions recorded
+  // the whole gaze pilot before anyone could tell.
+  const { studyIdFromUrl } = await import('./study.js');
+  assert.equal(studyIdFromUrl(''), null);
+  assert.equal(studyIdFromUrl('?pid=p1'), null);
+  assert.equal(studyIdFromUrl('?study='), null);
+  assert.equal(studyIdFromUrl('?study=au-expressions'), 'au-expressions');
+});
+
+test('the study index lists exactly the study files that exist', async () => {
+  const fs = await import('node:fs/promises');
+  const files = (await fs.readdir('studies'))
+    .filter((f) => f.endsWith('.json') && f !== 'index.json')
+    .map((f) => f.replace(/\.json$/, '')).sort();
+  const index = JSON.parse(await fs.readFile('studies/index.json', 'utf8'));
+  assert.deepEqual([...index.studies].sort(), files);
+});
+
+test('every indexed study validates, so the chooser never offers a dead end', async () => {
+  const fs = await import('node:fs/promises');
+  const { validateStudy } = await import('./study.js');
+  const index = JSON.parse(await fs.readFile('studies/index.json', 'utf8'));
+  for (const id of index.studies) {
+    const s = JSON.parse(await fs.readFile(`studies/${id}.json`, 'utf8'));
+    assert.equal(s.study_id, id);
+    assert.equal(validateStudy(s).valid, true, id);
+  }
+});
+
+test('the protocol line names the study, its version and what it will do', async () => {
+  const fs = await import('node:fs/promises');
+  const { describeStudy } = await import('./study.js');
+  const s = JSON.parse(await fs.readFile('studies/au-expressions.json', 'utf8'));
+  const line = describeStudy(s);
+  assert.match(line, /au-expressions v1\.0\.0/);
+  assert.match(line, /expression_prompts/);
+  assert.doesNotMatch(describeStudy(JSON.parse(
+    await fs.readFile('studies/m0.json', 'utf8'))), /chinrest/);
+});

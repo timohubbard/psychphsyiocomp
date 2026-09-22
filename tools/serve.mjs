@@ -28,7 +28,8 @@ const TYPES = {
 
 const server = createServer(async (req, res) => {
   try {
-    const urlPath = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+    const parsed = new URL(req.url, 'http://x');
+    const urlPath = decodeURIComponent(parsed.pathname);
 
     // REDIRECT, not an internal rewrite. Serving web/index.html *at* `/` would
     // leave the document's base URL as `/`, so its relative `./src/main.js`
@@ -37,8 +38,13 @@ const server = createServer(async (req, res) => {
     // and inline CSS are fine; it is just completely inert, which is a much
     // worse failure than a blank screen. Redirecting moves the base URL to
     // /web/index.html so relative imports resolve where the files are.
+    //
+    // The query string MUST survive the redirect. It did not, and `?study=`
+    // lives there: `/?study=au-expressions` arrived as a bare /web/index.html,
+    // the page fell back to m0, and a session meant to record posed facial
+    // movements recorded the whole gaze pilot instead.
     if (urlPath === '/') {
-      res.writeHead(302, { Location: '/web/index.html' }).end();
+      res.writeHead(302, { Location: `/web/index.html${parsed.search}` }).end();
       return;
     }
 
