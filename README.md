@@ -148,6 +148,7 @@ that AV sync is a ceiling rather than a bug to fix.
 - [x] Virtual chinrest — screen geometry per participant (`web/src/chinrest.js`)
 - [x] `sessions` canonical table — geometry queryable beside the signals
 - [x] Capture page verified in a real browser (first time — see below)
+- [x] **Real capture run** — full session on live hardware, through the pipeline
 - [ ] Validation metrics (`percent_in_roi`, `average_offset`, `samples_per_sec`)
 - [ ] MediaPipe eye normalisation + per-participant ridge baseline (the floor)
 - [ ] Eval harness, including the human-annotation arm
@@ -186,6 +187,56 @@ not stop the session. Everything except the dva conversion is unaffected, and
 `geometry_refusal_reason` keeps "the participant tried and the method declined
 to guess" distinguishable from "the task never ran". Those are different
 exclusion decisions and only one is about the participant.
+
+### M0 on real data
+
+`npm run verify:m0` proves the machinery against a synthetic clip.
+`server/process_bundle.py` runs a session a participant actually produced:
+
+```bash
+npm run py -- server/process_bundle.py tempdata --out out/
+```
+
+On the first real session — 7 minutes, 82MB, 44 events:
+
+```
+sources          face.mediapipe_blendshapes@0.1.0+browser-live
+                 face.mediapipe_blendshapes@0.1.0+server-batch
+signal rows      865,242
+aligned rows     865,242 / 865,242
+M0 criterion on REAL data: PASS
+```
+
+That took eight fixes to achieve, none of which the synthetic tests could have
+surfaced. A synthetic clip has a sane frame count, a seek index, and a flash the
+generator placed there. A browser's WebM has none of the three:
+
+| What broke | Synthetic said | Real data said |
+|---|---|---|
+| `CAP_PROP_FPS` | 30 | **1000.0** (WebM stores a timebase there) |
+| `CAP_PROP_FRAME_COUNT` | 90 | **INT64_MIN**, giving `duration_s = -9.2e18` |
+| Seeking | works | **`set()` returns True, then reads fail** |
+| Clapper flash | 100 → 240, one frame | **185 → 193.5**, seven frames |
+| Frame pump rate | n/a | **2.35 frames processed per camera frame** |
+
+The clapper one was the most consequential. The detector required a 15-luma
+rise; the real flash was +8.5 — unmistakable to the eye, a clean plateau at
+exactly the right instant — so alignment failed and every server-side row would
+have carried a NULL `master_ts`. The system refused rather than guessing, which
+is the designed behaviour and why the failure was visible at all. But the test
+had encoded a flash no real room produces: a camera already exposed for a lit
+room has almost no headroom left when the screen turns white.
+
+The detector is now a matched filter over the known 200ms flash duration
+against a rolling local baseline, requiring pulse shape and edge sharpness. Both
+of those earn their place: auto-exposure settling produced a +4 luma bump over
+13 frames that scored as high as the real flash, and only edge sharpness
+separates them — a screen turning white puts ~82% of its rise into one frame
+interval, and a ramp cannot.
+
+Measured end to end: the camera sees the flash **~54ms** after the browser draws
+it. That latency also truncated the closing clapper, which is why
+`TIMINGS.clapperPostrollMs` now exists.
 
 ### A note on verification
 
