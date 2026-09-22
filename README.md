@@ -52,8 +52,10 @@ seen the evidence behind them.
 **M0 (walking skeleton) complete. M1 (gaze) working end to end. All four
 modalities run on real footage; facial has two AU engines.**
 
-`npm run check` → licence inventory, 652 tests (152 JS + 500 Python), M0 gate
-PASS. `npm run verify:gaze` → GAZE GATE PASS.
+`npm run check` → licence inventory, 700 tests (169 JS + 531 Python), M0 gate
+PASS. `npm run verify:gaze` → GAZE GATE PASS on the pilot, **FAIL on the second
+session** (83% of fixations on target at 4.5°, need 90%; 3.2° to target vs
+1.5°) — see "The second real session" below.
 
 | | |
 |---|---|
@@ -66,7 +68,7 @@ PASS. `npm run verify:gaze` → GAZE GATE PASS.
 | AOIs, Holmqvist metrics, and an in-app editor | done |
 | Researcher app — scanpath, AOI editor | done |
 | Eval harness — kappa, human ceiling, refusals | done |
-| Human-annotation UI for collecting the reference labels | done, playback unverified |
+| Human-annotation UI for collecting the reference labels | done — playback verified in Chrome |
 | L2CS-Net fine-tune | not started |
 | M2 — `face.pyfeat_aus`, per-AU reliability tiers | done |
 | M2 — inter-engine agreement + relative proportions | done |
@@ -455,7 +457,13 @@ No configuration produced text outside the speaking windows, so the VAD stays on
 Gaze on that session was 2.61° held-out against the pilot's 1.65°. Two-anchor
 alignment did not change it (2.58° with one anchor), so it is not a timing
 effect; the session was darker (median luma 91 vs 138), slower (19.8 fps) and
-closer (38.8 cm vs 47.5 cm). Two sessions cannot separate those.
+closer (38.8 cm vs 47.5 cm). Two sessions cannot separate those. It also
+**fails the gaze gate**: 83% of fixations on target at 4.5° padding against
+the 90% the gate requires, and 3.22° mean error to the target on screen. Re-run
+with the old single-anchor alignment it scores 89% and 3.20° — the mean error
+is unchanged and the percentage differs by about one fixation (89 vs 92
+classified), so the failure belongs to the session, not to the new alignment.
+The gate is doing its job: it is the first real session that did not meet it.
 
 ### The trap that cost 3.4 degrees
 
@@ -743,6 +751,7 @@ npm run process -- <dir> --out o/ # bundle -> canonical tables + gaze
 #   --no-gaze / --no-voice   skip those stages
 npm run app                       # researcher app
 #   --media <dir>   serve session recordings to the annotation page
+npm run verify:playback -- <id>   # does that recording play in real Chrome? (needs app --media)
 npm run check                     # licences + all tests + M0 gate
 npm run verify:gaze               # do fixations land on the right target?
 npm run verify:m0                 # M0 gate on a synthetic clip
