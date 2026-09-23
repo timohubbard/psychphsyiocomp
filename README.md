@@ -82,6 +82,43 @@ session** (83% of fixations on target at 4.5°, need 90%; 3.2° to target vs
 | Clock alignment from both clappers, placed by expected position | done |
 | End-to-end capture smoke test (headless Chrome, fake camera) | done — `npm run smoke:capture` |
 
+### Picking this up
+
+Open items, most valuable first. The first four need a person or hardware; the
+rest can be done at a keyboard.
+
+1. **Record the posed-expression session.** `npm run serve` (fresh — an old
+   server keeps its old routing), open `localhost:5173/?study=au-expressions`,
+   check the blue *Protocol* line names it, record (~4.5 min, camera only),
+   Download. Put the three files in `tempdata/<session_id>/` — one folder per
+   session; a download straight into `tempdata/` overwrote the pilot's video.
+   Then `npm run process -- tempdata/<session_id> --out out --aus` (~15 min,
+   almost all Py-Feat). The summary and the app's *Posed movements* panel give
+   each AU engine's sensitivity/specificity against what was asked for, and the
+   between-engine agreement on held movements — the §2.2 figure measured on
+   behaviour that happened.
+2. **Human labels on that recording** via the annotation page
+   (`npm run app -- --media tempdata`), at least two raters — the reference
+   standard `server/evaluation.py` scores engines against.
+3. **Why gaze failed its gate on the second session** (3.2° vs 1.5°). Needs
+   more sessions with lighting, distance and frame rate varied one at a time.
+4. **Respiration validation** against an RIP belt, before any rate is emitted.
+5. A working **negative control for `verify:playback`**: the raw MediaRecorder
+   WebM from a stub server is rejected by Chrome with "URL safety check", cause
+   not yet found.
+6. `smoke:capture` covers studies without the chinrest only; driving the
+   chinrest's card-and-blind-spot steps would let it cover `m0`.
+7. **Legal research passes** `research/pass3d-…-PARTIAL.md` and
+   `research/pass4d-…-INCOMPLETE.md` — before anyone but the developer is
+   recorded.
+8. L2CS-Net fine-tune (not started; its gaze datasets carry research-only EULAs
+   someone has to accept by hand).
+
+Local state that is not in git: `out/` holds both real sessions
+(`s_mucntzzh` — raw video lost, audio survives; `s_mud6trnr` — complete);
+`tempdata/<session_id>/` holds raw bundles; `models/` holds the fetched
+weights (`npm run models`).
+
 ### What the numbers are
 
 On one real session, one participant:
