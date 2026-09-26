@@ -93,6 +93,10 @@ async function main() {
     await until(`!!document.getElementById('consentGo')`, 'the consent screen');
     const consentText = await js(`document.querySelector('.consent-panel').innerText`);
     const consentWarnsSelfTest = /Developer self-test/.test(consentText);
+    const consentHas = {
+      analysis: /Automated analysis\. Software analyses the recording automatically/.test(consentText),
+      withdrawal: /Changing your mind:.*every measurement taken from it/s.test(consentText),
+    };
     log(`consent: ${consentText.split('\n').find((l) => l.startsWith('This session')) ?? '(no summary line)'}`);
     await js(`(() => {
       const r = document.querySelector('input[name="tier"]:checked') ?? document.querySelector('input[name="tier"]');
@@ -139,6 +143,7 @@ async function main() {
     }
     log(`session finished in ${Math.round((Date.now() - started) / 1000)}s`);
 
+    const withdrawCode = await js(`document.getElementById('withdrawCode')?.innerText ?? ''`);
     await js(`document.getElementById('btnDownload').click()`);
     await untilFiles(OUT, ['session.json', 'browser_chunks.json'], 60_000);
     await sleep(3000);   // the video blob is the largest and lands last
@@ -146,6 +151,17 @@ async function main() {
     const report = checkOutput(OUT, STUDY, { chinrest });
     // Every shipped study is a developer self-test; the operator and the
     // participant must both be told so on screen, not just in the manifest.
+    // The consent wording awaiting sign-off (README): on screen, in the
+    // record, and the session code it tells participants to quote.
+    if (!consentHas.analysis) report.failures.push('no automated-analysis notice on the consent screen');
+    if (!consentHas.withdrawal) report.failures.push('no withdrawal paragraph on the consent screen');
+    const consent = JSON.parse(readFileSync(join(OUT, 'session.json'), 'utf8')).consent ?? {};
+    if (!consent.analysis_notice || !consent.withdrawal) {
+      report.failures.push('the consent record does not store the notice and withdrawal text');
+    }
+    if (!withdrawCode.includes(report.facts.session_id)) {
+      report.failures.push('the end screen does not show the session code to quote');
+    }
     if (report.facts.audience === 'developer') {
       if (!selfTestBanner) report.failures.push('no DEVELOPER SELF-TEST line under the protocol');
       if (!consentWarnsSelfTest) report.failures.push('the consent screen does not say this is a self-test');
@@ -174,6 +190,7 @@ export function checkOutput(dir, studyId, { chinrest = null } = {}) {
   const facts = {};
   const session = JSON.parse(readFileSync(join(dir, 'session.json'), 'utf8'));
   facts.study_id = session.study_id;
+  facts.session_id = session.session_id;
   if (session.study_id !== studyId) failures.push(`session ran ${session.study_id}, not ${studyId}`);
   facts.audience = session.study?.audience ?? null;
   if (!facts.audience) failures.push('the session does not record its audience');

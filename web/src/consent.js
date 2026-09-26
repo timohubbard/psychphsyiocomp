@@ -52,6 +52,11 @@ export const CONSENT_TIERS = [
     keeps: [
       'Numbers derived from the recording — where you looked, how your face moved.',
       'No video. No audio. Nothing a person could watch or listen to.',
+      // research/pass5 (ethics section): gaze traces, facial-movement and voice
+      // features have each been used to re-identify people in published work.
+      // "Nothing a person could watch" is true; "anonymous" would not be.
+      'These numbers are still personal data. Patterns in them could, in '
+      + 'principle, help identify you, so they are protected like the recording.',
     ],
     consequence:
       'The recording cannot be re-analysed later if the analysis is improved.',
@@ -154,6 +159,42 @@ export function tierCopy(tier, { audio = true } = {}) {
 }
 
 /**
+ * The automated-analysis notice, built from what this study measures.
+ *
+ * EU AI Act Art 50(3), applicable since 2 August 2026, requires people exposed
+ * to an emotion recognition system to be told. Research use is probably outside
+ * the Act (Art 2(6)), but only while it is solely scientific, and the notice
+ * costs a paragraph — research/pass5-legal-gaps.md recommends it regardless
+ * and the Commission's Art 50 guidelines endorse merging it with the GDPR
+ * notice. It says what the software does NOT do as well, because those are
+ * the things a participant is most likely to assume.
+ */
+export function analysisNotice(measures) {
+  if (!measures?.length) return '';
+  return `Software analyses the recording automatically to measure ${joinAnd(measures)}. `
+    + 'It does not identify who you are, it does not label your emotions, and '
+    + 'nothing is decided about you from it. The researchers may use these '
+    + 'measurements to study reactions such as attention or emotion.';
+}
+
+/**
+ * What a participant can do after the session, in words they can act on.
+ *
+ * The policy is the simplest honest one (research/pass5, ethics section):
+ * on request, the recording AND every measurement from it are deleted —
+ * `npm run withdraw` does exactly that. The one exception is stated rather
+ * than hidden. The complaint route is UK GDPR Art 13(2)(d).
+ */
+export function withdrawalText(retentionDays) {
+  return `If you change your mind later, contact us (above) with the session code `
+    + `shown at the end, within the ${retentionDays} days. We will delete your `
+    + 'recording and every measurement taken from it. The only thing we cannot '
+    + 'take back is a result already combined into a published summary that does '
+    + 'not identify anyone. You can also complain to a data protection authority '
+    + '— in the UK, the Information Commissioner’s Office (ico.org.uk).';
+}
+
+/**
  * The record written into the session manifest.
  *
  * Carries what was disclosed, not just what was agreed. A tier alone cannot be
@@ -163,6 +204,7 @@ export function tierCopy(tier, { audio = true } = {}) {
 export function consentRecord({ tier, retentionDays, secondaryUse, contact,
                                 irbReference = null, controller = null, lawfulBasis = null,
                                 specialCategoryBasis = null, audience = 'developer',
+                                analysis = null, withdrawal = null,
                                 studyId, audio = true }) {
   const chosen = tierCopy(CONSENT_TIERS.find((t) => t.id === tier), { audio });
   return {
@@ -183,9 +225,13 @@ export function consentRecord({ tier, retentionDays, secondaryUse, contact,
     disclosed: chosen
       ? { label: chosen.label, keeps: chosen.keeps, consequence: chosen.consequence }
       : null,
+    // The two paragraphs verbatim, for the same reason as `disclosed`.
+    analysis_notice: analysis,
+    withdrawal,
     // Recorded so a later reader knows which rules this flow was built against
     // rather than having to infer it from the date.
-    basis: '45 CFR 46.116 elements; retention capped per REPORT.md §6.4',
+    basis: 'UK GDPR Art 13 notice; EU AI Act Art 50(3) automated-analysis notice; '
+      + '45 CFR 46.116 elements; retention capped at 3 years',
   };
 }
 
@@ -218,6 +264,8 @@ export function runConsent(host, protocol) {
   }
   const doing = activity.doing.length
     ? ` while you ${joinAnd(activity.doing)}` : '';
+  const analysis = analysisNotice(activity.measures);
+  const withdrawal = withdrawalText(disclosure.retentionDays);
 
   return new Promise((resolve) => {
     const root = document.createElement('div');
@@ -247,6 +295,8 @@ export function runConsent(host, protocol) {
         <p>This session records ${activity.records} from your
            ${activity.devices}${doing}.</p>
 
+        ${analysis ? `<p id="analysisNotice"><strong>Automated analysis.</strong> ${analysis}</p>` : ''}
+
         <p><strong>Your recording is identifiable.</strong> A face is
            identifiable, and so is a voice — blurring a video or shifting a
            pitch does not reliably change that. We are not going to tell you the
@@ -268,7 +318,8 @@ export function runConsent(host, protocol) {
           ${disclosure.irbReference
             ? `Approved under ${disclosure.irbReference}.<br>` : ''}
           You can stop at any time, and nothing leaves your machine until you
-          choose to finish.
+          choose to finish.<br>
+          <span id="withdrawalText"><strong>Changing your mind:</strong> ${withdrawal}</span>
         </div>
 
         <p class="consent-ack">
@@ -297,6 +348,8 @@ export function runConsent(host, protocol) {
         lawfulBasis: disclosure.lawfulBasis,
         specialCategoryBasis: disclosure.specialCategoryBasis,
         audience: disclosure.audience,
+        analysis: analysis || null,
+        withdrawal,
         studyId,
         audio: activity.audio,
       });

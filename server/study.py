@@ -159,6 +159,13 @@ def audience_of(study: dict[str, Any]) -> str:
     return study.get("audience") or "developer"
 
 
+def is_usable_contact(contact: Any) -> bool:
+    """A contact a participant could actually use: not a template, and an
+    email or web address in it. The test the participant gate applies."""
+    return (_non_empty(contact) and not _PLACEHOLDER.search(contact)
+            and bool(_CONTACT_ROUTE.search(contact)))
+
+
 def _participant_gate(study: dict[str, Any], d: dict[str, Any]) -> list[str]:
     """Mirror of ``participantGate`` — what a study needs before it runs on others."""
     reasons = []
@@ -166,8 +173,7 @@ def _participant_gate(study: dict[str, Any], d: dict[str, Any]) -> list[str]:
         reasons.append("audience is participants but there is no disclosure.irb_reference "
                        "(the ethics committee approval reference, REC or IRB)")
     contact = d.get("contact")
-    if _non_empty(contact) and (_PLACEHOLDER.search(contact)
-                                or not _CONTACT_ROUTE.search(contact)):
+    if _non_empty(contact) and not is_usable_contact(contact):
         reasons.append("disclosure.contact is still a placeholder or gives no email address "
                        "or web address a participant could use")
     if not _non_empty(d.get("controller")):

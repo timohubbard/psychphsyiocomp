@@ -760,6 +760,12 @@ function renderSummary() {
   ui.summary.innerHTML = rows
     .map(([k, v]) => `<li><span>${k}</span><span class="state">${v}</span></li>`)
     .join('');
+
+  // The consent screen promised a session code to quote when withdrawing; this
+  // is where it is given. Without it, "contact us to withdraw" names no data.
+  document.getElementById('withdrawCode').innerHTML = `Your session code is
+    <strong><code>${manifest.session_id}</code></strong>. Keep it if you might
+    want your data deleted later — quote it to the contact on the consent screen.`;
 }
 
 ui.btnDownload.addEventListener('click', async () => {

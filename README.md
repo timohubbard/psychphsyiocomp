@@ -101,13 +101,52 @@ session** (83% of fixations on target at 4.5°, need 90%; 3.2° to target vs
   placeholder. Washington's and Colorado's laws exempt Common Rule research and
   otherwise reach non-profits, so `irbReference` should become required for
   any study run on someone other than the developer. Needs a person.
-- **Consent wording:** a one-line notice that face and voice are analysed
-  automatically (AI Act Art 50(3), live since 2 Aug 2026); the
-  *Measurements only* tier should say the measurements could in principle help
-  identify someone; and a stated withdrawal policy. Keyboard, with sign-off.
+- **Sign off the consent wording** — written overnight and live on the consent
+  screen, quoted in full under *Awaiting sign-off* below. The DPIA template
+  (`docs/dpia-template.md`) and `npm run ropa -- <study>` (the Art 30 record,
+  generated from the study file) are ready for a deploying group to complete.
 - **Decide whether to offer an in-browser-only tier.** It is the strongest
   BIPA/GDPR mitigation (features extracted and video never uploaded), and it
   cuts against record-first. A decision, not a fix.
+
+#### Awaiting sign-off: consent wording added 2026-09-26
+
+Written to be conservative, shipped live, and listed here verbatim so each
+sentence can be accepted, changed or struck. Source: `web/src/consent.js`
+unless noted. Every one is also stored in the session's consent record.
+
+1. **Automated-analysis notice** (`analysisNotice`, AI Act Art 50(3)),
+   shown under the first paragraph. The list of measures is built from the
+   study's modalities:
+   > **Automated analysis.** Software analyses the recording automatically to
+   > measure {where on the screen you look / how the muscles of your face move
+   > / the sound of your voice (pitch, loudness and timing — not your words) /
+   > the movement of your chest and shoulders as you breathe}. It does not
+   > identify who you are, it does not label your emotions, and nothing is
+   > decided about you from it. The researchers may use these measurements to
+   > study reactions such as attention or emotion.
+2. **Measurements only** tier, a third bullet:
+   > These numbers are still personal data. Patterns in them could, in
+   > principle, help identify you, so they are protected like the recording.
+3. **Withdrawal and complaint** (`withdrawalText`), after "You can stop at any
+   time…":
+   > **Changing your mind:** If you change your mind later, contact us (above)
+   > with the session code shown at the end, within the {N} days. We will
+   > delete your recording and every measurement taken from it. The only thing
+   > we cannot take back is a result already combined into a published summary
+   > that does not identify anyone. You can also complain to a data protection
+   > authority — in the UK, the Information Commissioner's Office (ico.org.uk).
+4. **Session code** on the end screen (`web/src/main.js`):
+   > Your session code is {s_…}. Keep it if you might want your data deleted
+   > later — quote it to the contact on the consent screen.
+5. **Self-test warning**, shown only for studies without
+   `"audience": "participants"`:
+   > **Developer self-test.** This study has no ethics approval recorded and is
+   > not for participants. If someone has asked you to take part in research
+   > through this page, stop here and contact them.
+6. **UK GDPR Art 13 lines**, shown when the study states them:
+   > **Responsible for your data:** {controller} ·
+   > **Legal basis:** {lawful_basis}; {special_category_basis}
 
 Then, most valuable first. The first four need a person or hardware; the rest
 can be done at a keyboard.

@@ -38,18 +38,22 @@ export const MODALITIES = [
     label: 'Screen-based eye tracking',
     needs: ['camera'],
     note: 'Requires the chinrest step and a calibration grid.',
+    // What the participant is told is measured (consent.js analysisNotice).
+    measures: 'where on the screen you look',
   },
   {
     id: 'face',
     label: 'Facial expression (Action Units)',
     needs: ['camera'],
     note: 'Action Units only. No emotion labels are produced.',
+    measures: 'how the muscles of your face move',
   },
   {
     id: 'voice',
     label: 'Voice acoustics',
     needs: ['microphone'],
     note: 'eGeMAPS acoustic features. No valence channel exists (§2.3).',
+    measures: 'the sound of your voice (pitch, loudness and timing — not your words)',
   },
   {
     id: 'respiration',
@@ -60,6 +64,7 @@ export const MODALITIES = [
     note: 'Waveform only — no breathing rate (§2.4). Plausibly health data '
       + 'under GDPR Art. 4(15), so it carries higher legal risk than the '
       + 'others (§6.3).',
+    measures: 'the movement of your chest and shoulders as you breathe',
   },
 ];
 
@@ -465,6 +470,9 @@ export function protocolFor(study) {
       devices: audio ? 'camera and microphone' : 'camera',
       records: audio ? 'video and audio' : 'video (no audio)',
       doing: activitiesFor(study),
+      // In MODALITIES order, whatever order the file lists them in.
+      measures: MODALITIES.filter((m) => (study.modalities ?? []).includes(m.id))
+        .map((m) => m.measures),
     },
   };
 }

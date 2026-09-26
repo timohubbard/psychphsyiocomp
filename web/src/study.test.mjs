@@ -20,6 +20,7 @@ import {
   disclosureFor,
   needsAudio,
   offeredTiers,
+  protocolFor,
   studyProvenance,
   validateStudy,
 } from './study.js';
@@ -359,6 +360,13 @@ test('fields added after m0 are hashed only when set, so older hashes hold', () 
 
 test('changing the audience changes the hash', async () => {
   assert.notEqual(await contentHash(study()), await contentHash(study({ audience: 'participants' })));
+});
+
+test('the consent flow is told what each enabled modality measures, in canonical order', () => {
+  const p = protocolFor(study({ modalities: ['face', 'gaze'], tasks: [] }));
+  assert.deepEqual(p.activity.measures,
+    ['where on the screen you look', 'how the muscles of your face move']);
+  assert.ok(MODALITIES.every((m) => typeof m.measures === 'string' && m.measures));
 });
 
 test('provenance and disclosure carry the audience', async () => {

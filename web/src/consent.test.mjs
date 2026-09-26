@@ -6,9 +6,11 @@ import {
   DEFAULT_TIER,
   MAX_RETENTION_DAYS,
   allowsTranscript,
+  analysisNotice,
   consentRecord,
   retainsMedia,
   validateConsent,
+  withdrawalText,
 } from './consent.js';
 
 const VALID = {
@@ -145,6 +147,45 @@ test('the record is timestamped and names the basis it was built against', () =>
   });
   assert.ok(Date.parse(rec.agreed_utc) > 0);
   assert.ok(rec.basis.includes('46.116'));
+});
+
+test('the automated-analysis notice names what is measured and what is not done', () => {
+  const n = analysisNotice(['where on the screen you look', 'how the muscles of your face move']);
+  assert.match(n, /automatically/);
+  assert.match(n, /where on the screen you look and how the muscles of your face move/);
+  // The three things a participant is most likely to assume.
+  assert.match(n, /does not identify who you are/);
+  assert.match(n, /does not label your emotions/);
+  assert.match(n, /nothing is decided about you/);
+});
+
+test('a study that measures nothing gets no analysis notice rather than an empty one', () => {
+  assert.equal(analysisNotice([]), '');
+});
+
+test('the withdrawal text states the period, the scope, the exception and the complaint route', () => {
+  const w = withdrawalText(180);
+  assert.match(w, /within the 180 days/);
+  assert.match(w, /session code/);
+  assert.match(w, /every measurement taken from it/);
+  assert.match(w, /published summary that does not identify anyone/);
+  assert.match(w, /Information Commissioner/);
+});
+
+test('measurements only says the measurements are still personal data', () => {
+  const t = CONSENT_TIERS.find((x) => x.id === 'features_only');
+  assert.ok(t.keeps.some((k) => /still personal data/.test(k) && /help identify you/.test(k)));
+});
+
+test('the record stores the notice and the withdrawal text exactly as shown', () => {
+  const rec = consentRecord({
+    tier: 'features_only', retentionDays: 30, secondaryUse: 'none',
+    analysis: 'A', withdrawal: 'B',
+  });
+  assert.equal(rec.analysis_notice, 'A');
+  assert.equal(rec.withdrawal, 'B');
+  assert.match(rec.basis, /Art 50\(3\)/);
+  assert.match(rec.basis, /UK GDPR Art 13/);
 });
 
 test('a record built from the tiers validates', () => {
