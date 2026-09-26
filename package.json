@@ -34,6 +34,7 @@
     "verify:gaze": "node tools/py.mjs server/verify_gaze.py --data out",
     "smoke:capture": "node tools/smoke_capture.mjs",
     "verify:playback": "node tools/verify_playback.mjs",
-    "verify:playback:control": "node tools/verify_playback.mjs --control"
+    "verify:playback:control": "node tools/verify_playback.mjs --control",
+    "verify:cohort-view": "node tools/verify_cohort_view.mjs"
   }
 }

@@ -89,6 +89,7 @@ session** (83% of fixations on target at 4.5°, need 90%; 3.2° to target vs
 | Remote upload: capture page → `serve.mjs --ingest` → `server/ingest.py` inbox | done — localhost only; see *Deploying* |
 | Cohort: declared exclusions, attrition funnel, baseline-corrected epochs | done — `npm run cohort -- <study>` |
 | Per-stimulus gaze/AOI/face results, degree-blurred heatmaps, audited export zip (CSV + BIDS-style) | done — `npm run export -- <study>` |
+| Cohort page in the researcher app (funnel, epoch curves, heatmaps) | done — `/cohort.html`; `npm run verify:cohort-view` |
 
 ### Picking this up
 

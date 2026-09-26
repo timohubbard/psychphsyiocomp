@@ -163,3 +163,15 @@ def test_signals_in_the_export_are_the_tables_rows(out, tmp_path):
     export.build(out, STUDY, z)
     csv_text = gzip.decompress(zipfile.ZipFile(z).read("csv/signals/s1.csv.gz")).decode()
     assert csv_text.count("\n") - 1 == read_session(out, "s1").num_rows
+
+
+def test_the_cohort_page_sees_the_cohort_the_export_writes(out):
+    """The app route uses the same select/epochs/heatmap as the CLI and the
+    export, so the page cannot show a different cohort from the zip."""
+    import app
+    write(out, "s1")
+    v = app.cohort_view(out, STUDY, include_developer=False, allow_mixed=False)
+    assert [f["remaining"] for f in v["funnel"]] == [1, 1, 1]
+    assert v["epochs"][0]["n_epochs"] == 1 and "blendshape.s" in v["epochs"][0]["curves"]
+    assert v["heatmaps"][0]["stimulus_id"] == "pic" and v["heatmaps"][0]["grid"] is not None
+    assert v["analysis_hash"] and v["content_hash"] == content_hash(STUDY)

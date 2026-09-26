@@ -98,6 +98,51 @@ def _study_check(meta: dict) -> dict:
             "detail": verdict.detail}
 
 
+def cohort_view(data_root: Path, study: dict, *, include_developer: bool,
+                allow_mixed: bool) -> dict:
+    """The cohort page's data: the funnel, mean epoch curves, heatmap grids.
+
+    Read-only and computed from the same functions the CLI and the export use
+    (cohort.py, stimulus_summary.py), so the page cannot show a different
+    cohort from the one `npm run export` writes.
+    """
+    from cohort import EpochSpec, epochs, select
+    from stimulus_summary import DEFAULT_HEATMAP_SIGMA_DEG, heatmap
+
+    c = select(data_root, study, include_developer=include_developer, allow_mixed=allow_mixed)
+    analysis = study.get("analysis") or {}
+    epoch_sets = []
+    for d in analysis.get("epochs", []):
+        spec = EpochSpec.from_study(d)
+        rows, refusals = epochs(data_root, c.included, spec)
+        curves: dict[str, dict[float, list[float]]] = {}
+        for r in rows:
+            curves.setdefault(r["channel"], {}).setdefault(r["t_ms"], []).append(r["value_bc"])
+        epoch_sets.append({
+            "name": spec.name, "event_type": spec.event_type,
+            "n_epochs": len({(r["session_id"], r["epoch"]) for r in rows}),
+            "refusals": len(refusals),
+            "curves": {ch: [{"t_ms": t, "mean": sum(v) / len(v), "n": len(v)}
+                            for t, v in sorted(pts.items())] for ch, pts in curves.items()},
+        })
+    sigma = analysis.get("heatmap_sigma_deg", DEFAULT_HEATMAP_SIGMA_DEG)
+    heatmaps = []
+    for t in study.get("tasks") or []:
+        for it in t.get("items", []) if t.get("type") == "stimuli" else []:
+            density, n, refused = heatmap(data_root, c.included, it["stimulus_id"], sigma_deg=sigma)
+            heatmaps.append({"stimulus_id": it["stimulus_id"], "participants": n,
+                             "refused": len(refused), "sigma_deg": sigma,
+                             "grid": None if density is None else density.round(6).tolist()})
+    return {
+        "study_id": c.study_id, "content_hash": c.content_hash, "analysis_hash": c.analysis_hash,
+        "include_developer": include_developer, "allow_mixed": allow_mixed,
+        "funnel": [{"step": f.label, "remaining": f.remaining,
+                    "excluded": [{"session_id": s, "reason": r} for s, r in f.excluded]}
+                   for f in c.funnel],
+        "epochs": epoch_sets, "heatmaps": heatmaps,
+    }
+
+
 def _opt_float(values):
     """First value of a query param as a float, or None if absent."""
     v = (values or [None])[0]
@@ -191,6 +236,12 @@ class Handler(SimpleHTTPRequestHandler):
 
         if parts == ["api", "studies"]:
             return {"studies": list_studies(STUDIES_ROOT)}
+
+        if len(parts) == 4 and parts[:2] == ["api", "studies"] and parts[3] == "cohort":
+            flag = lambda k: (query.get(k) or ["0"])[0] == "1"  # noqa: E731
+            return cohort_view(self.data_root, load_study(STUDIES_ROOT, parts[2]),
+                               include_developer=flag("include_developer"),
+                               allow_mixed=flag("allow_mixed"))
 
         if len(parts) == 3 and parts[:2] == ["api", "studies"]:
             # Returns the whole definition, not a summary: the point of opening
@@ -555,6 +606,8 @@ def main() -> int:
     ap.add_argument("--data", type=Path, default=ROOT / "out",
                     help="directory holding session_id=* folders")
     ap.add_argument("--port", type=int, default=5174)
+    ap.add_argument("--studies", type=Path, default=None,
+                    help="study definitions (default: studies/)")
     ap.add_argument("--media", type=Path, default=None,
                     help="directory holding capture bundles, so the annotation "
                          "page can play a session's recording back")
@@ -562,6 +615,9 @@ def main() -> int:
 
     data_root = args.data.resolve()
     media_root = args.media.resolve() if args.media else None
+    if args.studies:
+        global STUDIES_ROOT
+        STUDIES_ROOT = args.studies.resolve()
     handler = partial(Handler, data_root=data_root, media_root=media_root)
 
     # Localhost only. This serves participant-derived measurements, and binding
