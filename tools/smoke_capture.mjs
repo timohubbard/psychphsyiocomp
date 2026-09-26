@@ -18,8 +18,11 @@
  * about measurement quality. Driven over the DevTools protocol with Node's
  * built-in WebSocket — no new dependency.
  *
+ * Studies with the chinrest (m0) are driven through it with a known truth —
+ * see smoke_chinrest.mjs — and the recorded geometry is checked against it.
+ *
  * Usage:
- *   node tools/smoke_capture.mjs [--study au-expressions] [--port 5173]
+ *   node tools/smoke_capture.mjs [--study au-expressions|m0] [--port 5173]
  *                                [--out tempdata/smoke] [--headed]
  * Needs `npm run serve` running.
  */
@@ -29,6 +32,7 @@ import { join, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import { launch } from './cdp.mjs';
+import { driveChinrest } from './smoke_chinrest.mjs';
 
 const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, all) => {
   if (a.startsWith('--')) acc.push([a.slice(2), all[i + 1]?.startsWith('--') || all[i + 1] === undefined ? true : all[i + 1]]);
@@ -101,11 +105,11 @@ async function main() {
     await js(`document.getElementById('btnStart').click()`);
 
     // Walk the protocol: press space whenever an instruction is waiting, and
-    // let timed stages run. Chinrest screens, if the study has them, need a
-    // human and fail the smoke test by timing out — which is correct for a
-    // protocol that does not list the chinrest.
+    // let timed stages run. The chinrest, if the study has it, is driven once
+    // with a known truth (smoke_chinrest.mjs) so the geometry can be checked.
     const started = Date.now();
     let lastStage = '';
+    let chinrest = null;
     while (Date.now() - started < TIMEOUT_MS) {
       const s = await js(`({
         done: document.getElementById('donePanel').style.display === 'block',
@@ -115,7 +119,11 @@ async function main() {
         chinrest: !!document.querySelector('.chinrest'),
       })`);
       if (s.done) break;
-      if (s.chinrest) throw new Error('a chinrest screen appeared, which this driver cannot complete');
+      if (s.chinrest) {
+        if (chinrest) throw new Error('the chinrest appeared a second time');
+        chinrest = await driveChinrest(page, { log });
+        continue;
+      }
       if (s.stage !== lastStage) { log(`stage ${s.stage}`); lastStage = s.stage; }
       if (s.waiting) {
         await sleep(1400);   // past the instruction's minimum display time
@@ -133,7 +141,7 @@ async function main() {
     await untilFiles(OUT, ['session.json', 'browser_chunks.json'], 60_000);
     await sleep(3000);   // the video blob is the largest and lands last
 
-    const report = checkOutput(OUT, STUDY);
+    const report = checkOutput(OUT, STUDY, { chinrest });
     if (errors.length) report.failures.push(`page errors: ${errors.slice(0, 5).join(' | ')}`);
     printReport(report);
     process.exitCode = report.failures.length ? 1 : 0;
@@ -153,7 +161,7 @@ async function untilFiles(dir, names, ms) {
 }
 
 /** Assertions on what the pipeline will actually receive. */
-export function checkOutput(dir, studyId) {
+export function checkOutput(dir, studyId, { chinrest = null } = {}) {
   const failures = [];
   const facts = {};
   const session = JSON.parse(readFileSync(join(dir, 'session.json'), 'utf8'));
@@ -177,6 +185,35 @@ export function checkOutput(dir, studyId) {
     facts.hold_ms = spans.length ? `${Math.min(...spans).toFixed(0)}-${Math.max(...spans).toFixed(0)}` : null;
     if (events.some((e) => e.event_type === 'calibration_point')) failures.push('calibration ran in a face-only study');
     if (session.geometry?.reason !== 'not_in_protocol') failures.push(`geometry reason ${session.geometry?.reason}, expected not_in_protocol`);
+  }
+
+  if (studyId === 'm0') {
+    // The pilot protocol: chinrest, 13-point calibration, 5-point validation,
+    // the 60 s fixation, read-aloud and free speech, with the microphone on.
+    const g = session.geometry ?? {};
+    facts.geometry = g.ok ? `${(g.viewing_distance_mm / 10).toFixed(1)} cm at ${g.px_per_mm?.toFixed(3)} px/mm`
+      : `refused (${g.reason})`;
+    if (!g.ok) failures.push(`chinrest geometry refused: ${g.reason} ${g.detail ?? ''}`);
+    else if (chinrest) {
+      // The driver chose the truth; the page must recover it. ±10% on distance
+      // covers the ±2 px jitter and the one-frame (2 px) marking granularity.
+      if (Math.abs(g.px_per_mm - chinrest.pxPerMm) > 0.02) {
+        failures.push(`px/mm ${g.px_per_mm} vs the ${chinrest.pxPerMm.toFixed(3)} the card was sized to`);
+      }
+      if (Math.abs(g.viewing_distance_mm - chinrest.distanceMm) > chinrest.distanceMm * 0.1) {
+        failures.push(`viewing distance ${g.viewing_distance_mm.toFixed(0)} mm vs the ${chinrest.distanceMm} mm driven`);
+      }
+    } else failures.push('m0 ran without the chinrest being driven');
+    facts.calibration_points = count('calibration_point');
+    facts.validation_points = count('validation_point');
+    if (facts.calibration_points !== 13) failures.push(`${facts.calibration_points} calibration points, expected 13`);
+    if (facts.validation_points !== 5) failures.push(`${facts.validation_points} validation points, expected 5`);
+    for (const t of ['fixation', 'speech_read', 'speech_free']) {
+      if (count(t) !== 1) failures.push(`${count(t)} ${t} events, expected 1`);
+    }
+    const mime = events.find((e) => e.event_type === 'recording_start')?.metadata?.mimeType ?? '';
+    facts.mime = mime;
+    if (!/opus/.test(mime)) failures.push(`recording ${mime} has no audio codec — m0 needs the microphone`);
   }
 
   const video = readdirSync(dir).find((f) => /^capture\.(webm|mp4)$/.test(f));

@@ -80,7 +80,7 @@ session** (83% of fixations on target at 4.5°, need 90%; 3.2° to target vs
 | Study definitions — protocol as data, content-hashed | done |
 | `speech.faster_whisper` — transcripts, consent-gated | done — 13% word error on real read-aloud |
 | Clock alignment from both clappers, placed by expected position | done |
-| End-to-end capture smoke test (headless Chrome, fake camera) | done — `npm run smoke:capture` |
+| End-to-end capture smoke test (headless Chrome, fake camera) | done — `npm run smoke:capture -- --study m0` drives the chinrest too, and checks the page recovers the distance it was driven at |
 | Retention sweep and withdrawal, with a deletion log processing honours | done — `npm run retention`, `npm run withdraw` |
 
 ### Picking this up
@@ -128,9 +128,7 @@ can be done at a keyboard.
    Frame rate first: the two most recent sessions both captured at ~20 fps
    against a 30 fps request, and the passing one ran at 29.9.
 4. **Respiration validation** against an RIP belt, before any rate is emitted.
-5. `smoke:capture` covers studies without the chinrest only; driving the
-   chinrest's card-and-blind-spot steps would let it cover `m0`.
-6. L2CS-Net fine-tune (not started; its gaze datasets carry research-only EULAs
+5. L2CS-Net fine-tune (not started; its gaze datasets carry research-only EULAs
    someone has to accept by hand).
 
 Local state that is not in git: `out/` holds three real sessions
