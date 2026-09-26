@@ -22,6 +22,7 @@ import { runVirtualChinrest, CHINREST_CSS } from './chinrest-ui.js';
 import { stimulusSizeErrorFraction } from './chinrest.js';
 import { recordsMedia, retainsMedia, runConsent } from './consent.js';
 import { fitRect, preloadStimuli, rectNorm } from './stimuli.js';
+import { uploadAvailable, uploadBundle } from './upload.js';
 import {
   assignCondition, completionUrl, manifestParticipantId, panelIdentifiers,
 } from './recruitment.js';
@@ -857,6 +858,7 @@ async function finish() {
   ui.stage.classList.remove('active');
   ui.hud.classList.remove('visible');
   ui.donePanel.style.display = 'block';
+  if (state.uploadAvailable) document.getElementById('btnUpload').style.display = 'inline-block';
 
   renderSummary();
 }
@@ -933,6 +935,34 @@ function bundleFiles() {
 ui.btnDownload.addEventListener('click', async () => {
   for (const f of bundleFiles()) downloadBlob(f.blob, f.name);
   showCompletion();
+});
+
+/**
+ * Upload, when the page is served with an ingest service behind it. Download
+ * stays available either way: if the upload fails, the participant still has
+ * a way to hand the data over.
+ */
+const btnUpload = document.getElementById('btnUpload');
+const uploadStatus = document.getElementById('uploadStatus');
+uploadAvailable().then((ok) => { state.uploadAvailable = ok; });
+
+btnUpload.addEventListener('click', async () => {
+  btnUpload.disabled = true;
+  uploadStatus.style.display = 'block';
+  const sessionId = state.recorder.manifest().session_id;
+  try {
+    await uploadBundle(sessionId, bundleFiles(), (fraction, name) => {
+      uploadStatus.textContent = `Sending ${name}… ${Math.round(fraction * 100)}%`;
+    });
+    state.recorder.logEvent('upload_complete');
+    uploadStatus.textContent = 'Sent. Thank you — your part is done.';
+    btnUpload.style.display = 'none';
+    showCompletion();
+  } catch (err) {
+    uploadStatus.textContent = `The upload did not finish (${err.message}). `
+      + 'Please try again, or use Download and send the files to the contact on the consent screen.';
+    btnUpload.disabled = false;
+  }
 });
 
 /**

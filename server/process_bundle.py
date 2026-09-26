@@ -40,6 +40,7 @@ MediaPipeBlendshapesBatch = _face.MediaPipeBlendshapesBatch
 _gaze = load_engine_module("gaze.mediapipe_features")
 from pipeline import (SessionBundle, no_video_eligibility, process_session,  # noqa: E402
                       refuse_unconsented_recording)
+from ingest import upload_refusal  # noqa: E402
 from pseudonym import apply_to_bundle  # noqa: E402
 from retention import refusal_for  # noqa: E402
 from tables import read_session  # noqa: E402
@@ -251,7 +252,8 @@ def main() -> int:
 
     # Before anything is written: a withdrawn or expired session must not come
     # back because a copy of its bundle was still lying around. See retention.py.
-    refusal = refusal_for(args.out, bundle.session_id, bundle.metadata)
+    refusal = (refusal_for(args.out, bundle.session_id, bundle.metadata)
+               or upload_refusal(args.bundle))
     if refusal:
         print(f"\n  REFUSED  {refusal}")
         return 2

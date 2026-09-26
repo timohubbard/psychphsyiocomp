@@ -391,6 +391,13 @@ def _run(targets: list[SessionRecord], out: Path, media: list[Path], reason: str
     return 0
 
 
+def default_media_roots() -> list[Path]:
+    """Where raw bundles land: hand-placed downloads, and the upload inbox
+    (server/ingest.py), whose folders sit one level deeper. An uploaded
+    session carries the same retention promise as a downloaded one."""
+    return [ROOT / "tempdata", ROOT / "tempdata" / "inbox"]
+
+
 def main(argv: list[str] | None = None) -> int:
     # On each subcommand rather than the top level, because the npm scripts
     # fix the subcommand and everything the user types lands after it.
@@ -409,7 +416,7 @@ def main(argv: list[str] | None = None) -> int:
     wd.add_argument("--apply", action="store_true")
     args = ap.parse_args(argv)
 
-    media = args.media or [ROOT / "tempdata"]
+    media = args.media or default_media_roots()
     now = datetime.now(timezone.utc)
     sessions = collect_sessions(args.out, media)
 

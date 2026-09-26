@@ -147,13 +147,37 @@ async function main() {
 
     const withdrawCode = await js(`document.getElementById('withdrawCode')?.innerText ?? ''`);
     const linkBefore = await js(`document.getElementById('completeLink')?.style.display ?? 'none'`);
-    await js(`document.getElementById('btnDownload').click()`);
+
+    // --upload: send the bundle through the page's Upload button to the
+    // ingest service (serve.mjs --ingest), then check what arrived there.
+    let bundleDir = OUT;
+    if (args.upload) {
+      await until(`document.getElementById('btnUpload').style.display !== 'none'`,
+        'the Upload button (is serve.mjs running with --ingest?)', 15_000);
+      await js(`document.getElementById('btnUpload').click()`);
+      await until(`/Sent\\./.test(document.getElementById('uploadStatus').textContent)
+        || /did not finish/.test(document.getElementById('uploadStatus').textContent)`, 'the upload', 180_000);
+      const status = await js(`document.getElementById('uploadStatus').textContent`);
+      log(`upload: ${status}`);
+      if (!/Sent\./.test(status)) throw new Error(`upload failed: ${status}`);
+      const sid = await js(`document.querySelector('#withdrawCode code').textContent`);
+      bundleDir = resolve(args.inbox ?? join('tempdata', 'inbox'), sid);
+    } else {
+      await js(`document.getElementById('btnDownload').click()`);
+    }
     const linkAfter = await js(`({ shown: document.getElementById('completeLink')?.style.display !== 'none',
       href: document.getElementById('completeLink')?.href ?? null })`);
-    await untilFiles(OUT, ['session.json', 'browser_chunks.json'], 60_000);
-    await sleep(3000);   // the video blob is the largest and lands last
+    if (!args.upload) {
+      await untilFiles(OUT, ['session.json', 'browser_chunks.json'], 60_000);
+      await sleep(3000);   // the video blob is the largest and lands last
+    }
 
-    const report = checkOutput(OUT, STUDY, { chinrest, rawPid: panelPid(args.query) });
+    const report = checkOutput(bundleDir, STUDY, { chinrest, rawPid: panelPid(args.query) });
+    if (args.upload) {
+      const up = JSON.parse(readFileSync(join(bundleDir, '.upload.json'), 'utf8'));
+      report.facts.upload = `${up.complete ? 'sealed' : 'NOT SEALED'}: ${Object.keys(up.files).sort().join(', ')}`;
+      if (!up.complete) report.failures.push('the upload was not sealed');
+    }
     if (STUDY === 'panel-example') {
       // The completion link must not be offered before the data is saved.
       if (linkBefore !== 'none') report.failures.push('completion link shown before the data was saved');
@@ -167,7 +191,7 @@ async function main() {
     // record, and the session code it tells participants to quote.
     if (!consentHas.analysis) report.failures.push('no automated-analysis notice on the consent screen');
     if (!consentHas.withdrawal) report.failures.push('no withdrawal paragraph on the consent screen');
-    const consent = JSON.parse(readFileSync(join(OUT, 'session.json'), 'utf8')).consent ?? {};
+    const consent = JSON.parse(readFileSync(join(bundleDir, 'session.json'), 'utf8')).consent ?? {};
     if (!consent.analysis_notice || !consent.withdrawal) {
       report.failures.push('the consent record does not store the notice and withdrawal text');
     }

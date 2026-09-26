@@ -86,6 +86,7 @@ session** (83% of fixations on target at 4.5°, need 90%; 3.2° to target vs
 | `features_in_browser` tier: video never leaves the device; gaze features in the browser | done — not yet run on a real face |
 | Image and video stimuli (sha256-checked, paint-time onsets, AOIs drawn on the stimulus) | done — `studies/stimulus-example.json` |
 | Prolific parameters → keyed pseudonyms; between-subject conditions; completion link | done — `studies/panel-example.json` |
+| Remote upload: capture page → `serve.mjs --ingest` → `server/ingest.py` inbox | done — localhost only; see *Deploying* |
 
 ### Picking this up
 
@@ -116,6 +117,31 @@ session** (83% of fixations on target at 4.5°, need 90%; 3.2° to target vs
   there is no video. It is an option a study offers, and record-first stays
   the default. Not yet seen: a real face through it — the smoke test's fake
   camera shows none.
+
+#### Deploying for remote collection (not done)
+
+Everything runs on localhost. To collect from participants' own machines:
+
+1. Start the ingest service: `INGEST_TOKEN=<secret ≥16 chars> npm run ingest`.
+   It writes to `tempdata/inbox/<session_id>/`.
+2. Start the capture server with the same token: `npm run serve -- --ingest`.
+3. Put both behind an HTTPS reverse proxy on a host you control. Camera access
+   needs a secure context. Both processes bind 127.0.0.1 on purpose and are
+   not meant to face the internet directly.
+
+The participant then sees *Send to the study* beside *Download*. The ingest
+service:
+
+- requires `session.json` first;
+- refuses a recording under `features_in_browser`, and any withdrawn or expired
+  session (410);
+- caps every file, and seals each upload once.
+
+`npm run process -- tempdata/inbox/<id>` refuses an upload that was never
+sealed. Retention and withdrawal already search the inbox. Not built: TLS, the
+proxy, or any authentication of participants. Anyone who can load a public
+study link can upload a bundle, and the caps and refusals bound what they can
+do.
 
 #### Awaiting sign-off: consent wording added 2026-09-26
 

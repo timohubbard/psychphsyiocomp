@@ -8,7 +8,7 @@
  * the page imports the engine from engines/ and a browser cannot escape the
  * served root.
  */
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import { stat } from 'node:fs/promises';
 import { join, resolve, normalize, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,9 +27,50 @@ const PORT = Number(process.env.PORT) || 5173;
  */
 const SERVED = new Set(['web', 'engines', 'studies']);
 
+/**
+ * `--ingest`: forward /ingest/* to server/ingest.py, adding the bearer token
+ * HERE. The browser never sees INGEST_TOKEN, so a participant's page cannot
+ * leak it and the ingest service stays unreachable except through this
+ * proxy's own rules. Bodies are streamed, not buffered: a capture is
+ * hundreds of megabytes.
+ */
+const INGEST = process.argv.includes('--ingest');
+const INGEST_PORT = Number(process.env.INGEST_PORT) || 5175;
+const INGEST_TOKEN = process.env.INGEST_TOKEN ?? '';
+if (INGEST && INGEST_TOKEN.length < 16) {
+  console.error('\n  --ingest needs INGEST_TOKEN (the same secret server/ingest.py was started with).\n');
+  process.exit(1);
+}
+
+function proxyIngest(req, res) {
+  const upstream = httpRequest({
+    host: '127.0.0.1', port: INGEST_PORT, method: req.method, path: req.url,
+    headers: {
+      'content-type': req.headers['content-type'] ?? 'application/octet-stream',
+      ...(req.headers['content-length'] ? { 'content-length': req.headers['content-length'] } : {}),
+      authorization: `Bearer ${INGEST_TOKEN}`,
+    },
+  }, (up) => {
+    res.writeHead(up.statusCode, { 'Content-Type': up.headers['content-type'] ?? 'application/json',
+      'Cache-Control': 'no-store' });
+    up.pipe(res);
+  });
+  upstream.on('error', () => {
+    if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'the ingest service is not running' }));
+  });
+  req.pipe(upstream);
+}
+
 const server = createServer(async (req, res) => {
   try {
     const parsed = new URL(req.url, 'http://x');
+    if (parsed.pathname.startsWith('/ingest/')) {
+      if (INGEST) { proxyIngest(req, res); return; }
+      res.writeHead(404, { 'Content-Type': 'application/json' })
+        .end(JSON.stringify({ error: 'uploading is not enabled on this server' }));
+      return;
+    }
     const urlPath = decodeURIComponent(parsed.pathname);
 
     // REDIRECT, not an internal rewrite. Serving web/index.html *at* `/` would
@@ -100,5 +141,6 @@ server.on('error', (err) => {
 // and localhost is one; nothing else needs to reach a development server.
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`\n  capture page:  http://localhost:${PORT}/\n`);
+  if (INGEST) console.log(`  uploads:       proxied to the ingest service on 127.0.0.1:${INGEST_PORT}\n`);
   console.log('  Camera access needs a secure context; localhost counts as one.\n');
 });
