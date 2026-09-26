@@ -115,6 +115,35 @@ participant's own choice makes it happen.
 | `read_aloud` | `passage: "default"` or your own array of lines |
 | `free_speech` | `prompts: "default"` or your own; `duration_ms` optional |
 | `expression_prompts` | posed facial movements, ready → hold → relax; `expressions: "default"` or your own `[{id, text, target_aus}]`, `repeats` (default 2, each shuffled), `hold_ms` optional. Each trial's events carry the AUs it asked for |
+| `stimuli` | images and videos, one at a time after a fixation cross: `items: [{stimulus_id, kind: "image"\|"video", src: "stimuli/…", sha256, duration_ms, sound?}]`, `randomise` (default true, seeded), `isi_ms` (default 1000). See *Stimuli* below |
+
+### Stimuli
+
+Files live in `studies/stimuli/` and are named in the study by **sha256**. The
+hash is inside the study's content hash, so the protocol covers the pixels,
+not just the file name. The capture page fetches and checks every file before
+consent: a missing or changed file is a setup error, not a surprise halfway
+through a session. Everything is preloaded into memory, so an onset is a paint
+time rather than a network time.
+
+Each presentation writes a `stimulus` event. `stimulus_id` is the item's id,
+and the span is onset to offset. The metadata records:
+
+- where it was placed (`rect_norm`, as fractions of the stage — the same frame
+  gaze is estimated in);
+- its natural size and sha256;
+- how onset was stamped: `animation_frame` for images, or
+  `first_presented_frame` (requestVideoFrameCallback) for videos.
+
+Videos play muted unless `"sound": true`. `duration_ms` is required for videos
+too, as the most they are shown for, because the participant is told how long
+the task takes.
+
+AOIs can be drawn on a stimulus rather than on the screen. Save an AOI set with
+`stimulus_id` and give coordinates as fractions of the image. Each session's
+recorded `rect_norm` then places them where that participant's display showed
+the picture (`server/aoi.py` `to_stage`). `tools/make_stimuli.py` generated
+the example files; `studies/stimulus-example.json` uses them.
 
 A task whose modality is not enabled is dropped — `read_aloud` in a study
 without `voice` would ask a participant to speak into a microphone nobody

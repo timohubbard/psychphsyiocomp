@@ -112,3 +112,12 @@ def test_names_with_path_separators_cannot_escape_the_store(tmp_path):
     written = list((tmp_path / "aoi_sets").glob("*.json"))
     assert len(written) == 1
     assert written[0].parent == tmp_path / "aoi_sets"
+
+
+def test_a_stimulus_set_round_trips_with_its_stimulus(tmp_path):
+    s = AOISet("scene", "x", (AOI("disc", "circle", (0.3, 0.5, 0.12)),), stimulus_id="scene_left")
+    saved = aoi_store.save(tmp_path, s)
+    loaded = aoi_store.load(tmp_path, "scene")
+    assert loaded.stimulus_id == "scene_left"
+    assert loaded.content_hash() == saved["content_hash"]
+    assert aoi_store.list_sets(tmp_path)[0]["stimulus_id"] == "scene_left"

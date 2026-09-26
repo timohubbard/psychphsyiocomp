@@ -217,6 +217,8 @@ export function validateStudy(study) {
 
   if (study.tasks !== undefined && !Array.isArray(study.tasks)) {
     reasons.push('tasks must be a list when present');
+  } else if (Array.isArray(study.tasks)) {
+    reasons.push(...stimuliReasons(study.tasks));
   }
 
   // A transcript tier with no microphone offers the participant a choice that
@@ -240,6 +242,58 @@ export function validateStudy(study) {
   }
 
   return { valid: reasons.length === 0, reasons };
+}
+
+/** Stimuli live under studies/stimuli/, named plainly, and nowhere else. */
+const STIMULUS_SRC = /^stimuli\/[A-Za-z0-9][A-Za-z0-9._-]*(\/[A-Za-z0-9][A-Za-z0-9._-]*)*$/;
+const SHA256 = /^[0-9a-f]{64}$/;
+const MAX_STIMULUS_MS = 10 * 60 * 1000;
+
+/**
+ * Image and video stimulus items. Mirrored in server/study.py.
+ *
+ * `stimulus_id` is unique across the whole study because AOIs and every
+ * per-stimulus result are keyed on it. `sha256` is required, not optional: it
+ * is how the study's content hash comes to cover the pixels and not just the
+ * file name (web/src/stimuli.js checks it before consent). `duration_ms` is
+ * required for videos too, as the most the stimulus may be shown for, because
+ * the participant is told how long the task takes.
+ */
+function stimuliReasons(tasks) {
+  const reasons = [];
+  const seen = new Set();
+  for (const task of tasks) {
+    if (task?.type !== 'stimuli') continue;
+    if (!Array.isArray(task.items) || !task.items.length) {
+      reasons.push('a stimuli task has no items');
+      continue;
+    }
+    if (task.randomise !== undefined && typeof task.randomise !== 'boolean') {
+      reasons.push('stimuli.randomise must be true or false');
+    }
+    if (task.isi_ms !== undefined && !(Number.isFinite(task.isi_ms) && task.isi_ms >= 0)) {
+      reasons.push('stimuli.isi_ms must be a non-negative number of milliseconds');
+    }
+    for (const it of task.items) {
+      const id = it?.stimulus_id;
+      const where = isId(id) ? `stimulus ${id}` : 'a stimulus';
+      if (!isId(id)) reasons.push('stimulus_id must be a slug of letters, digits, dash or underscore');
+      else if (seen.has(id)) reasons.push(`stimulus_id ${id} is used twice — AOIs and results are keyed on it`);
+      seen.add(id);
+      if (!['image', 'video'].includes(it?.kind)) reasons.push(`${where}: kind must be image or video`);
+      if (typeof it?.src !== 'string' || !STIMULUS_SRC.test(it.src) || it.src.includes('..')) {
+        reasons.push(`${where}: src must be a path under stimuli/`);
+      }
+      if (!SHA256.test(it?.sha256 ?? '')) reasons.push(`${where}: sha256 must be 64 lower-case hex digits`);
+      if (!(Number.isFinite(it?.duration_ms) && it.duration_ms > 0 && it.duration_ms <= MAX_STIMULUS_MS)) {
+        reasons.push(`${where}: duration_ms must be between 1 and ${MAX_STIMULUS_MS}`);
+      }
+      if (it?.sound !== undefined && typeof it.sound !== 'boolean') {
+        reasons.push(`${where}: sound must be true or false`);
+      }
+    }
+  }
+  return reasons;
 }
 
 /**

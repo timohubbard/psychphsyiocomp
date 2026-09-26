@@ -134,6 +134,19 @@ export const EXPRESSION_TIMINGS = {
   relaxMs: 3000,
 };
 
+/**
+ * Image and video stimuli.
+ *
+ * A fixation cross fills the gap between stimuli, so every onset starts from
+ * the same place: gaze at the centre. Without it, where a participant happened
+ * to be looking when the previous stimulus vanished becomes part of the time
+ * to first fixation on every AOI of the next one.
+ */
+export const STIMULUS_TIMINGS = {
+  /** Default inter-stimulus interval, on the fixation cross. */
+  isiMs: 1000,
+};
+
 export const TIMINGS = {
   /** How long the flash stays up. Long enough to survive a dropped frame. */
   clapperFlashMs: 200,
@@ -491,6 +504,36 @@ function stagesForTask(task, { calPoints, valPoints, wantsGaze, wantsVoice, seed
       ];
     }
 
+    case 'stimuli': {
+      // Shuffled unless the study says otherwise, for the same reason as
+      // calibration: in a fixed order, stimulus identity becomes a function
+      // of elapsed time and every slow drift becomes a fake stimulus effect.
+      // The seed is logged, so the order a participant saw can be rebuilt.
+      const items = task.randomise === false
+        ? [...task.items] : seededShuffle(task.items, (seed ^ 0x5717B1) >>> 0);
+      const isiMs = task.isi_ms ?? STIMULUS_TIMINGS.isiMs;
+      const kinds = new Set(items.map((it) => it.kind));
+      const what = kinds.size > 1 ? 'pictures and short videos'
+        : kinds.has('video') ? 'short videos' : 'pictures';
+      const totalMs = items.reduce((n, it) => n + it.duration_ms + isiMs, 0);
+      return [
+        { type: 'instruction', id: 'stimuli_intro',
+          title: `Now some ${what}`,
+          lines: [
+            'Each one appears in the middle of the screen for a few seconds.',
+            'Just look at it naturally. There is nothing to press and nothing to remember.',
+            'A cross appears between them. Look at it until the next one comes.',
+            `${items.length} ${what}, about ${describeDuration(totalMs)}.`,
+          ] },
+        ...items.map((it, i) => ({
+          type: 'stimulus', id: `stim_${String(i + 1).padStart(2, '0')}_${it.stimulus_id}`,
+          stimulusId: it.stimulus_id, kind: it.kind, src: it.src, sha256: it.sha256,
+          durationMs: it.duration_ms, sound: it.sound === true, isiMs,
+          index: i + 1, total: items.length,
+        })),
+      ];
+    }
+
     default:
       return null;
   }
@@ -516,6 +559,7 @@ export function activitiesFor(study) {
   if (has('speech_read')) doing.push('read a short passage aloud');
   if (has('speech_free')) doing.push('talk briefly about an everyday topic');
   if (has('expression')) doing.push('make some facial movements when asked');
+  if (has('stimulus')) doing.push('look at some pictures or short videos');
   return doing;
 }
 
@@ -529,6 +573,9 @@ function countParts(body, nCal, nVal) {
   if (has('speech_read')) parts.push('You read a short passage aloud.');
   if (has('speech_free')) parts.push('You talk for a short while about an everyday topic.');
   if (has('expression')) parts.push('You make some facial movements when asked, one at a time.');
+  if (has('stimulus')) {
+    parts.push(`You look at ${body.filter((s) => s.type === 'stimulus').length} pictures or short videos.`);
+  }
   return parts;
 }
 
@@ -607,6 +654,9 @@ export function estimateDurationMs(sequence) {
       case 'expression':
         total += EXPRESSION_TIMINGS.readyMs + (stage.holdMs ?? EXPRESSION_TIMINGS.holdMs)
           + EXPRESSION_TIMINGS.relaxMs;
+        break;
+      case 'stimulus':
+        total += (stage.isiMs ?? STIMULUS_TIMINGS.isiMs) + stage.durationMs;
         break;
       case 'instruction':
         // Genuinely participant-paced now, so any number here is an allowance

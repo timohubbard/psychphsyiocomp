@@ -50,6 +50,7 @@ def list_sets(root: str | Path) -> list[dict[str, Any]]:
             "content_hash": raw.get("content_hash"),
             "created_utc": raw.get("created_utc"),
             "n_aois": len(raw.get("aois", [])),
+            "stimulus_id": raw.get("stimulus_id"),
             "file": path.name,
         })
     out.sort(key=lambda r: (r["name"] or "", r["created_utc"] or ""), reverse=True)
@@ -76,6 +77,7 @@ def load(root: str | Path, name: str, version: str | None = None) -> AOISet:
         aois=tuple(AOI(aoi_id=a["aoi_id"], shape=a["shape"],
                        coords=tuple(a["coords"]), label=a.get("label"))
                    for a in raw["aois"]),
+        stimulus_id=raw.get("stimulus_id"),
     )
 
 
@@ -98,13 +100,15 @@ def save(root: str | Path, aoi_set: AOISet) -> dict[str, Any]:
     # Version numbers count revisions of this name. They are a human-readable
     # ordering; the content hash is the identity.
     version = str(len(existing) + 1)
-    stored = AOISet(name=aoi_set.name, version=version, aois=aoi_set.aois)
+    stored = AOISet(name=aoi_set.name, version=version, aois=aoi_set.aois,
+                    stimulus_id=aoi_set.stimulus_id)
 
     payload = {
         "name": stored.name,
         "version": version,
         "content_hash": stored.content_hash(),
         "created_utc": datetime.now(timezone.utc).isoformat(),
+        **({"stimulus_id": stored.stimulus_id} if stored.stimulus_id else {}),
         "aois": [asdict(a) for a in stored.aois],
         # Restated in every file rather than assumed to be common knowledge.
         # Anyone reading one of these years later needs to know that the

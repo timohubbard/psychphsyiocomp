@@ -21,6 +21,7 @@ import { MediaPipeGazeFeaturesLive } from '../../engines/gaze.mediapipe_features
 import { runVirtualChinrest, CHINREST_CSS } from './chinrest-ui.js';
 import { stimulusSizeErrorFraction } from './chinrest.js';
 import { recordsMedia, retainsMedia, runConsent } from './consent.js';
+import { fitRect, preloadStimuli, rectNorm } from './stimuli.js';
 import {
   audienceOf, describeStudy, loadStudy, loadStudyIndex, needsAudio, protocolFor,
   studyIdFromUrl, studyProvenance,
@@ -36,7 +37,7 @@ const ui = {
   btnEnable: el('btnEnable'), btnStart: el('btnStart'), btnDownload: el('btnDownload'),
   chkStream: el('chkStream'), chkLight: el('chkLight'),
   chkFps: el('chkFps'), chkAudio: el('chkAudio'),
-  progress: el('progress'),
+  progress: el('progress'), stimulusBox: el('stimulusBox'),
   hud: el('hud'), hudFps: el('hudFps'), hudFace: el('hudFace'),
   hudLuma: el('hudLuma'), hudStage: el('hudStage'),
 };
@@ -187,6 +188,9 @@ async function prepareStudy() {
 
   try {
     state.study = await loadStudy(studyId);
+    // Before consent: a stimulus file that is missing or has changed since
+    // the study was fixed is a setup error, not something to find mid-session.
+    state.stimuli = await preloadStimuli(state.study);
     line.innerHTML = `Protocol: <strong>${describeStudy(state.study)}</strong>`;
     // Whoever is running the session sees this before anything is enabled: a
     // study with no ethics reference must not be run on anyone else.
@@ -459,6 +463,7 @@ async function runStage(stage) {
     case 'speech_read':
     case 'speech_free':    return runSpeech(stage);
     case 'expression':     return runExpression(stage);
+    case 'stimulus':       return runStimulus(stage);
     default:
       console.warn('unknown stage', stage);
       return undefined;
@@ -724,6 +729,99 @@ async function runExpression(stage) {
 
   state.recorder.closeEvent('expression_prompt', stage.id);
   ui.stageText.style.display = 'none';
+}
+
+/**
+ * One image or video stimulus, after a fixation cross.
+ *
+ * Onset is stamped when the stimulus is painted, not when it was asked for:
+ * an image inside the requestAnimationFrame that shows it (as the clapper
+ * does), a video in the requestVideoFrameCallback for its first presented
+ * frame. The difference is a frame or more of decode and compositing, which
+ * is the same order as an early fixation. The event carries where the
+ * stimulus was placed, in the stage frame gaze is estimated in (stimuli.js).
+ */
+async function runStimulus(stage) {
+  ui.target.style.opacity = '0';
+  ui.stageText.style.display = 'none';
+
+  ui.fixation.style.display = 'block';
+  await wait(stage.isiMs);
+  ui.fixation.style.display = 'none';
+
+  const loaded = state.stimuli.get(stage.stimulusId);
+  const video = stage.kind === 'video';
+  const el = video ? document.createElement('video') : new Image();
+  el.src = loaded.url;
+  let naturalW;
+  let naturalH;
+  if (video) {
+    el.muted = !stage.sound;
+    el.playsInline = true;
+    el.preload = 'auto';
+    await new Promise((ok, fail) => {
+      el.addEventListener('loadeddata', ok, { once: true });
+      el.addEventListener('error', () => fail(new Error(`stimulus ${stage.stimulusId} failed to decode`)), { once: true });
+    });
+    [naturalW, naturalH] = [el.videoWidth, el.videoHeight];
+  } else {
+    await el.decode();
+    [naturalW, naturalH] = [el.naturalWidth, el.naturalHeight];
+  }
+
+  const box = ui.stage.getBoundingClientRect();
+  const rect = fitRect(naturalW, naturalH, box.width, box.height);
+  Object.assign(el.style, {
+    left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.w}px`, height: `${rect.h}px`,
+  });
+  const meta = {
+    stimulus_id: stage.stimulusId, kind: stage.kind, presentation: stage.id,
+    index: stage.index, total: stage.total, sha256: stage.sha256,
+    natural_width: naturalW, natural_height: naturalH,
+    rect_norm: rectNorm(rect, box.width, box.height),
+    stage_px: { width: box.width, height: box.height },
+  };
+
+  ui.stimulusBox.replaceChildren(el);
+  ui.stimulusBox.style.display = 'block';
+
+  if (video) {
+    const onset = new Promise((ok) => {
+      if (typeof el.requestVideoFrameCallback === 'function') {
+        el.requestVideoFrameCallback((_now, m) => {
+          state.recorder.logEvent('stimulus', {
+            ...meta, onset_basis: 'first_presented_frame',
+            media_time: m.mediaTime, expected_display_time: m.expectedDisplayTime,
+          }, stage.stimulusId);
+          ok();
+        });
+      } else {
+        el.addEventListener('playing', () => {
+          state.recorder.logEvent('stimulus', { ...meta, onset_basis: 'playing_event' },
+            stage.stimulusId);
+          ok();
+        }, { once: true });
+      }
+    });
+    await el.play();
+    await onset;
+    const ended = new Promise((ok) => el.addEventListener('ended', ok, { once: true }));
+    await Promise.race([ended, wait(stage.durationMs)]);
+    el.pause();
+  } else {
+    await new Promise((ok) => {
+      requestAnimationFrame(() => {
+        state.recorder.logEvent('stimulus', { ...meta, onset_basis: 'animation_frame' },
+          stage.stimulusId);
+        ok();
+      });
+    });
+    await wait(stage.durationMs);
+  }
+
+  state.recorder.closeEvent('stimulus', stage.stimulusId);
+  ui.stimulusBox.style.display = 'none';
+  ui.stimulusBox.replaceChildren();
 }
 
 // ---------------------------------------------------------------------------

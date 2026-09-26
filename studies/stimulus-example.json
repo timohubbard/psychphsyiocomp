@@ -1,0 +1,52 @@
+{
+  "study_id": "stimulus-example",
+  "name": "Stimulus example — two pictures and a short video",
+  "version": "1.0.0",
+
+  "notes": [
+    "Shows the stimuli task: images and video named by sha256, shown in a",
+    "seeded order with a fixation cross between them, each onset stamped when",
+    "it is painted. The files are self-generated (tools/make_stimuli.py).",
+    "scene_left and scene_right are mirror images, so the same two AOIs swap",
+    "sides — the simplest check that per-stimulus gaze results follow the",
+    "picture rather than the screen. A developer self-test (no audience)."
+  ],
+
+  "disclosure": {
+    "retention_days": 180,
+    "secondary_use": "Analysed by the named research team only. Not sold, and not shared outside the team without a further, separate agreement.",
+    "contact": "Replace this with the investigator and the route to the ethics board before running anyone other than the developer.",
+    "irb_reference": null
+  },
+
+  "consent_tiers": ["features_only", "media_retained"],
+  "default_tier": "features_only",
+
+  "modalities": ["gaze", "face"],
+
+  "calibration": {
+    "n_points": 13,
+    "randomise_order": true
+  },
+
+  "tasks": [
+    { "type": "chinrest" },
+    { "type": "calibration" },
+    { "type": "validation" },
+    {
+      "type": "stimuli",
+      "isi_ms": 1000,
+      "items": [
+        { "stimulus_id": "scene_left", "kind": "image", "src": "stimuli/scene_left.png",
+          "sha256": "629b0f1ebc823f79ca8138bc1c7d61768a8fcc7e4edf20a41dba736b903b2dc1",
+          "duration_ms": 4000 },
+        { "stimulus_id": "scene_right", "kind": "image", "src": "stimuli/scene_right.png",
+          "sha256": "d7ef3a1b55c2028a612ba0b1f9b82f539d085130488d74c04286233be752f058",
+          "duration_ms": 4000 },
+        { "stimulus_id": "pattern", "kind": "video", "src": "stimuli/pattern.webm",
+          "sha256": "402c10e89effe2998eb62463a23a6c9629db2ed2bd76a87266d707e9e6b77b49",
+          "duration_ms": 4000 }
+      ]
+    }
+  ]
+}

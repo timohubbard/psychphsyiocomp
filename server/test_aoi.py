@@ -272,3 +272,46 @@ def test_calibration_grid_builds_one_aoi_per_target():
     assert len(s.aois) == 3
     assert all(a.shape == "circle" for a in s.aois)
     assert s.provenance()["aoi_set"] == "calibration_grid"
+
+
+# ---------------------------------------------------------------------------
+# AOIs drawn on a stimulus
+# ---------------------------------------------------------------------------
+
+from aoi import to_stage  # noqa: E402
+
+_PANELS = (AOI("left", "rect", (0.1, 0.2, 0.4, 0.8)), AOI("dot", "circle", (0.7, 0.5, 0.1)))
+
+
+def test_a_screen_set_hashes_exactly_as_before_stimuli_existed():
+    """Pinned: computed by the formula before stimulus_id was added, and
+    unchanged after. Every result already recorded references these hashes."""
+    assert AOISet("panels", "1", _PANELS).content_hash() == "501a06a0da43d659"
+
+
+def test_the_stimulus_is_part_of_a_sets_identity():
+    screen = AOISet("panels", "1", _PANELS)
+    on_a = AOISet("panels", "1", _PANELS, stimulus_id="scene_left")
+    on_b = AOISet("panels", "1", _PANELS, stimulus_id="scene_right")
+    assert len({screen.content_hash(), on_a.content_hash(), on_b.content_hash()}) == 3
+    assert on_a.provenance()["stimulus_id"] == "scene_left"
+    assert "stimulus_id" not in screen.provenance()
+
+
+def test_to_stage_places_a_rect_where_the_stimulus_was_shown():
+    rect = {"x0": 0.1, "y0": 0.2, "x1": 0.9, "y1": 0.6}     # 0.8 wide, 0.4 tall
+    got = to_stage(AOI("a", "rect", (0.0, 0.0, 0.5, 1.0)), rect)
+    assert got.coords == pytest.approx((0.1, 0.2, 0.5, 0.6))
+
+
+def test_to_stage_maps_polygon_pairs_and_scales_a_circle_by_width():
+    rect = {"x0": 0.25, "y0": 0.25, "x1": 0.75, "y1": 0.5}
+    poly = to_stage(AOI("p", "polygon", (0, 0, 1, 0, 0, 1)), rect)
+    assert poly.coords == pytest.approx((0.25, 0.25, 0.75, 0.25, 0.25, 0.5))
+    circ = to_stage(AOI("c", "circle", (0.5, 0.5, 0.2)), rect)
+    assert circ.coords == pytest.approx((0.5, 0.375, 0.1))
+
+
+def test_a_degenerate_stimulus_rect_is_refused():
+    with pytest.raises(ValueError):
+        to_stage(_PANELS[0], {"x0": 0.5, "y0": 0.1, "x1": 0.5, "y1": 0.9})

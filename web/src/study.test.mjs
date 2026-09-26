@@ -362,6 +362,37 @@ test('changing the audience changes the hash', async () => {
   assert.notEqual(await contentHash(study()), await contentHash(study({ audience: 'participants' })));
 });
 
+const item = (over = {}) => ({
+  stimulus_id: 'forest', kind: 'image', src: 'stimuli/forest.png',
+  sha256: 'a'.repeat(64), duration_ms: 4000, ...over,
+});
+const withStimuli = (items, extra = {}) => study({ tasks: [{ type: 'stimuli', items, ...extra }] });
+
+test('a well-formed stimuli task validates', () => {
+  assert.deepEqual(validateStudy(withStimuli([item(), item({ stimulus_id: 'sea', kind: 'video',
+    src: 'stimuli/sea.webm' })])).reasons, []);
+});
+
+test('stimulus refusals: empty, duplicate id, bad kind, path, hash, duration, sound', () => {
+  const r = (s) => validateStudy(s).reasons.join(' | ');
+  assert.match(r(withStimuli([])), /no items/);
+  assert.match(r(withStimuli([item(), item()])), /forest is used twice/);
+  assert.match(r(withStimuli([item({ kind: 'audio' })])), /kind must be image or video/);
+  assert.match(r(withStimuli([item({ src: '../out/x.png' })])), /path under stimuli/);
+  assert.match(r(withStimuli([item({ src: 'stimuli/../../x.png' })])), /path under stimuli/);
+  assert.match(r(withStimuli([item({ src: '/etc/passwd' })])), /path under stimuli/);
+  assert.match(r(withStimuli([item({ sha256: 'ABC' })])), /sha256 must be 64/);
+  assert.match(r(withStimuli([item({ duration_ms: 0 })])), /duration_ms must be between/);
+  assert.match(r(withStimuli([item({ sound: 'yes' })])), /sound must be true or false/);
+  assert.match(r(withStimuli([item()], { randomise: 'no' })), /randomise must be true or false/);
+});
+
+test('the shipped stimulus example validates', async () => {
+  const fs = await import('node:fs/promises');
+  const s = JSON.parse(await fs.readFile('studies/stimulus-example.json', 'utf8'));
+  assert.deepEqual(validateStudy(s).reasons, []);
+});
+
 test('the in-browser tier may be offered for gaze and face', () => {
   const s = study({ consent_tiers: ['features_in_browser', 'features_only'],
     default_tier: 'features_in_browser', modalities: ['gaze', 'face'] });

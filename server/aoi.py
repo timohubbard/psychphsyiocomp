@@ -70,22 +70,58 @@ class AOISet:
     name: str
     version: str
     aois: tuple[AOI, ...]
+    #: None: the AOIs are in normalised SCREEN (stage) coordinates, as every
+    #: set was before stimuli existed. Set: they are fractions of that
+    #: stimulus's own image, and are placed on a session's screen through the
+    #: `rect_norm` its `stimulus` event recorded — see `to_stage`. Drawn once
+    #: on the picture, they then follow it wherever a participant's display put
+    #: it, which is what makes them comparable across displays.
+    stimulus_id: str | None = None
 
     def content_hash(self) -> str:
+        geometry = [[a.aoi_id, a.shape, list(a.coords)]
+                    for a in sorted(self.aois, key=lambda a: a.aoi_id)]
+        # The stimulus is part of the identity — the same boxes on a different
+        # picture are a different question — but only when set, so every set
+        # saved before stimuli existed keeps the hash its results recorded.
         payload = json.dumps(
-            [[a.aoi_id, a.shape, list(a.coords)] for a in sorted(self.aois, key=lambda a: a.aoi_id)],
+            geometry if self.stimulus_id is None
+            else {"stimulus_id": self.stimulus_id, "aois": geometry},
             separators=(",", ":"),
         )
         return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
     def provenance(self) -> dict[str, Any]:
         """What must travel with any metric computed from this set."""
-        return {
+        out = {
             "aoi_set": self.name,
             "aoi_version": self.version,
             "aoi_content_hash": self.content_hash(),
             "n_aois": len(self.aois),
         }
+        if self.stimulus_id is not None:
+            out["stimulus_id"] = self.stimulus_id
+        return out
+
+
+def to_stage(aoi: AOI, rect_norm: dict[str, float]) -> AOI:
+    """Map a stimulus-space AOI onto the stage, where this stimulus was shown.
+
+    `rect_norm` is the stimulus's box in stage fractions ({x0, y0, x1, y1}),
+    recorded in its `stimulus` event. A circle's radius is a fraction of the
+    stimulus WIDTH, and becomes a fraction of the stage width — the axis the
+    screen-space hit test measures radii against.
+    """
+    x0, y0 = rect_norm["x0"], rect_norm["y0"]
+    sx, sy = rect_norm["x1"] - x0, rect_norm["y1"] - y0
+    if sx <= 0 or sy <= 0:
+        raise ValueError(f"degenerate stimulus rect {rect_norm}")
+    c = aoi.coords
+    if aoi.shape == "circle":
+        coords = (x0 + c[0] * sx, y0 + c[1] * sy, c[2] * sx)
+    else:
+        coords = tuple(x0 + v * sx if i % 2 == 0 else y0 + v * sy for i, v in enumerate(c))
+    return AOI(aoi_id=aoi.aoi_id, shape=aoi.shape, coords=coords, label=aoi.label)
 
 
 # ---------------------------------------------------------------------------

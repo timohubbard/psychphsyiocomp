@@ -268,12 +268,18 @@ class Handler(SimpleHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(length) or b"{}")
+            stimulus_id = body.get("stimulus_id")
+            if stimulus_id is not None and not (
+                    isinstance(stimulus_id, str) and stimulus_id
+                    and all(c.isalnum() or c in "_-" for c in stimulus_id)):
+                raise ValueError(f"stimulus_id must be a slug, got {stimulus_id!r}")
             aoi_set = AOISet(
                 name=str(body["name"]), version="pending",
                 aois=tuple(AOI(aoi_id=str(a["aoi_id"]), shape=a["shape"],
                                coords=tuple(float(c) for c in a["coords"]),
                                label=a.get("label"))
                            for a in body["aois"]),
+                stimulus_id=stimulus_id,
             )
         except (KeyError, TypeError, ValueError) as exc:
             return self._json({"error": "bad_request", "detail": str(exc)}, status=400)

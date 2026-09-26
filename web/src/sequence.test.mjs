@@ -640,3 +640,44 @@ test('the chinrest runs only when the protocol asks for it', async () => {
   assert.equal(wantsChinrest({ modalities: ['gaze', 'face'] }), true);
   assert.equal(wantsChinrest({ modalities: ['face'] }), false);
 });
+
+// ---------------------------------------------------------------------------
+// image and video stimuli
+// ---------------------------------------------------------------------------
+
+const STIM = (overrides = {}) => ({
+  modalities: ['gaze'],
+  calibration: { n_points: 13 },
+  tasks: [{
+    type: 'stimuli', isi_ms: 800, ...overrides,
+    items: ['a', 'b', 'c', 'd'].map((id, i) => ({
+      stimulus_id: id, kind: i === 3 ? 'video' : 'image', src: `stimuli/${id}.png`,
+      sha256: '0'.repeat(64), duration_ms: 3000,
+    })),
+  }],
+});
+
+test('a stimuli task becomes an instruction and one stage per item', () => {
+  const seq = buildSequence(STIM(), 7).filter((s) => s.type === 'stimulus');
+  assert.equal(seq.length, 4);
+  assert.ok(seq.every((s) => s.durationMs === 3000 && s.isiMs === 800 && s.total === 4));
+  assert.deepEqual([...new Set(seq.map((s) => s.kind))].sort(), ['image', 'video']);
+});
+
+test('stimulus order is shuffled by the session seed, and replays from it', () => {
+  const order = (seed) => buildSequence(STIM(), seed).filter((s) => s.type === 'stimulus')
+    .map((s) => s.stimulusId).join('');
+  assert.equal(order(11), order(11));
+  const seen = new Set([1, 2, 3, 4, 5, 6, 7, 8].map(order));
+  assert.ok(seen.size > 1, 'eight seeds produced one order — not shuffled');
+});
+
+test('randomise: false keeps the file order', () => {
+  const seq = buildSequence(STIM({ randomise: false }), 3).filter((s) => s.type === 'stimulus');
+  assert.deepEqual(seq.map((s) => s.stimulusId), ['a', 'b', 'c', 'd']);
+});
+
+test('the time estimate counts each stimulus and its gap', () => {
+  const seq = buildSequence(STIM(), 1).filter((s) => s.type === 'stimulus');
+  assert.equal(estimateDurationMs(seq), 4 * (3000 + 800));
+});

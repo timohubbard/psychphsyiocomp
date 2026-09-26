@@ -63,6 +63,9 @@
     position: absolute; inset: 0; background: #fff;
     display: none; z-index: 10;
   }
+  /* Images and videos, placed in stage pixels by stimuli.js fitRect. */
+  #stimulusBox { position: absolute; inset: 0; display: none; }
+  #stimulusBox > * { position: absolute; display: block; }
   /* Instruction card. Left-aligned body text on purpose: centred text is
      harder to read line-to-line, and these screens are read, not glanced at. */
   #stageText {
@@ -175,6 +178,7 @@
     <div id="flash"></div>
     <div id="target"><div class="inner"></div></div>
     <div id="fixation">+</div>
+  <div id="stimulusBox"></div>
     <div id="stageText"></div>
     <div id="progress"></div>
   </div>

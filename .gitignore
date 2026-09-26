@@ -53,6 +53,14 @@ browser_chunks.json
 # further up, one directory over.
 out/annotations/
 
+# Stimuli are the deliberate exception to the media rules above. They are part
+# of the protocol, not anyone's recording: the study names each one by sha256,
+# and a session is not reproducible without the exact file. Only this folder,
+# because the extension rules are what keep participant video out of history.
+!studies/stimuli/
+!studies/stimuli/*.webm
+!studies/stimuli/*.mp4
+
 # The deletion log (server/retention.py) holds no participant id, but it is a
 # list of which sessions existed and when each was withdrawn — a record about
 # participants, and so local like the data it records the removal of.

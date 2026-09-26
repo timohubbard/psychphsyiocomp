@@ -217,7 +217,32 @@ export function checkOutput(dir, studyId, { chinrest = null } = {}) {
     if (session.geometry?.reason !== 'not_in_protocol') failures.push(`geometry reason ${session.geometry?.reason}, expected not_in_protocol`);
   }
 
-  if (studyId === 'm0' || studyId === 'in-browser-example') {
+  if (studyId === 'stimulus-example') {
+    // Every stimulus shown once, closed, placed, and stamped at paint time.
+    const shown = events.filter((e) => e.event_type === 'stimulus');
+    facts.stimuli = shown.map((e) => `${e.stimulus_id}:${e.metadata?.onset_basis}`).join(' ');
+    const ids = shown.map((e) => e.stimulus_id).sort();
+    if (JSON.stringify(ids) !== JSON.stringify(['pattern', 'scene_left', 'scene_right'])) {
+      failures.push(`stimuli shown ${ids.join(',')}, expected pattern, scene_left, scene_right once each`);
+    }
+    for (const e of shown) {
+      const r = e.metadata?.rect_norm;
+      if (e.offset_native_ts == null || e.offset_native_ts <= e.onset_native_ts) {
+        failures.push(`stimulus ${e.stimulus_id} has no closed span`);
+      }
+      if (!r || !(r.x0 >= 0 && r.x1 <= 1 && r.x0 < r.x1 && r.y0 >= 0 && r.y1 <= 1 && r.y0 < r.y1)) {
+        failures.push(`stimulus ${e.stimulus_id} has no valid rect_norm`);
+      }
+      const span = e.offset_native_ts - e.onset_native_ts;
+      if (!(span > 3500 && span < 4600)) failures.push(`stimulus ${e.stimulus_id} shown for ${span.toFixed(0)} ms, asked 4000`);
+    }
+    const video = shown.find((e) => e.stimulus_id === 'pattern');
+    if (video && !['first_presented_frame', 'playing_event'].includes(video.metadata?.onset_basis)) {
+      failures.push(`video onset basis ${video.metadata?.onset_basis}`);
+    }
+  }
+
+  if (['m0', 'in-browser-example', 'stimulus-example'].includes(studyId)) {
     // Both run the chinrest, the 13-point calibration and 5-point validation.
     const g = session.geometry ?? {};
     facts.geometry = g.ok ? `${(g.viewing_distance_mm / 10).toFixed(1)} cm at ${g.px_per_mm?.toFixed(3)} px/mm`

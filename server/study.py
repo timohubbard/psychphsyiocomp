@@ -149,6 +149,8 @@ def validate_study(study: Any) -> Verdict:
 
     if "tasks" in study and not isinstance(study["tasks"], list):
         reasons.append("tasks must be a list when present")
+    elif isinstance(study.get("tasks"), list):
+        reasons.extend(_stimuli_reasons(study["tasks"]))
 
     # Mirrors study.js: a transcript tier with no microphone offers a choice
     # that cannot happen and records consent to transcribe a silent session.
@@ -164,6 +166,57 @@ def validate_study(study: Any) -> Verdict:
                            "can only be measured from a recording on the server")
 
     return Verdict(not reasons, tuple(reasons))
+
+
+#: Mirrors STIMULUS_SRC, SHA256 and MAX_STIMULUS_MS in web/src/study.js.
+_STIMULUS_SRC = re.compile(r"^stimuli/[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+MAX_STIMULUS_MS = 10 * 60 * 1000
+
+
+def _is_ms(v: Any, *, minimum: float) -> bool:
+    return (isinstance(v, (int, float)) and not isinstance(v, bool)
+            and v == v and v not in (float("inf"),) and v >= minimum)
+
+
+def _stimuli_reasons(tasks: list[Any]) -> list[str]:
+    """Mirror of ``stimuliReasons`` — image and video items."""
+    reasons: list[str] = []
+    seen: set[str] = set()
+    for task in tasks:
+        if not isinstance(task, dict) or task.get("type") != "stimuli":
+            continue
+        items = task.get("items")
+        if not isinstance(items, list) or not items:
+            reasons.append("a stimuli task has no items")
+            continue
+        if "randomise" in task and not isinstance(task["randomise"], bool):
+            reasons.append("stimuli.randomise must be true or false")
+        if "isi_ms" in task and not _is_ms(task["isi_ms"], minimum=0):
+            reasons.append("stimuli.isi_ms must be a non-negative number of milliseconds")
+        for it in items:
+            it = it if isinstance(it, dict) else {}
+            sid = it.get("stimulus_id")
+            where = f"stimulus {sid}" if _is_id(sid) else "a stimulus"
+            if not _is_id(sid):
+                reasons.append("stimulus_id must be a slug of letters, digits, dash or underscore")
+            elif sid in seen:
+                reasons.append(f"stimulus_id {sid} is used twice — AOIs and results are keyed on it")
+            if _is_id(sid):
+                seen.add(sid)
+            if it.get("kind") not in ("image", "video"):
+                reasons.append(f"{where}: kind must be image or video")
+            src = it.get("src")
+            if not isinstance(src, str) or not _STIMULUS_SRC.match(src) or ".." in src:
+                reasons.append(f"{where}: src must be a path under stimuli/")
+            if not isinstance(it.get("sha256"), str) or not _SHA256.match(it["sha256"]):
+                reasons.append(f"{where}: sha256 must be 64 lower-case hex digits")
+            d = it.get("duration_ms")
+            if not (_is_ms(d, minimum=1) and d <= MAX_STIMULUS_MS):
+                reasons.append(f"{where}: duration_ms must be between 1 and {MAX_STIMULUS_MS}")
+            if "sound" in it and not isinstance(it["sound"], bool):
+                reasons.append(f"{where}: sound must be true or false")
+    return reasons
 
 
 def audience_of(study: dict[str, Any]) -> str:

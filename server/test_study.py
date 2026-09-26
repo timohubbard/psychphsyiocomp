@@ -182,6 +182,45 @@ def test_present_but_empty_fields_are_refused_whoever_the_audience():
     assert "controller is present but empty" in _reasons(s)
 
 
+def _item(**over):
+    return {"stimulus_id": "forest", "kind": "image", "src": "stimuli/forest.png",
+            "sha256": "a" * 64, "duration_ms": 4000, **over}
+
+
+def _with_stimuli(items, **extra):
+    return study(tasks=[{"type": "stimuli", "items": items, **extra}])
+
+
+def test_a_well_formed_stimuli_task_validates():
+    assert validate_study(_with_stimuli([_item(), _item(stimulus_id="sea", kind="video",
+                                                         src="stimuli/sea.webm")])).ok
+
+
+def test_stimulus_refusals_mirror_the_browser():
+    assert "no items" in _reasons(_with_stimuli([]))
+    assert "forest is used twice" in _reasons(_with_stimuli([_item(), _item()]))
+    assert "kind must be image or video" in _reasons(_with_stimuli([_item(kind="audio")]))
+    for bad in ("../out/x.png", "stimuli/../../x.png", "/etc/passwd"):
+        assert "path under stimuli" in _reasons(_with_stimuli([_item(src=bad)])), bad
+    assert "sha256 must be 64" in _reasons(_with_stimuli([_item(sha256="ABC")]))
+    assert "duration_ms must be between" in _reasons(_with_stimuli([_item(duration_ms=0)]))
+    assert "duration_ms must be between" in _reasons(_with_stimuli([_item(duration_ms=True)]))
+    assert "sound must be true or false" in _reasons(_with_stimuli([_item(sound="yes")]))
+    assert "randomise must be true or false" in _reasons(_with_stimuli([_item()], randomise="no"))
+
+
+def test_the_shipped_stimulus_example_validates_and_its_hashes_match_the_files():
+    """The browser refuses a changed file before consent; this catches it at
+    commit time instead, on the real files."""
+    import hashlib
+    s = json.loads((ROOT / "studies" / "stimulus-example.json").read_text(encoding="utf-8"))
+    assert validate_study(s).ok
+    for task in s["tasks"]:
+        for it in task.get("items", []):
+            data = (ROOT / "studies" / it["src"]).read_bytes()
+            assert hashlib.sha256(data).hexdigest() == it["sha256"], it["src"]
+
+
 def test_the_in_browser_tier_may_be_offered_for_gaze_and_face():
     s = study(consent_tiers=["features_in_browser", "features_only"],
               default_tier="features_in_browser", modalities=["gaze", "face"])
