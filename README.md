@@ -84,8 +84,28 @@ session** (83% of fixations on target at 4.5°, need 90%; 3.2° to target vs
 
 ### Picking this up
 
-Open items, most valuable first. The first four need a person or hardware; the
-rest can be done at a keyboard.
+**Before anyone but the developer is recorded** — from
+`research/pass5-legal-gaps.md`, whose opening synthesis gives the reasons:
+
+- **Make the retention promise true.** The consent screen says data is "kept
+  for N days and then deleted". `features_only` deletion is enforced, but
+  nothing reads `consent_retention_days`, so retained media and all derived
+  data never expire, and there is no per-participant delete path for
+  withdrawal. Keyboard work.
+- **Name the jurisdiction and the ethics route.** Every study's `contact` is a
+  placeholder. Washington's and Colorado's laws exempt Common Rule research and
+  otherwise reach non-profits, so `irbReference` should become required for
+  any study run on someone other than the developer. Needs a person.
+- **Consent wording:** a one-line notice that face and voice are analysed
+  automatically (AI Act Art 50(3), live since 2 Aug 2026); the
+  *Measurements only* tier should say the measurements could in principle help
+  identify someone; and a stated withdrawal policy. Keyboard, with sign-off.
+- **Decide whether to offer an in-browser-only tier.** It is the strongest
+  BIPA/GDPR mitigation (features extracted and video never uploaded), and it
+  cuts against record-first. A decision, not a fix.
+
+Then, most valuable first. The first four need a person or hardware; the rest
+can be done at a keyboard.
 
 1. **Human labels on the posed recording** (`s_muirbs2a`, in `tempdata/s_test/`)
    via the annotation page (`npm run app -- --media tempdata`), at least two
@@ -100,16 +120,15 @@ rest can be done at a keyboard.
    --aus` (~18 min, almost all Py-Feat).
 3. **Why gaze failed its gate on the second session** (3.2° vs 1.5°). Needs
    more sessions with lighting, distance and frame rate varied one at a time.
+   Frame rate first: the two most recent sessions both captured at ~20 fps
+   against a 30 fps request, and the passing one ran at 29.9.
 4. **Respiration validation** against an RIP belt, before any rate is emitted.
 5. A working **negative control for `verify:playback`**: the raw MediaRecorder
    WebM from a stub server is rejected by Chrome with "URL safety check", cause
    not yet found.
 6. `smoke:capture` covers studies without the chinrest only; driving the
    chinrest's card-and-blind-spot steps would let it cover `m0`.
-7. **Legal research passes** `research/pass3d-…-PARTIAL.md` and
-   `research/pass4d-…-INCOMPLETE.md` — before anyone but the developer is
-   recorded.
-8. L2CS-Net fine-tune (not started; its gaze datasets carry research-only EULAs
+7. L2CS-Net fine-tune (not started; its gaze datasets carry research-only EULAs
    someone has to accept by hand).
 
 Local state that is not in git: `out/` holds three real sessions
