@@ -50,9 +50,18 @@ seen the evidence behind them.
 ## Status
 
 **M0 (walking skeleton) complete. M1 (gaze) working end to end. All four
-modalities run on real footage; facial has two AU engines.**
+modalities run on real footage; facial has two AU engines. As of 2026-09-27
+it can run a study end to end:**
 
-`npm run check` → licence inventory, 717 tests (169 JS + 548 Python), M0 gate
+- image and video stimuli, recruitment from a panel and between-subject
+  conditions;
+- upload, pseudonymisation, retention and withdrawal;
+- cohort analysis, and an audited export.
+
+What it still needs is a deployment, an ethics approval and people (see
+*Picking this up*).
+
+`npm run check` → licence inventory, 873 tests (244 JS + 629 Python), M0 gate
 PASS. `npm run verify:gaze` → GAZE GATE PASS on the pilot, **FAIL on the second
 session** (83% of fixations on target at 4.5°, need 90%; 3.2° to target vs
 1.5°) — see "The second real session" below.
@@ -105,21 +114,28 @@ session** (83% of fixations on target at 4.5°, need 90%; 3.2° to target vs
   the sweep: schedule it where the data lives. The researcher app names any
   session past its date at startup, and `process` refuses a deleted or expired
   session rather than recreate it from a leftover copy.
-- **Name the jurisdiction and the ethics route.** Every study's `contact` is a
-  placeholder. Washington's and Colorado's laws exempt Common Rule research and
-  otherwise reach non-profits, so `irbReference` should become required for
-  any study run on someone other than the developer. Needs a person.
+- **Get a real study approved and filled in.** The route is UK/EU, decided
+  2026-09-26, and the gate is built: a study runs on anyone but the developer
+  only with `"audience": "participants"`. Validation then refuses it until it
+  carries:
+  - a REC reference;
+  - a real contact;
+  - the data controller;
+  - the Art 6 lawful basis;
+  - the Art 9 condition, when face, voice or respiration is recorded.
+
+  Copy an example study and fill it in. The ethics approval itself needs a
+  person.
 - **Sign off the consent wording** — written overnight and live on the consent
   screen, quoted in full under *Awaiting sign-off* below. The DPIA template
   (`docs/dpia-template.md`) and `npm run ropa -- <study>` (the Art 30 record,
   generated from the study file) are ready for a deploying group to complete.
-- **The in-browser tier exists** (`features_in_browser`, decided 2026-09-26):
-  the camera feeds only the in-browser engines and no recording is ever
-  made. Gaze features were ported to the browser for it, and pinned to the
-  server engine by a shared golden fixture. The estimator fits on them when
-  there is no video. It is an option a study offers, and record-first stays
-  the default. Not yet seen: a real face through it — the smoke test's fake
-  camera shows none.
+- **Deploy behind HTTPS** — see *Deploying for remote collection*. Nothing
+  faces the internet yet.
+- **Run the in-browser tier on a real face.** `features_in_browser` records
+  nothing and measures gaze and face in the browser. Its maths is pinned to the
+  server engine by a shared fixture, but the smoke test's fake camera shows no
+  face, so the tier has only been seen refusing gracefully.
 
 #### Deploying for remote collection (not done)
 
