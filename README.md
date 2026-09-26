@@ -87,19 +87,17 @@ session** (83% of fixations on target at 4.5°, need 90%; 3.2° to target vs
 Open items, most valuable first. The first four need a person or hardware; the
 rest can be done at a keyboard.
 
-1. **Record the posed-expression session.** `npm run serve` (fresh — an old
-   server keeps its old routing), open `localhost:5173/?study=au-expressions`,
-   check the blue *Protocol* line names it, record (~4.5 min, camera only),
-   Download. Put the three files in `tempdata/<session_id>/` — one folder per
-   session; a download straight into `tempdata/` overwrote the pilot's video.
-   Then `npm run process -- tempdata/<session_id> --out out --aus` (~15 min,
-   almost all Py-Feat). The summary and the app's *Posed movements* panel give
-   each AU engine's sensitivity/specificity against what was asked for, and the
-   between-engine agreement on held movements — the §2.2 figure measured on
-   behaviour that happened.
-2. **Human labels on that recording** via the annotation page
-   (`npm run app -- --media tempdata`), at least two raters — the reference
-   standard `server/evaluation.py` scores engines against.
+1. **Human labels on the posed recording** (`s_muirbs2a`, in `tempdata/s_test/`)
+   via the annotation page (`npm run app -- --media tempdata`), at least two
+   raters — the reference standard `server/evaluation.py` scores engines
+   against. The engine-vs-request scores are in "What the two engines say about
+   each other"; AU20 is the unit only labels can settle. More posed sessions,
+   from other faces, are what would turn n = 2 per AU into a figure.
+2. To record another: `npm run serve` (fresh — an old server keeps its old
+   routing), open `localhost:5173/?study=au-expressions`, check the blue
+   *Protocol* line names it, record (~4.5 min), Download into its own
+   `tempdata/<folder>/`, then `npm run process -- tempdata/<folder> --out out
+   --aus` (~18 min, almost all Py-Feat).
 3. **Why gaze failed its gate on the second session** (3.2° vs 1.5°). Needs
    more sessions with lighting, distance and frame rate varied one at a time.
 4. **Respiration validation** against an RIP belt, before any rate is emitted.
@@ -114,8 +112,9 @@ rest can be done at a keyboard.
 8. L2CS-Net fine-tune (not started; its gaze datasets carry research-only EULAs
    someone has to accept by hand).
 
-Local state that is not in git: `out/` holds both real sessions
-(`s_mucntzzh` — raw video lost, audio survives; `s_mud6trnr` — complete);
+Local state that is not in git: `out/` holds three real sessions
+(`s_mucntzzh` — raw video lost, audio survives; `s_mud6trnr` — complete;
+`s_muirbs2a` — posed expressions, raw bundle in `tempdata/s_test/`);
 `tempdata/<session_id>/` holds raw bundles; `models/` holds the fetched
 weights (`npm run models`).
 
@@ -633,6 +632,40 @@ couples units), and **agreement on held movements only** — in the pipeline's
 output and as a "Posed movements" panel in the app. It scores against what was
 *asked for*, not what the face did; human labels via the annotation page remain
 the reference standard.
+
+**The first posed recording** (`s_muirbs2a`, 2026-09-26, one participant, all
+20 trials, 19.7 fps) puts the §2.2 comparison on behaviour that happened. Over
+all frames, median r across the 18 shared AUs rose from 0.14 (pilot) and 0.23
+(speech) to **0.37**; on the 20 held movements it is **0.60** (range −0.56 to
+0.88 over 14 AUs) — inside §2.2's 0.37–0.75 for the first time, because there
+was finally something to agree about.
+
+| | median sensitivity | median specificity | AUs below 0.7 sensitivity |
+|---|---|---|---|
+| OpenGraphAU | 1.00 | 0.99 | AU17 (0.68) |
+| Py-Feat | 0.99 | 0.89 | AU23 (0.07), AU20 (0.50), AU15 (0.55), AU17 (0.57) |
+
+The expected result was "Py-Feat sensitive but unspecific". That is half
+right. Its specificity is lower (0.89 vs 0.99; AU12 0.73, the smile over-call
+again), but its larger failure is **missing lower-face movements**. For AU23 its
+score was *lower* during the requested lip press than at rest, while it scored
+the same press as AU24 (0.97): it saw the movement and named it differently.
+
+MediaPipe blendshapes are the third signal that separates "the engine missed
+it" from "the face did not do it": `mouthFrown` for AU15 and `mouthShrugLower`
+for AU17 both score sensitivity 1.00, so those movements happened and the
+engines that missed them missed them. That covers Py-Feat on AU15/AU17 and
+OpenGraphAU on AU17 (where its values barely move: sd 0.047). AU20 stays
+unresolved. OpenGraphAU finds it (1.00) while Py-Feat (0.50) and
+`mouthStretch` (0.10) do not, and the two engines anti-correlate on its holds
+(r = −0.56). Either the lip stretch was faint or only one signal can see it;
+human labels decide. The blendshapes cannot referee AU06, AU09 or AU10, because
+`cheekSquint`, `noseSneer` and `mouthUpperUp` stayed at zero even during the
+requested movements.
+
+Every figure is **n = 2 target holds per AU** (4 for AU12 and AU25) against 20
+neutral windows, one participant, and scored against what was requested. It
+favours OpenGraphAU on this face; it is not an accuracy claim for either engine.
 
 #### Barely moved is not disagreed
 
