@@ -291,6 +291,11 @@ function analysisReasons(a) {
   if (typeof a !== 'object' || Array.isArray(a)) return ['analysis must be an object'];
   const reasons = [];
   const num = (v) => typeof v === 'number' && Number.isFinite(v);
+  for (const key of ['aoi_pad_deg', 'heatmap_sigma_deg']) {
+    if (a[key] !== undefined && !(num(a[key]) && a[key] >= 0 && a[key] <= 10)) {
+      reasons.push(`analysis.${key} must be a number of degrees between 0 and 10`);
+    }
+  }
   (a.exclusions ?? []).forEach((rule, i) => {
     const where = `analysis.exclusions[${i}]`;
     if (!rule || typeof rule !== 'object' || !nonEmpty(rule.metric)) {

@@ -131,6 +131,24 @@ The funnel always starts with two further steps:
   - or has no baseline samples.
 - A channel produced by more than one source must name the `source`.
 
+**`aoi_pad_deg`** — padding for AOIs drawn on stimuli, in degrees. There is
+no default (§4.2), so without it per-stimulus AOI metrics are refused.
+**`heatmap_sigma_deg`** — the heatmap blur in degrees (default 1°). It is
+converted per participant through their own geometry, so the same blur is the
+same visual angle for everyone.
+
+**`npm run export -- <study_id>`** writes one zip of the cohort:
+
+- `provenance.json`;
+- CSVs: sessions, attrition, events, signals per session, epochs, and
+  per-stimulus gaze, AOI and facial-change results;
+- heatmaps as a CSV grid and a PNG over the picture;
+- a BIDS-*style* layout, clearly marked as not validated BIDS.
+
+The zip is audited before it is kept. No recording, no `identifiers.json`, no
+key material, and no raw panel ID anywhere in its bytes — or it is not
+written.
+
 `studies/stimulus-example.json` carries a plan. On the real posed session,
 smile epochs on each expression hold put both "smile broadly" trials top
 (baseline-corrected blendshape 0.95, 0.93), "closed smile" next (0.30), and

@@ -30,6 +30,7 @@
     "ropa": "node tools/py.mjs server/ropa.py",
     "ingest": "node tools/py.mjs server/ingest.py",
     "cohort": "node tools/py.mjs server/cohort.py",
+    "export": "node tools/py.mjs server/export.py",
     "verify:gaze": "node tools/py.mjs server/verify_gaze.py --data out",
     "smoke:capture": "node tools/smoke_capture.mjs",
     "verify:playback": "node tools/verify_playback.mjs",

@@ -263,6 +263,9 @@ def _analysis_reasons(a: Any) -> list[str]:
     if not isinstance(a, dict):
         return ["analysis must be an object"]
     reasons: list[str] = []
+    for key, top in (("aoi_pad_deg", 10), ("heatmap_sigma_deg", 10)):
+        if key in a and not (_num(a[key]) and 0 <= a[key] <= top):
+            reasons.append(f"analysis.{key} must be a number of degrees between 0 and {top}")
     for i, rule in enumerate(a.get("exclusions") or []):
         where = f"analysis.exclusions[{i}]"
         if not isinstance(rule, dict) or not _non_empty(rule.get("metric")):

@@ -67,6 +67,9 @@ out/annotations/
 # repo it would be neither separate nor safe.
 out/_keys/
 
+# Exports (server/export.py) are participants' derived data by construction.
+out/exports/
+
 # The deletion log (server/retention.py) holds no participant id, but it is a
 # list of which sessions existed and when each was withdrawn — a record about
 # participants, and so local like the data it records the removal of.

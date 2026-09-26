@@ -30,6 +30,8 @@
   },
 
   "analysis": {
+    "aoi_pad_deg": 1.5,
+    "heatmap_sigma_deg": 1.0,
     "exclusions": [
       { "metric": "achieved_fps", "min": 5 },
       { "metric": "face_detect_rate", "min": 0.5 },
