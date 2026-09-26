@@ -95,6 +95,47 @@ finish, e.g. Prolific's `…/submissions/complete?cc=CODE`.
 
 `studies/panel-example.json` shows all three.
 
+## The analysis plan: `analysis`
+
+Declared in the study, before any data is seen, and run with
+`npm run cohort -- <study_id> [--csv-dir DIR]` (server/cohort.py).
+
+The plan is **not** in the protocol hash, because changing an exclusion does
+not change what participants did. It has its own `analysis_hash`, printed and
+stamped on every result.
+
+**`exclusions`** — `[{"metric": …, "min"?: …, "max"?: …}]`, applied in order.
+
+- `metric` is a sessions-table column (`achieved_fps`, `viewing_distance_mm`, …)
+  or a quality metric, taken as its median over the session
+  (`face_detect_rate`, `iris_valid_rate`, `gaze_average_offset_deg`, …).
+- A metric that was never measured excludes the session as `not_measured`,
+  shown apart from `failed`. A criterion nobody measured is not a criterion
+  met.
+
+The funnel always starts with two further steps:
+
+- self-tests are left out (unless `--include-developer`);
+- sessions whose recorded protocol hash differs from the file are left out
+  (unless `--allow-mixed`).
+
+**`epochs`** — `[{"name", "event_type", "channels", "source"?, "stimulus_id"?,
+"pre_ms", "post_ms", "baseline_ms": [start, end], "resample_hz"}]`.
+
+- Cut on the master clock around each matching event and resampled onto a
+  grid. Gaps over 250 ms are left empty, never interpolated across.
+- Baseline-corrected by the mean over `baseline_ms`.
+- Refused, with a reason row, when an epoch:
+  - has no master timestamp,
+  - covers less than half its window,
+  - or has no baseline samples.
+- A channel produced by more than one source must name the `source`.
+
+`studies/stimulus-example.json` carries a plan. On the real posed session,
+smile epochs on each expression hold put both "smile broadly" trials top
+(baseline-corrected blendshape 0.95, 0.93), "closed smile" next (0.30), and
+lip-corners-down and jaw-drop at zero.
+
 ## Who a study may be run on: `audience`
 
 A study with no `audience` is a **developer self-test**: the person who built

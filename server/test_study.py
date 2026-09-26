@@ -243,6 +243,26 @@ def test_an_unsafe_completion_link_is_refused():
     assert validate_study(study(recruitment={"completion_url": "http://localhost:5173/done"})).ok
 
 
+def test_an_analysis_plan_validates_and_is_not_in_the_protocol_hash():
+    plan = {"exclusions": [{"metric": "achieved_fps", "min": 5}],
+            "epochs": [{"name": "e", "event_type": "stimulus", "channels": ["gaze.x"],
+                        "pre_ms": 200, "post_ms": 1000, "baseline_ms": [-200, 0]}]}
+    assert validate_study(study(analysis=plan)).ok
+    assert content_hash(study(analysis=plan)) == content_hash(study())
+
+
+def test_analysis_refusals_mirror_the_browser():
+    r = lambda a: _reasons(study(analysis=a))  # noqa: E731
+    assert "needs a metric" in r({"exclusions": [{"min": 1}]})
+    assert "needs a min or a max" in r({"exclusions": [{"metric": "x"}]})
+    assert "min is above max" in r({"exclusions": [{"metric": "x", "min": 2, "max": 1}]})
+    base = {"name": "e", "event_type": "stimulus", "channels": ["c"], "pre_ms": 200, "post_ms": 500}
+    assert "unique slug name" in r({"epochs": [base, base]})
+    assert "list of channels" in r({"epochs": [{**base, "channels": []}]})
+    assert "inside the window" in r({"epochs": [{**base, "baseline_ms": [-500, 0]}]})
+    assert "resample_hz" in r({"epochs": [{**base, "resample_hz": 0}]})
+
+
 def test_the_in_browser_tier_may_be_offered_for_gaze_and_face():
     s = study(consent_tiers=["features_in_browser", "features_only"],
               default_tier="features_in_browser", modalities=["gaze", "face"])

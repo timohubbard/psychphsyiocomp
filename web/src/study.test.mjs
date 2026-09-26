@@ -410,6 +410,19 @@ test('an unsafe completion link is refused', () => {
     .reasons.join(), /https address/);
 });
 
+test('analysis refusals mirror server/study.py', () => {
+  const r = (a) => validateStudy(study({ analysis: a })).reasons.join(' | ');
+  assert.match(r({ exclusions: [{ min: 1 }] }), /needs a metric/);
+  assert.match(r({ exclusions: [{ metric: 'x' }] }), /needs a min or a max/);
+  assert.match(r({ exclusions: [{ metric: 'x', min: 2, max: 1 }] }), /min is above max/);
+  const base = { name: 'e', event_type: 'stimulus', channels: ['c'], pre_ms: 200, post_ms: 500 };
+  assert.match(r({ epochs: [base, base] }), /unique slug name/);
+  assert.match(r({ epochs: [{ ...base, channels: [] }] }), /list of channels/);
+  assert.match(r({ epochs: [{ ...base, baseline_ms: [-500, 0] }] }), /inside the window/);
+  assert.match(r({ epochs: [{ ...base, resample_hz: 0 }] }), /resample_hz/);
+  assert.equal(r({ exclusions: [{ metric: 'achieved_fps', min: 5 }], epochs: [base] }), '');
+});
+
 test('the shipped stimulus example validates', async () => {
   const fs = await import('node:fs/promises');
   const s = JSON.parse(await fs.readFile('studies/stimulus-example.json', 'utf8'));

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -153,6 +154,7 @@ def validate_study(study: Any) -> Verdict:
     elif isinstance(study.get("tasks"), list):
         reasons.extend(_stimuli_reasons(study["tasks"]))
     reasons.extend(_condition_reasons(study))
+    reasons.extend(_analysis_reasons(study.get("analysis")))
     rec = study.get("recruitment")
     if isinstance(rec, dict) and "completion_url" in rec and not _safe_completion_url(
             rec["completion_url"]):
@@ -247,6 +249,57 @@ def _condition_reasons(study: dict[str, Any]) -> list[str]:
               or any(a not in arms for a in task["arms"])):
             reasons.append(f"task {task.get('type')}: arms must be a non-empty subset "
                            "of conditions.arms")
+    return reasons
+
+
+def _num(v: Any) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def _analysis_reasons(a: Any) -> list[str]:
+    """Mirror of ``analysisReasons``: the pre-declared analysis plan (server/cohort.py)."""
+    if a is None:
+        return []
+    if not isinstance(a, dict):
+        return ["analysis must be an object"]
+    reasons: list[str] = []
+    for i, rule in enumerate(a.get("exclusions") or []):
+        where = f"analysis.exclusions[{i}]"
+        if not isinstance(rule, dict) or not _non_empty(rule.get("metric")):
+            reasons.append(f"{where} needs a metric")
+            continue
+        lo, hi = rule.get("min"), rule.get("max")
+        if lo is None and hi is None:
+            reasons.append(f"{where} needs a min or a max")
+        if (lo is not None and not _num(lo)) or (hi is not None and not _num(hi)):
+            reasons.append(f"{where}: min and max must be numbers")
+        elif lo is not None and hi is not None and lo > hi:
+            reasons.append(f"{where}: min is above max")
+    names: set[str] = set()
+    for i, e in enumerate(a.get("epochs") or []):
+        where = f"analysis.epochs[{i}]"
+        if not isinstance(e, dict):
+            reasons.append(f"{where} must be an object")
+            continue
+        if not _is_id(e.get("name")) or e.get("name") in names:
+            reasons.append(f"{where} needs a unique slug name")
+        names.add(e.get("name"))
+        if not _non_empty(e.get("event_type")):
+            reasons.append(f"{where} needs an event_type")
+        ch = e.get("channels")
+        if not isinstance(ch, list) or not ch or not all(_non_empty(c) for c in ch):
+            reasons.append(f"{where} needs a list of channels")
+        pre, post = e.get("pre_ms"), e.get("post_ms")
+        if not (_num(pre) and pre >= 0 and _num(post) and post > 0):
+            reasons.append(f"{where}: pre_ms >= 0 and post_ms > 0 are required")
+        b = e.get("baseline_ms", [-200, 0])
+        if b is not None and not (isinstance(b, list) and len(b) == 2 and all(_num(x) for x in b)
+                                  and b[0] < b[1] and _num(pre) and _num(post)
+                                  and b[0] >= -pre and b[1] <= post):
+            reasons.append(f"{where}: baseline_ms must be [start, end] inside the window")
+        hz = e.get("resample_hz", 30)
+        if not (_num(hz) and 0 < hz <= 1000):
+            reasons.append(f"{where}: resample_hz must be between 0 and 1000")
     return reasons
 
 

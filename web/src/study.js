@@ -222,6 +222,7 @@ export function validateStudy(study) {
     reasons.push(...stimuliReasons(study.tasks));
   }
   reasons.push(...conditionReasons(study));
+  reasons.push(...analysisReasons(study.analysis));
   const url = study.recruitment?.completion_url;
   if (study.recruitment !== undefined && url !== undefined && !isSafeCompletionUrl(url)) {
     reasons.push('recruitment.completion_url must be an https address (or localhost for testing)');
@@ -276,6 +277,55 @@ function conditionReasons(study) {
       reasons.push(`task ${task.type}: arms must be a non-empty subset of conditions.arms`);
     }
   }
+  return reasons;
+}
+
+/**
+ * The pre-declared analysis plan (server/cohort.py). Validated here too, so a
+ * study with a broken plan is refused before anyone is recorded under it, not
+ * discovered at analysis time. Not in the content hash — see server/cohort.py
+ * analysis_hash. Mirrored in server/study.py.
+ */
+function analysisReasons(a) {
+  if (a === undefined || a === null) return [];
+  if (typeof a !== 'object' || Array.isArray(a)) return ['analysis must be an object'];
+  const reasons = [];
+  const num = (v) => typeof v === 'number' && Number.isFinite(v);
+  (a.exclusions ?? []).forEach((rule, i) => {
+    const where = `analysis.exclusions[${i}]`;
+    if (!rule || typeof rule !== 'object' || !nonEmpty(rule.metric)) {
+      reasons.push(`${where} needs a metric`);
+      return;
+    }
+    const lo = rule.min ?? null;
+    const hi = rule.max ?? null;
+    if (lo === null && hi === null) reasons.push(`${where} needs a min or a max`);
+    if ((lo !== null && !num(lo)) || (hi !== null && !num(hi))) {
+      reasons.push(`${where}: min and max must be numbers`);
+    } else if (lo !== null && hi !== null && lo > hi) reasons.push(`${where}: min is above max`);
+  });
+  const names = new Set();
+  (a.epochs ?? []).forEach((e, i) => {
+    const where = `analysis.epochs[${i}]`;
+    if (!e || typeof e !== 'object') { reasons.push(`${where} must be an object`); return; }
+    if (!isId(e.name) || names.has(e.name)) reasons.push(`${where} needs a unique slug name`);
+    names.add(e.name);
+    if (!nonEmpty(e.event_type)) reasons.push(`${where} needs an event_type`);
+    if (!Array.isArray(e.channels) || !e.channels.length || !e.channels.every(nonEmpty)) {
+      reasons.push(`${where} needs a list of channels`);
+    }
+    const { pre_ms: pre, post_ms: post } = e;
+    if (!(num(pre) && pre >= 0 && num(post) && post > 0)) {
+      reasons.push(`${where}: pre_ms >= 0 and post_ms > 0 are required`);
+    }
+    const b = e.baseline_ms === undefined ? [-200, 0] : e.baseline_ms;
+    if (b !== null && !(Array.isArray(b) && b.length === 2 && b.every(num) && b[0] < b[1]
+        && num(pre) && num(post) && b[0] >= -pre && b[1] <= post)) {
+      reasons.push(`${where}: baseline_ms must be [start, end] inside the window`);
+    }
+    const hz = e.resample_hz ?? 30;
+    if (!(num(hz) && hz > 0 && hz <= 1000)) reasons.push(`${where}: resample_hz must be between 0 and 1000`);
+  });
   return reasons;
 }
 

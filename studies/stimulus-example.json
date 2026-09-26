@@ -29,6 +29,20 @@
     "randomise_order": true
   },
 
+  "analysis": {
+    "exclusions": [
+      { "metric": "achieved_fps", "min": 5 },
+      { "metric": "face_detect_rate", "min": 0.5 },
+      { "metric": "gaze_average_offset_deg", "max": 4.5 }
+    ],
+    "epochs": [
+      { "name": "smile_on_stimulus", "event_type": "stimulus",
+        "channels": ["blendshape.mouthSmileLeft", "blendshape.mouthSmileRight"],
+        "source": "face.mediapipe_blendshapes@0.1.0+browser-live",
+        "pre_ms": 500, "post_ms": 3500, "baseline_ms": [-500, 0], "resample_hz": 30 }
+    ]
+  },
+
   "tasks": [
     { "type": "chinrest" },
     { "type": "calibration" },
