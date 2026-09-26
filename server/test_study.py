@@ -221,6 +221,28 @@ def test_the_shipped_stimulus_example_validates_and_its_hashes_match_the_files()
             assert hashlib.sha256(data).hexdigest() == it["sha256"], it["src"]
 
 
+def test_conditions_mirror_the_browser():
+    ok = study(conditions={"arms": ["A", "B"]}, tasks=[{"type": "calibration", "arms": ["A"]}])
+    assert validate_study(ok).ok
+    assert "at least two arms" in _reasons(study(conditions={"arms": ["A"]}))
+    assert "repeats an arm" in _reasons(study(conditions={"arms": ["A", "A"]}))
+    assert "defines no conditions" in _reasons(study(tasks=[{"type": "calibration", "arms": ["A"]}]))
+    assert "non-empty subset" in _reasons(study(conditions={"arms": ["A", "B"]},
+                                                tasks=[{"type": "calibration", "arms": ["C"]}]))
+
+
+def test_conditions_are_hashed_and_the_completion_link_is_not():
+    base = study(conditions={"arms": ["A", "B"]})
+    assert content_hash(base) != content_hash(study(conditions={"arms": ["A", "C"]}))
+    assert content_hash(base) == content_hash({**base, "recruitment": {
+        "completion_url": "https://app.prolific.com/submissions/complete?cc=X"}})
+
+
+def test_an_unsafe_completion_link_is_refused():
+    assert "https address" in _reasons(study(recruitment={"completion_url": "http://example.org/?cc=X"}))
+    assert validate_study(study(recruitment={"completion_url": "http://localhost:5173/done"})).ok
+
+
 def test_the_in_browser_tier_may_be_offered_for_gaze_and_face():
     s = study(consent_tiers=["features_in_browser", "features_only"],
               default_tier="features_in_browser", modalities=["gaze", "face"])

@@ -61,6 +61,12 @@ out/annotations/
 !studies/stimuli/*.webm
 !studies/stimuli/*.mp4
 
+# The pseudonymisation key and the table linking panel IDs to pseudonyms
+# (server/pseudonym.py). The link is the "additional information kept
+# separately" that makes the rest pseudonymous rather than identified; in the
+# repo it would be neither separate nor safe.
+out/_keys/
+
 # The deletion log (server/retention.py) holds no participant id, but it is a
 # list of which sessions existed and when each was withdrawn — a record about
 # participants, and so local like the data it records the removal of.

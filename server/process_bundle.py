@@ -40,6 +40,7 @@ MediaPipeBlendshapesBatch = _face.MediaPipeBlendshapesBatch
 _gaze = load_engine_module("gaze.mediapipe_features")
 from pipeline import (SessionBundle, no_video_eligibility, process_session,  # noqa: E402
                       refuse_unconsented_recording)
+from pseudonym import apply_to_bundle  # noqa: E402
 from retention import refusal_for  # noqa: E402
 from tables import read_session  # noqa: E402
 
@@ -254,6 +255,12 @@ def main() -> int:
     if refusal:
         print(f"\n  REFUSED  {refusal}")
         return 2
+
+    # Before anything is written: a raw panel ID becomes a pseudonym, so no
+    # table, log line or export below ever sees it (server/pseudonym.py).
+    pseud = apply_to_bundle(args.out, bundle, args.bundle)
+    if pseud:
+        print(f"\n  participant      pseudonymised as {pseud}")
 
     # Before the clapper scan below decodes a single frame: a recording that a
     # features_in_browser participant never agreed to send is deleted unread.

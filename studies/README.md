@@ -56,6 +56,45 @@ video never leaves the device. The cost is that the AU engines, voice and
 respiration cannot run, and nothing can ever be re-checked against a recording.
 `studies/in-browser-example.json` shows it.
 
+## Recruitment and conditions
+
+**Panel identifiers.** Open the study the way Prolific does:
+`/?study=<id>&PROLIFIC_PID=…&STUDY_ID=…&SESSION_ID=…`, or `?pid=` for
+anything else.
+
+- **In the browser:** the raw ID never enters `session.json`, which carries
+  `participant_id: "p_pending"`. The ID is saved separately in
+  `identifiers.json`.
+- **On processing:** `server/pseudonym.py` replaces it with
+  `p_` + HMAC-SHA256 under a per-deployment key, before anything is written.
+  The key and the table linking IDs to pseudonyms live in `out/_keys/`
+  (gitignored). That is the "additional information kept separately" that
+  makes the data pseudonymous (UK GDPR Art 89(1)).
+- **Withdrawal:** `npm run withdraw -- <Prolific ID>` finds every session by
+  the ID the participant actually knows, and deletes the linking rows with
+  the data.
+
+**`conditions`** — `{"arms": ["A", "B"]}` (hashed: it is protocol).
+
+- Each participant is assigned an arm uniformly at random from
+  `crypto.getRandomValues`. The draw (seed, method) is logged as a
+  `condition_assigned` event and the arm goes in the `condition` column.
+- A reload keeps the same arm. Assignment is not balanced across
+  participants, because a static page cannot count them; check the split
+  from the events.
+- A task with `"arms": ["A"]` runs only for arm A, and the consent screen
+  describes that participant's arm.
+
+**`recruitment.completion_url`** — where to send a participant when they
+finish, e.g. Prolific's `…/submissions/complete?cc=CODE`.
+
+- It must be https (or localhost for testing).
+- The link appears only after the data has been saved, never before.
+- It is not hashed: a completion code changes per posting without the
+  protocol changing.
+
+`studies/panel-example.json` shows all three.
+
 ## Who a study may be run on: `audience`
 
 A study with no `audience` is a **developer self-test**: the person who built

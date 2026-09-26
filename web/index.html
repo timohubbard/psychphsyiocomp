@@ -32,9 +32,10 @@
   h2 { font-size: 15px; margin: 24px 0 8px; font-weight: 600; }
   p { color: var(--muted); margin: 0 0 16px; }
 
-  button {
+  button, a.button {
     background: var(--accent); color: #fff; border: 0;
     padding: 11px 20px; border-radius: 6px; font-size: 15px; cursor: pointer;
+    text-decoration: none;
   }
   button:disabled { background: #3a4048; cursor: not-allowed; }
   button.secondary { background: transparent; border: 1px solid var(--border); color: var(--fg); }
@@ -192,6 +193,8 @@
     <ul class="checks" id="summary"></ul>
     <p style="margin-top:22px">
       <button id="btnDownload">Download session bundle</button>
+      <a id="completeLink" class="button" style="display:none; margin-left:10px"
+         rel="noopener">Finish and return to the study panel</a>
     </p>
     <div class="note">
       Run it through the pipeline with:

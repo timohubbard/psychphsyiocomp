@@ -1,0 +1,53 @@
+{
+  "study_id": "panel-example",
+  "name": "Panel example — two conditions, Prolific parameters, a completion link",
+  "version": "1.0.0",
+
+  "notes": [
+    "Shows recruitment and conditions. Open it the way Prolific does:",
+    "  /?study=panel-example&PROLIFIC_PID=...&STUDY_ID=...&SESSION_ID=...",
+    "The Prolific ID never enters session.json: it is saved separately in",
+    "identifiers.json and replaced by a keyed pseudonym on processing. Each",
+    "participant is assigned arm A or B at random (the seed is logged); arm A",
+    "sees scene_left, arm B its mirror image. The completion link appears only",
+    "once the data has been saved. Replace EXAMPLE00 with your study's code.",
+    "A developer self-test (no audience)."
+  ],
+
+  "disclosure": {
+    "retention_days": 180,
+    "secondary_use": "Analysed by the named research team only. Not sold, and not shared outside the team without a further, separate agreement.",
+    "contact": "Replace this with the investigator and the route to the ethics board before running anyone other than the developer.",
+    "irb_reference": null
+  },
+
+  "consent_tiers": ["features_only", "media_retained"],
+  "default_tier": "features_only",
+
+  "modalities": ["face"],
+
+  "conditions": { "arms": ["A", "B"] },
+
+  "recruitment": {
+    "completion_url": "https://app.prolific.com/submissions/complete?cc=EXAMPLE00"
+  },
+
+  "tasks": [
+    {
+      "type": "stimuli", "arms": ["A"],
+      "items": [
+        { "stimulus_id": "scene_left", "kind": "image", "src": "stimuli/scene_left.png",
+          "sha256": "629b0f1ebc823f79ca8138bc1c7d61768a8fcc7e4edf20a41dba736b903b2dc1",
+          "duration_ms": 3000 }
+      ]
+    },
+    {
+      "type": "stimuli", "arms": ["B"],
+      "items": [
+        { "stimulus_id": "scene_right", "kind": "image", "src": "stimuli/scene_right.png",
+          "sha256": "d7ef3a1b55c2028a612ba0b1f9b82f539d085130488d74c04286233be752f058",
+          "duration_ms": 3000 }
+      ]
+    }
+  ]
+}

@@ -149,6 +149,10 @@ SESSIONS_SCHEMA = pa.schema([
     # before the field existed — "not recorded", which cohort analysis treats
     # like a self-test rather than guessing either way.
     pa.field("audience", pa.string(), nullable=True),
+    # The between-subject arm this participant was assigned, NULL for a study
+    # without conditions. How it was drawn (seed, method) is in the
+    # `condition_assigned` event, so analysis can check the split.
+    pa.field("condition", pa.string(), nullable=True),
     pa.field("achieved_fps", pa.float64(), nullable=True),
     pa.field("clock_id", pa.string(), nullable=True),
     pa.field("clock_resolution_ms", pa.float64(), nullable=True),
@@ -247,6 +251,7 @@ class CanonicalWriter:
             "study_modalities": (json.dumps(study["modalities"])
                                  if study.get("modalities") else None),
             "audience": study.get("audience"),
+            "condition": manifest.get("condition"),
             "achieved_fps": manifest.get("achieved_fps"),
             "clock_id": clock.get("master_clock_id"),
             "clock_resolution_ms": clock.get("measured_resolution_ms"),

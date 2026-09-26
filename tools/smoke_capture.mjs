@@ -77,7 +77,9 @@ async function main() {
 
     // Through the server's `/` redirect on purpose: that is the path Tim took,
     // and the one that dropped the query string.
-    const url = `http://localhost:${PORT}/?study=${encodeURIComponent(STUDY)}`;
+    // --query adds panel parameters the way Prolific appends them.
+    const extra = typeof args.query === 'string' ? `&${args.query}` : '';
+    const url = `http://localhost:${PORT}/?study=${encodeURIComponent(STUDY)}${extra}`;
     log(`opening ${url}`);
     await page.send('Page.navigate', { url });
 
@@ -144,11 +146,21 @@ async function main() {
     log(`session finished in ${Math.round((Date.now() - started) / 1000)}s`);
 
     const withdrawCode = await js(`document.getElementById('withdrawCode')?.innerText ?? ''`);
+    const linkBefore = await js(`document.getElementById('completeLink')?.style.display ?? 'none'`);
     await js(`document.getElementById('btnDownload').click()`);
+    const linkAfter = await js(`({ shown: document.getElementById('completeLink')?.style.display !== 'none',
+      href: document.getElementById('completeLink')?.href ?? null })`);
     await untilFiles(OUT, ['session.json', 'browser_chunks.json'], 60_000);
     await sleep(3000);   // the video blob is the largest and lands last
 
-    const report = checkOutput(OUT, STUDY, { chinrest });
+    const report = checkOutput(OUT, STUDY, { chinrest, rawPid: panelPid(args.query) });
+    if (STUDY === 'panel-example') {
+      // The completion link must not be offered before the data is saved.
+      if (linkBefore !== 'none') report.failures.push('completion link shown before the data was saved');
+      if (!linkAfter.shown || !String(linkAfter.href).includes('cc=EXAMPLE00')) {
+        report.failures.push(`completion link after download: ${JSON.stringify(linkAfter)}`);
+      }
+    }
     // Every shipped study is a developer self-test; the operator and the
     // participant must both be told so on screen, not just in the manifest.
     // The consent wording awaiting sign-off (README): on screen, in the
@@ -174,6 +186,10 @@ async function main() {
   }
 }
 
+function panelPid(query) {
+  return typeof query === 'string' ? new URLSearchParams(query).get('PROLIFIC_PID') : null;
+}
+
 async function untilFiles(dir, names, ms) {
   const end = Date.now() + ms;
   while (Date.now() < end) {
@@ -185,10 +201,37 @@ async function untilFiles(dir, names, ms) {
 }
 
 /** Assertions on what the pipeline will actually receive. */
-export function checkOutput(dir, studyId, { chinrest = null } = {}) {
+export function checkOutput(dir, studyId, { chinrest = null, rawPid = null } = {}) {
   const failures = [];
   const facts = {};
-  const session = JSON.parse(readFileSync(join(dir, 'session.json'), 'utf8'));
+  const sessionText = readFileSync(join(dir, 'session.json'), 'utf8');
+  const session = JSON.parse(sessionText);
+
+  if (rawPid) {
+    // The raw panel ID goes in identifiers.json and nowhere else.
+    facts.participant_id = session.participant_id;
+    if (sessionText.includes(rawPid)) failures.push('the raw panel ID is in session.json');
+    if (readFileSync(join(dir, 'browser_chunks.json'), 'utf8').includes(rawPid)) {
+      failures.push('the raw panel ID is in browser_chunks.json');
+    }
+    let ids = null;
+    try { ids = JSON.parse(readFileSync(join(dir, 'identifiers.json'), 'utf8')); } catch { /* absent */ }
+    if (ids?.participant !== rawPid) failures.push('identifiers.json does not hold the panel ID');
+    if (session.participant_id !== 'p_pending') failures.push(`participant_id ${session.participant_id}, expected p_pending`);
+  }
+
+  if (studyId === 'panel-example') {
+    const assigned = (session.events ?? []).find((e) => e.event_type === 'condition_assigned');
+    facts.condition = session.condition;
+    if (!assigned || !Number.isInteger(assigned.metadata?.seed) || assigned.metadata?.arm !== session.condition) {
+      failures.push('no condition_assigned event matching the manifest condition');
+    }
+    const shown = (session.events ?? []).filter((e) => e.event_type === 'stimulus').map((e) => e.stimulus_id);
+    const expected = session.condition === 'A' ? ['scene_left'] : ['scene_right'];
+    if (JSON.stringify(shown) !== JSON.stringify(expected)) {
+      failures.push(`arm ${session.condition} was shown ${shown.join(',')}, expected ${expected}`);
+    }
+  }
   facts.study_id = session.study_id;
   facts.session_id = session.session_id;
   if (session.study_id !== studyId) failures.push(`session ran ${session.study_id}, not ${studyId}`);

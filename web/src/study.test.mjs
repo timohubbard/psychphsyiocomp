@@ -387,6 +387,29 @@ test('stimulus refusals: empty, duplicate id, bad kind, path, hash, duration, so
   assert.match(r(withStimuli([item()], { randomise: 'no' })), /randomise must be true or false/);
 });
 
+test('conditions: at least two unique slug arms; tasks may name a subset', () => {
+  const r = (s) => validateStudy(s).reasons.join(' | ');
+  const ok = study({ conditions: { arms: ['A', 'B'] }, tasks: [{ type: 'calibration', arms: ['A'] }] });
+  assert.deepEqual(validateStudy(ok).reasons, []);
+  assert.match(r(study({ conditions: { arms: ['A'] } })), /at least two arms/);
+  assert.match(r(study({ conditions: { arms: ['A', 'A'] } })), /repeats an arm/);
+  assert.match(r(study({ tasks: [{ type: 'calibration', arms: ['A'] }] })), /defines no conditions/);
+  assert.match(r(study({ conditions: { arms: ['A', 'B'] }, tasks: [{ type: 'calibration', arms: ['C'] }] })),
+    /non-empty subset/);
+});
+
+test('conditions are part of the protocol hash; the completion link is not', async () => {
+  const base = study({ conditions: { arms: ['A', 'B'] } });
+  assert.notEqual(await contentHash(base), await contentHash(study({ conditions: { arms: ['A', 'C'] } })));
+  assert.equal(await contentHash(base), await contentHash({
+    ...base, recruitment: { completion_url: 'https://app.prolific.com/submissions/complete?cc=X' } }));
+});
+
+test('an unsafe completion link is refused', () => {
+  assert.match(validateStudy(study({ recruitment: { completion_url: 'http://example.org/?cc=X' } }))
+    .reasons.join(), /https address/);
+});
+
 test('the shipped stimulus example validates', async () => {
   const fs = await import('node:fs/promises');
   const s = JSON.parse(await fs.readFile('studies/stimulus-example.json', 'utf8'));

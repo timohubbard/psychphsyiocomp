@@ -681,3 +681,18 @@ test('the time estimate counts each stimulus and its gap', () => {
   const seq = buildSequence(STIM(), 1).filter((s) => s.type === 'stimulus');
   assert.equal(estimateDurationMs(seq), 4 * (3000 + 800));
 });
+
+test('a task limited to an arm runs only for that arm', () => {
+  const study = {
+    modalities: ['face'],
+    conditions: { arms: ['A', 'B'] },
+    tasks: [
+      { type: 'rest_fixation', duration_ms: 1000 },
+      { type: 'rest_fixation', duration_ms: 2000, arms: ['B'] },
+    ],
+  };
+  const fixations = (condition) => buildSequence(study, 1, { condition })
+    .filter((s) => s.type === 'fixation').map((s) => s.durationMs);
+  assert.deepEqual(fixations('A'), [1000]);
+  assert.deepEqual(fixations('B'), [1000, 2000]);
+});

@@ -244,6 +244,20 @@ export class SessionRecorder {
     return this._study;
   }
 
+  /**
+   * Record this participant's between-subject condition and how it was drawn.
+   * The event carries the seed and method, so analysis can check the split
+   * rather than assume it; the manifest carries the arm for the sessions table.
+   */
+  setCondition(assigned) {
+    this._condition = assigned?.arm ?? null;
+    this.logEvent('condition_assigned', assigned ? {
+      arm: assigned.arm, seed: assigned.seed, method: assigned.method,
+      n_arms: assigned.n_arms, reused_after_reload: assigned.reused,
+    } : null);
+    return this._condition;
+  }
+
   /** Close a previously-opened event, e.g. a stimulus that has a duration. */
   closeEvent(eventType, stimulusId = null) {
     for (let i = this._events.length - 1; i >= 0; i -= 1) {
@@ -298,6 +312,7 @@ export class SessionRecorder {
       consent: this._consent,
       consent_tier: this._consent?.tier ?? null,
       study: this._study,
+      condition: this._condition ?? null,
       achieved_fps: this.achievedFps(),
       // Recorded because it bounds what precision was even possible (§3.3).
       clock: {

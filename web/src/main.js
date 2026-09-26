@@ -23,6 +23,14 @@ import { stimulusSizeErrorFraction } from './chinrest.js';
 import { recordsMedia, retainsMedia, runConsent } from './consent.js';
 import { fitRect, preloadStimuli, rectNorm } from './stimuli.js';
 import {
+  assignCondition, completionUrl, manifestParticipantId, panelIdentifiers,
+} from './recruitment.js';
+
+/** sessionStorage, or null where it is blocked (some privacy modes throw). */
+function safeSessionStorage() {
+  try { return window.sessionStorage; } catch { return null; }
+}
+import {
   audienceOf, describeStudy, loadStudy, loadStudyIndex, needsAudio, protocolFor,
   studyIdFromUrl, studyProvenance,
 } from './study.js';
@@ -96,13 +104,16 @@ ui.btnEnable.addEventListener('click', async () => {
     // prompt that appears before the participant has been told what happens to
     // the recording asks them to decide with the information in the wrong order.
     if (!state.consent) {
-      state.consent = await runConsent(document.body, protocolFor(state.study));
+      state.consent = await runConsent(document.body,
+        protocolFor(state.study, { condition: state.condition?.arm ?? null }));
     }
     ui.chkStream.textContent = 'requesting…';
 
     state.recorder = new SessionRecorder({
       sessionId: `s_${Date.now().toString(36)}`,
-      participantId: new URLSearchParams(location.search).get('pid') || 'anonymous',
+      // Never the raw panel ID: see recruitment.js. It travels separately in
+      // identifiers.json and is replaced by a pseudonym on the server.
+      participantId: manifestParticipantId(state.panel),
       studyId: state.study.study_id,
       // The microphone is requested only when a modality needs it. Asking for
       // a device the protocol will not use is a permission prompt with no
@@ -112,6 +123,7 @@ ui.btnEnable.addEventListener('click', async () => {
 
     state.recorder.setConsent(state.consent);
     state.recorder.setStudy(await studyProvenance(state.study));
+    if (state.condition) state.recorder.setCondition(state.condition);
     const { appliedAudioConstraints } = await state.recorder.start({
       // The participant's choice, enforced at the only place it can be: no
       // MediaRecorder is created, so there is no recording to leave the machine.
@@ -191,6 +203,9 @@ async function prepareStudy() {
     // Before consent: a stimulus file that is missing or has changed since
     // the study was fixed is a setup error, not something to find mid-session.
     state.stimuli = await preloadStimuli(state.study);
+    state.panel = panelIdentifiers(location.search);
+    // Before consent, so the consent screen describes this participant's arm.
+    state.condition = assignCondition(state.study, { storage: safeSessionStorage() });
     line.innerHTML = `Protocol: <strong>${describeStudy(state.study)}</strong>`;
     // Whoever is running the session sees this before anything is enabled: a
     // study with no ethics reference must not be run on anyone else.
@@ -404,7 +419,7 @@ async function runSequence() {
   state.recorder.logEvent('sequence_seed', { seed });
   // Built from the study, so the protocol the session is hashed against is
   // the protocol the participant actually saw.
-  const sequence = buildSequence(state.study, seed);
+  const sequence = buildSequence(state.study, seed, { condition: state.condition?.arm ?? null });
   console.info(`sequence: ${sequence.length} stages, ~${Math.round(estimateDurationMs(sequence) / 1000)}s`);
 
   for (const stage of sequence) {
@@ -885,28 +900,54 @@ function renderSummary() {
     want your data deleted later — quote it to the contact on the consent screen.`;
 }
 
-ui.btnDownload.addEventListener('click', async () => {
+/**
+ * The bundle, as named files. One list for every way it leaves the page, so
+ * a download and an upload cannot disagree about what a session contains.
+ */
+function bundleFiles() {
   const manifest = state.recorder.manifest();
   manifest.browser_source = `${state.engine.manifest.engine_id}@${state.engine.manifest.version}+browser-live`;
   manifest.browser_chunk_count = state.chunks.length;
+  const json = (v) => new Blob([JSON.stringify(v, null, 2)], { type: 'application/json' });
 
-  downloadBlob(
-    new Blob([JSON.stringify(manifest, null, 2)], { type: 'application/json' }),
-    'session.json',
-  );
-
-  // Live engine output travels beside the manifest so the pipeline can write
-  // it as a second `source` alongside the server-side pass.
-  downloadBlob(
-    new Blob([JSON.stringify(state.chunks)], { type: 'application/json' }),
-    'browser_chunks.json',
-  );
-
+  const files = [
+    { name: 'session.json', blob: json(manifest) },
+    // Live engine output travels beside the manifest so the pipeline can write
+    // it as a second `source` alongside the server-side pass.
+    { name: 'browser_chunks.json',
+      blob: new Blob([JSON.stringify(state.chunks)], { type: 'application/json' }) },
+  ];
+  // Raw panel identifiers, apart from the manifest (recruitment.js). The
+  // server turns them into a pseudonym before anything is written.
+  if (state.panel) {
+    files.push({ name: 'identifiers.json',
+      blob: json({ ...state.panel, session_id: manifest.session_id }) });
+  }
   if (state.videoBlob) {
     const ext = state.videoBlob.type.includes('mp4') ? 'mp4' : 'webm';
-    downloadBlob(state.videoBlob, `capture.${ext}`);
+    files.push({ name: `capture.${ext}`, blob: state.videoBlob });
   }
+  return files;
+}
+
+ui.btnDownload.addEventListener('click', async () => {
+  for (const f of bundleFiles()) downloadBlob(f.blob, f.name);
+  showCompletion();
 });
+
+/**
+ * The panel's completion link — only once the data has left the page. A
+ * participant sent back to Prolific before their bundle was saved has been
+ * paid for a session the researcher does not have.
+ */
+function showCompletion() {
+  const url = completionUrl(state.study);
+  const link = document.getElementById('completeLink');
+  if (!url || !link) return;
+  link.href = url;
+  link.style.display = 'inline-block';
+  state.recorder.logEvent('completion_link_shown');
+}
 
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);

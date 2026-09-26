@@ -75,6 +75,7 @@ def list_sessions(root: str | Path) -> list[dict[str, Any]]:
             "study_id": meta.get("study_id"),
             # None for sessions from before audiences were recorded.
             "audience": meta.get("audience"),
+            "condition": meta.get("condition"),
             "started_utc": _iso(meta.get("started_utc")),
             "signal_rows": signals.num_rows if signals is not None else 0,
             "sources": sources,

@@ -57,7 +57,7 @@ import argparse
 import json
 import shutil
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -79,6 +79,10 @@ class SessionRecord:
     #: Where the record was read from: 'table' (processed) or 'bundle' (a raw
     #: download never processed — it still carries a promise).
     origin: str
+    #: Raw panel identifiers this session is known by — from the bundle's
+    #: identifiers.json, or through the pseudonym link table. Only ever used to
+    #: FIND a session for withdrawal; never written anywhere.
+    raw_ids: tuple[str, ...] = ()
 
     def expires_utc(self) -> datetime | None:
         if self.started_utc is None or self.retention_days is None:
@@ -165,13 +169,24 @@ def _from_table(session_dir: Path) -> SessionRecord | None:
         retention_days=_int(r.get("consent_retention_days")), origin="table")
 
 
-def _from_manifest(meta: dict[str, Any]) -> SessionRecord:
+def _from_manifest(meta: dict[str, Any], raw_ids: tuple[str, ...] = ()) -> SessionRecord:
     consent = meta.get("consent") or {}
     return SessionRecord(
         session_id=meta["session_id"], participant_id=meta.get("participant_id"),
         study_id=meta.get("study_id"), started_utc=_utc(meta.get("created_utc")),
         consent_tier=consent.get("tier"),
-        retention_days=_int(consent.get("retentionDays")), origin="bundle")
+        retention_days=_int(consent.get("retentionDays")), origin="bundle",
+        raw_ids=raw_ids)
+
+
+def _bundle_raw_ids(manifest: Path) -> tuple[str, ...]:
+    """The raw panel ID beside a bundle's manifest, if it has one."""
+    path = manifest.parent / "identifiers.json"
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8")).get("participant")
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return ()
+    return (raw,) if isinstance(raw, str) and raw else ()
 
 
 def collect_sessions(out: Path, media_roots: Iterable[Path]) -> dict[str, SessionRecord]:
@@ -181,14 +196,22 @@ def collect_sessions(out: Path, media_roots: Iterable[Path]) -> dict[str, Sessio
     one that was, so it is found from its own session.json. Where both exist
     the table wins: it is the record the pipeline wrote from that manifest.
     """
+    from pseudonym import links
+
+    by_session: dict[str, set[str]] = {}
+    for row in links(out):
+        by_session.setdefault(row.get("session_id"), set()).add(row["raw_participant_id"])
+
     sessions: dict[str, SessionRecord] = {}
-    for _, meta in _bundle_manifests(media_roots):
+    for manifest, meta in _bundle_manifests(media_roots):
         if meta.get("session_id"):
-            sessions[meta["session_id"]] = _from_manifest(meta)
+            sessions[meta["session_id"]] = _from_manifest(meta, _bundle_raw_ids(manifest))
     for session_dir in sorted(Path(out).glob("session_id=*")):
         rec = _from_table(session_dir)
         if rec is not None:
-            sessions[rec.session_id] = rec
+            raw = tuple(sorted(by_session.get(rec.session_id, set())
+                               | set(sessions.get(rec.session_id, rec).raw_ids)))
+            sessions[rec.session_id] = replace(rec, raw_ids=raw)
     return sessions
 
 
@@ -241,10 +264,14 @@ def resolve_withdrawal(identifier: str,
 
     Withdrawal is by the person, so a participant id must reach every session
     they took part in — including ones only present as unprocessed bundles.
+    The participant id may be the pseudonym or the raw panel ID they actually
+    know (a Prolific ID), which reaches processed sessions through the link
+    table and unprocessed ones through their identifiers.json.
     """
     if identifier in sessions:
         return [sessions[identifier]]
-    return sorted((s for s in sessions.values() if s.participant_id == identifier),
+    return sorted((s for s in sessions.values()
+                   if s.participant_id == identifier or identifier in s.raw_ids),
                   key=lambda s: s.session_id)
 
 
@@ -269,6 +296,10 @@ def apply_deletion(plan: DeletionPlan, record: SessionRecord | None, out: Path,
     """
     for path in plan.paths:
         _remove(path)
+    # The pseudonym link for this session goes with its data: afterwards it
+    # would tie a pseudonym to a person with nothing left to point at.
+    from pseudonym import forget_sessions
+    forget_sessions(out, {plan.session_id})
     stone = {
         "session_id": plan.session_id,
         "study_id": record.study_id if record else None,

@@ -63,6 +63,7 @@ _OPTIONAL_HASHED = (
     ("controller", lambda s, d: d.get("controller")),
     ("lawful_basis", lambda s, d: d.get("lawful_basis")),
     ("special_category_basis", lambda s, d: d.get("special_category_basis")),
+    ("conditions", lambda s, d: s.get("conditions")),
 )
 
 MIN_CALIBRATION_POINTS = 5
@@ -151,6 +152,12 @@ def validate_study(study: Any) -> Verdict:
         reasons.append("tasks must be a list when present")
     elif isinstance(study.get("tasks"), list):
         reasons.extend(_stimuli_reasons(study["tasks"]))
+    reasons.extend(_condition_reasons(study))
+    rec = study.get("recruitment")
+    if isinstance(rec, dict) and "completion_url" in rec and not _safe_completion_url(
+            rec["completion_url"]):
+        reasons.append("recruitment.completion_url must be an https address "
+                       "(or localhost for testing)")
 
     # Mirrors study.js: a transcript tier with no microphone offers a choice
     # that cannot happen and records consent to transcribe a silent session.
@@ -217,6 +224,43 @@ def _stimuli_reasons(tasks: list[Any]) -> list[str]:
             if "sound" in it and not isinstance(it["sound"], bool):
                 reasons.append(f"{where}: sound must be true or false")
     return reasons
+
+
+def _condition_reasons(study: dict[str, Any]) -> list[str]:
+    """Mirror of ``conditionReasons``."""
+    reasons: list[str] = []
+    c = study.get("conditions")
+    arms = c.get("arms") if isinstance(c, dict) and isinstance(c.get("arms"), list) else None
+    if "conditions" in study:
+        if not arms or len(arms) < 2:
+            reasons.append("conditions.arms needs at least two arms")
+        elif not all(_is_id(a) for a in arms):
+            reasons.append("conditions.arms must be slugs")
+        elif len(set(arms)) != len(arms):
+            reasons.append("conditions.arms repeats an arm")
+    for task in study.get("tasks") if isinstance(study.get("tasks"), list) else []:
+        if not isinstance(task, dict) or "arms" not in task:
+            continue
+        if not arms:
+            reasons.append(f"task {task.get('type')} names arms but the study defines no conditions")
+        elif (not isinstance(task["arms"], list) or not task["arms"]
+              or any(a not in arms for a in task["arms"])):
+            reasons.append(f"task {task.get('type')}: arms must be a non-empty subset "
+                           "of conditions.arms")
+    return reasons
+
+
+def _safe_completion_url(url: Any) -> bool:
+    """Mirror of ``isSafeCompletionUrl`` in web/src/recruitment.js."""
+    from urllib.parse import urlparse
+    if not isinstance(url, str):
+        return False
+    try:
+        u = urlparse(url)
+    except ValueError:
+        return False
+    return (u.scheme == "https" and bool(u.netloc)) or (
+        u.scheme == "http" and u.hostname in ("localhost", "127.0.0.1"))
 
 
 def audience_of(study: dict[str, Any]) -> str:

@@ -85,6 +85,7 @@ session** (83% of fixations on target at 4.5°, need 90%; 3.2° to target vs
 | Ethics gate (`audience`), consent wording, DPIA template, `npm run ropa` | done — wording awaits sign-off |
 | `features_in_browser` tier: video never leaves the device; gaze features in the browser | done — not yet run on a real face |
 | Image and video stimuli (sha256-checked, paint-time onsets, AOIs drawn on the stimulus) | done — `studies/stimulus-example.json` |
+| Prolific parameters → keyed pseudonyms; between-subject conditions; completion link | done — `studies/panel-example.json` |
 
 ### Picking this up
 

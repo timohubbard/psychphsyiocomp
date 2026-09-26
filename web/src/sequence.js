@@ -258,7 +258,7 @@ export function seededShuffle(items, seed) {
  * the protocol and this build of the software, and running a degraded version
  * of someone's protocol without saying so is the worst available option.
  */
-export function buildSequence(study, seed = (Date.now() >>> 0)) {
+export function buildSequence(study, seed = (Date.now() >>> 0), { condition = null } = {}) {
   const mods = new Set(study?.modalities ?? []);
   const wantsGaze = mods.has('gaze');
   const wantsVoice = mods.has('voice');
@@ -276,9 +276,14 @@ export function buildSequence(study, seed = (Date.now() >>> 0)) {
   const calPoints = seededShuffle(CALIBRATION_POINTS, seed).slice(0, nCal);
   const valPoints = seededShuffle(VALIDATION_POINTS, seed ^ 0x9E3779B9);
 
-  const tasks = study?.tasks?.length
+  // A task limited to some arms runs only for participants in one of them. A
+  // study with conditions always has an arm by the time this runs (it is
+  // assigned before consent); with none, arm-limited tasks run for nobody,
+  // which validation already refuses as a study.
+  const tasks = (study?.tasks?.length
     ? study.tasks
-    : DEFAULT_TASKS.filter((t) => taskIsWanted(t, mods));
+    : DEFAULT_TASKS.filter((t) => taskIsWanted(t, mods)))
+    .filter((t) => t.arms === undefined || (condition !== null && t.arms.includes(condition)));
 
   const body = [];
   for (const task of tasks) {
@@ -549,8 +554,8 @@ function stagesForTask(task, { calPoints, valPoints, wantsGaze, wantsVoice, seed
  * A disclosure that describes a different protocol is not a disclosure of this
  * one.
  */
-export function activitiesFor(study) {
-  const seq = buildSequence(study, 1);
+export function activitiesFor(study, condition = null) {
+  const seq = buildSequence(study, 1, { condition });
   const has = (t) => seq.some((s) => s.type === t);
   const doing = [];
   if (wantsChinrest(study)) doing.push('measure how far you sit from the screen, using a bank card');

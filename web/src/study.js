@@ -29,6 +29,7 @@
  */
 
 import { CONSENT_TIERS, MAX_RETENTION_DAYS, tierCopy } from './consent.js';
+import { isSafeCompletionUrl } from './recruitment.js';
 import { activitiesFor } from './sequence.js';
 
 /** Every modality this platform can collect, and what it costs to say yes. */
@@ -220,6 +221,11 @@ export function validateStudy(study) {
   } else if (Array.isArray(study.tasks)) {
     reasons.push(...stimuliReasons(study.tasks));
   }
+  reasons.push(...conditionReasons(study));
+  const url = study.recruitment?.completion_url;
+  if (study.recruitment !== undefined && url !== undefined && !isSafeCompletionUrl(url)) {
+    reasons.push('recruitment.completion_url must be an https address (or localhost for testing)');
+  }
 
   // A transcript tier with no microphone offers the participant a choice that
   // cannot happen, and records a consent to transcription for a session with
@@ -242,6 +248,35 @@ export function validateStudy(study) {
   }
 
   return { valid: reasons.length === 0, reasons };
+}
+
+/**
+ * Between-subject conditions, and tasks limited to some of them. Mirrored in
+ * server/study.py.
+ *
+ * A task naming an arm the study does not define would never run for anyone,
+ * and a task naming arms in a study with no conditions would run for nobody
+ * or everybody depending on how the question was read — both refused.
+ */
+function conditionReasons(study) {
+  const reasons = [];
+  const c = study.conditions;
+  const arms = Array.isArray(c?.arms) ? c.arms : null;
+  if (c !== undefined) {
+    if (!arms || arms.length < 2) reasons.push('conditions.arms needs at least two arms');
+    else if (!arms.every(isId)) reasons.push('conditions.arms must be slugs');
+    else if (new Set(arms).size !== arms.length) reasons.push('conditions.arms repeats an arm');
+  }
+  for (const task of Array.isArray(study.tasks) ? study.tasks : []) {
+    if (task?.arms === undefined) continue;
+    if (!arms) {
+      reasons.push(`task ${task.type} names arms but the study defines no conditions`);
+    } else if (!Array.isArray(task.arms) || !task.arms.length
+        || task.arms.some((a) => !arms.includes(a))) {
+      reasons.push(`task ${task.type}: arms must be a non-empty subset of conditions.arms`);
+    }
+  }
+  return reasons;
 }
 
 /** Stimuli live under studies/stimuli/, named plainly, and nowhere else. */
@@ -378,6 +413,9 @@ export function canonicalise(study) {
     ['controller', d.controller],
     ['lawful_basis', d.lawful_basis],
     ['special_category_basis', d.special_category_basis],
+    // Which arms exist is protocol. `recruitment` is not hashed: a completion
+    // code changes per panel posting without the protocol changing.
+    ['conditions', study.conditions],
   ];
   return [...fixed, ...optional.filter(([, v]) => v !== undefined && v !== null)];
 }
@@ -529,7 +567,7 @@ export async function loadStudy(studyId, { base = '/studies' } = {}) {
  * renderer, and it avoids the import cycle that would otherwise exist since
  * this module imports the tier definitions from there.
  */
-export function protocolFor(study) {
+export function protocolFor(study, { condition = null } = {}) {
   const audio = needsAudio(study);
   return {
     studyId: study.study_id,
@@ -542,7 +580,8 @@ export function protocolFor(study) {
       audio,
       devices: audio ? 'camera and microphone' : 'camera',
       records: audio ? 'video and audio' : 'video (no audio)',
-      doing: activitiesFor(study),
+      // This participant's arm: the consent describes what THEY will do.
+      doing: activitiesFor(study, condition),
       // In MODALITIES order, whatever order the file lists them in.
       measures: MODALITIES.filter((m) => (study.modalities ?? []).includes(m.id))
         .map((m) => m.measures),

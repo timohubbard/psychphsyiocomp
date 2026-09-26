@@ -1,3 +1,4 @@
 {
-  "studies": ["m0", "au-expressions", "voice-only-example", "in-browser-example", "stimulus-example"]
+  "studies": ["m0", "au-expressions", "voice-only-example", "in-browser-example", "stimulus-example",
+              "panel-example"]
 }
