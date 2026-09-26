@@ -128,12 +128,9 @@ can be done at a keyboard.
    Frame rate first: the two most recent sessions both captured at ~20 fps
    against a 30 fps request, and the passing one ran at 29.9.
 4. **Respiration validation** against an RIP belt, before any rate is emitted.
-5. A working **negative control for `verify:playback`**: the raw MediaRecorder
-   WebM from a stub server is rejected by Chrome with "URL safety check", cause
-   not yet found.
-6. `smoke:capture` covers studies without the chinrest only; driving the
+5. `smoke:capture` covers studies without the chinrest only; driving the
    chinrest's card-and-blind-spot steps would let it cover `m0`.
-7. L2CS-Net fine-tune (not started; its gaze datasets carry research-only EULAs
+6. L2CS-Net fine-tune (not started; its gaze datasets carry research-only EULAs
    someone has to accept by hand).
 
 Local state that is not in git: `out/` holds three real sessions
@@ -337,13 +334,19 @@ the source. This is the same fact that made `describe_video` measure FPS from
 packet timestamps rather than trust `CAP_PROP_FRAME_COUNT`, which returned
 INT64_MIN on that file.
 
-> **Unverified:** video playback in the annotation page has not been confirmed
-> end to end. The browser used for testing refuses to load *any* media element
-> — audio stalls identically on a 4 MB static file — so this is an environment
-> limitation rather than a known defect, but it does mean nobody has watched a
-> frame play in this UI yet. Everything around it is verified: the route's
-> bytes and range handling, the consent refusal, the remux producing a real
-> 3m50s duration, and the full keyboard coding flow for two raters.
+**Verified in Chrome's real media stack, with a control.** `npm run
+verify:playback -- <session_id>` plays a real session through the app's route
+in headless Chrome: metadata with a finite duration, a decoded frame, a seek
+to 120 s that lands exactly, playback advancing. `npm run
+verify:playback:control` is the check on that check. Headless Chrome records a
+fresh 12 s MediaRecorder WebM from a canvas, and the same remux produces the
+playable copy. Both are probed from one throwaway origin, and the control holds
+only if the raw file fails and the remux passes all four checks. It does. Measured
+there, the raw file does NOT sit at readyState 0: served with byte ranges it
+loads, decodes and even plays, but reports duration `NaN` and cannot seek. That
+is the failure a coder would actually hit, since they could not jump to a
+moment. (The readyState-0 stall above was the 119 MB capture served without
+ranges.)
 
 ## Core design decisions
 

@@ -9,22 +9,23 @@
  * served root.
  */
 import { createServer } from 'node:http';
-import { readFile, stat } from 'node:fs/promises';
-import { join, extname, resolve, normalize, dirname } from 'node:path';
+import { stat } from 'node:fs/promises';
+import { join, resolve, normalize, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { sendFile } from './static.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT) || 5173;
 
-const TYPES = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.task': 'application/octet-stream',
-  '.wasm': 'application/wasm',
-};
+/**
+ * The only top-level folders the capture page loads from. An ALLOW list,
+ * because this server used to serve the whole repo root on every network
+ * interface — tempdata/ (participant recordings) and out/ (every derived
+ * measurement) included, to anyone on the same network while it ran. The
+ * face model comes from Google's CDN, not models/.
+ */
+const SERVED = new Set(['web', 'engines', 'studies']);
 
 const server = createServer(async (req, res) => {
   try {
@@ -48,9 +49,12 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    // Contain path traversal: resolve, then confirm it stayed under ROOT.
+    // Contain path traversal: resolve, then confirm it stayed under ROOT and
+    // inside a served folder. `relative` rather than a string prefix, so
+    // C:\repo-other is not "under" C:\repo.
     const filePath = resolve(join(ROOT, normalize(urlPath)));
-    if (!filePath.startsWith(ROOT)) {
+    const rel = relative(ROOT, filePath);
+    if (rel.startsWith('..') || !SERVED.has(rel.split(sep)[0])) {
       res.writeHead(403).end('forbidden');
       return;
     }
@@ -61,15 +65,12 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    const body = await readFile(filePath);
-    res.writeHead(200, {
-      'Content-Type': TYPES[extname(filePath)] ?? 'application/octet-stream',
+    await sendFile(req, res, filePath, {
       // Cross-origin isolation, for the finer clock resolution.
       'Cross-Origin-Opener-Policy': 'same-origin',
       'Cross-Origin-Embedder-Policy': 'credentialless',
       'Cache-Control': 'no-store',
     });
-    res.end(body);
   } catch (err) {
     res.writeHead(err.code === 'ENOENT' ? 404 : 500).end(String(err.code ?? err));
   }
@@ -95,7 +96,9 @@ server.on('error', (err) => {
   process.exit(1);
 });
 
-server.listen(PORT, () => {
+// Loopback only, like the researcher app. Camera access needs a secure context
+// and localhost is one; nothing else needs to reach a development server.
+server.listen(PORT, '127.0.0.1', () => {
   console.log(`\n  capture page:  http://localhost:${PORT}/\n`);
   console.log('  Camera access needs a secure context; localhost counts as one.\n');
 });

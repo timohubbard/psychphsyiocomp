@@ -12,7 +12,7 @@
     "packages/*"
   ],
   "scripts": {
-    "test": "node --test \"engines/**/*.test.mjs\" \"packages/**/*.test.mjs\" \"web/**/*.test.mjs\"",
+    "test": "node --test \"engines/**/*.test.mjs\" \"packages/**/*.test.mjs\" \"web/**/*.test.mjs\" \"tools/**/*.test.mjs\"",
     "licenses": "node tools/license-inventory/report.mjs",
     "licenses:json": "node tools/license-inventory/report.mjs --json",
     "licenses:commercial-gate": "node tools/license-inventory/report.mjs --fail-on-restricted",
@@ -29,6 +29,7 @@
     "withdraw": "node tools/py.mjs server/retention.py withdraw",
     "verify:gaze": "node tools/py.mjs server/verify_gaze.py --data out",
     "smoke:capture": "node tools/smoke_capture.mjs",
-    "verify:playback": "node tools/verify_playback.mjs"
+    "verify:playback": "node tools/verify_playback.mjs",
+    "verify:playback:control": "node tools/verify_playback.mjs --control"
   }
 }
