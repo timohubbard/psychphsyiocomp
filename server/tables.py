@@ -144,6 +144,11 @@ SESSIONS_SCHEMA = pa.schema([
     pa.field("study_version", pa.string(), nullable=True),
     pa.field("study_content_hash", pa.string(), nullable=True),
     pa.field("study_modalities", pa.string(), nullable=True),  # JSON list
+    # 'developer' (a self-test) or 'participants' (run under an ethics
+    # reference), from the study at capture time. NULL for sessions captured
+    # before the field existed — "not recorded", which cohort analysis treats
+    # like a self-test rather than guessing either way.
+    pa.field("audience", pa.string(), nullable=True),
     pa.field("achieved_fps", pa.float64(), nullable=True),
     pa.field("clock_id", pa.string(), nullable=True),
     pa.field("clock_resolution_ms", pa.float64(), nullable=True),
@@ -241,6 +246,7 @@ class CanonicalWriter:
             "study_content_hash": study.get("study_content_hash"),
             "study_modalities": (json.dumps(study["modalities"])
                                  if study.get("modalities") else None),
+            "audience": study.get("audience"),
             "achieved_fps": manifest.get("achieved_fps"),
             "clock_id": clock.get("master_clock_id"),
             "clock_resolution_ms": clock.get("measured_resolution_ms"),

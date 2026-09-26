@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,28 @@ AUDIO_MODALITY_IDS = ("voice",)
 
 #: BIPA's 3-year outer bound, mirroring MAX_RETENTION_DAYS.
 MAX_RETENTION_DAYS = 3 * 365
+
+#: Mirrors AUDIENCES in web/src/study.js. Absent means "developer".
+AUDIENCES = ("developer", "participants")
+
+#: Mirrors SPECIAL_CATEGORY_MODALITIES: treated as Art 9 data by default
+#: (research/pass5-legal-gaps.md — CJEU C-21/23, C-252/21).
+SPECIAL_CATEGORY_MODALITY_IDS = ("face", "voice", "respiration")
+
+#: Mirrors PLACEHOLDER and CONTACT_ROUTE in web/src/study.js.
+_PLACEHOLDER = re.compile(r"replace (this|with)|placeholder|\btodo\b|\btbd\b|example\.[a-z]+",
+                          re.IGNORECASE)
+_CONTACT_ROUTE = re.compile(r"[^\s@]+@[^\s@]+\.[a-z]{2,}|https?://\S+\.\S+", re.IGNORECASE)
+
+#: Hashed only when present, in this order, after the fixed eleven — so studies
+#: written before these fields existed keep the hashes their sessions recorded.
+#: Must match the `optional` list in web/src/study.js `canonicalise`.
+_OPTIONAL_HASHED = (
+    ("audience", lambda s, d: s.get("audience")),
+    ("controller", lambda s, d: d.get("controller")),
+    ("lawful_basis", lambda s, d: d.get("lawful_basis")),
+    ("special_category_basis", lambda s, d: d.get("special_category_basis")),
+)
 
 MIN_CALIBRATION_POINTS = 5
 
@@ -78,9 +101,16 @@ def validate_study(study: Any) -> Verdict:
             reasons.append("no disclosure.secondary_use")
         if not _non_empty(d.get("contact")):
             reasons.append("no disclosure.contact — required by 45 CFR 46.116(b)(7)")
-        irb = d.get("irb_reference")
-        if irb is not None and not _non_empty(irb):
-            reasons.append("disclosure.irb_reference is present but empty")
+        for field in ("irb_reference", "controller", "lawful_basis", "special_category_basis"):
+            value = d.get(field)
+            if value is not None and not _non_empty(value):
+                reasons.append(f"disclosure.{field} is present but empty")
+
+    audience = study.get("audience")
+    if audience is not None and audience not in AUDIENCES:
+        reasons.append(f"unknown audience: {audience} (expected {' or '.join(AUDIENCES)})")
+    if audience_of(study) == "participants" and isinstance(d, dict):
+        reasons.extend(_participant_gate(study, d))
 
     tiers = study.get("consent_tiers")
     if not isinstance(tiers, list) or not tiers:
@@ -124,6 +154,35 @@ def validate_study(study: Any) -> Verdict:
     return Verdict(not reasons, tuple(reasons))
 
 
+def audience_of(study: dict[str, Any]) -> str:
+    """Mirror of ``audienceOf``: absent means the developer testing their build."""
+    return study.get("audience") or "developer"
+
+
+def _participant_gate(study: dict[str, Any], d: dict[str, Any]) -> list[str]:
+    """Mirror of ``participantGate`` — what a study needs before it runs on others."""
+    reasons = []
+    if not _non_empty(d.get("irb_reference")):
+        reasons.append("audience is participants but there is no disclosure.irb_reference "
+                       "(the ethics committee approval reference, REC or IRB)")
+    contact = d.get("contact")
+    if _non_empty(contact) and (_PLACEHOLDER.search(contact)
+                                or not _CONTACT_ROUTE.search(contact)):
+        reasons.append("disclosure.contact is still a placeholder or gives no email address "
+                       "or web address a participant could use")
+    if not _non_empty(d.get("controller")):
+        reasons.append("no disclosure.controller — UK GDPR Art 13(1)(a): who is responsible "
+                       "for the data")
+    if not _non_empty(d.get("lawful_basis")):
+        reasons.append("no disclosure.lawful_basis — UK GDPR Art 13(1)(c): the Art 6 basis")
+    special = [m for m in (study.get("modalities") or [])
+               if m in SPECIAL_CATEGORY_MODALITY_IDS]
+    if special and not _non_empty(d.get("special_category_basis")):
+        reasons.append(f"{', '.join(special)} recorded but no disclosure.special_category_basis "
+                       "— the Art 9 condition relied on for data treated as special category")
+    return reasons
+
+
 def canonicalise(study: dict[str, Any]) -> list[list[Any]]:
     """The hashed subset, in the order ``web/src/study.js`` uses.
 
@@ -133,7 +192,7 @@ def canonicalise(study: dict[str, Any]) -> list[list[Any]]:
     object semantics.
     """
     d = study.get("disclosure") or {}
-    return [
+    fixed = [
         ["study_id", study.get("study_id")],
         ["version", study.get("version")],
         ["retention_days", d.get("retention_days")],
@@ -146,6 +205,8 @@ def canonicalise(study: dict[str, Any]) -> list[list[Any]]:
         ["calibration", study.get("calibration")],
         ["tasks", study.get("tasks")],
     ]
+    optional = [[key, get(study, d)] for key, get in _OPTIONAL_HASHED]
+    return fixed + [pair for pair in optional if pair[1] is not None]
 
 
 def content_hash(study: dict[str, Any]) -> str:
@@ -222,6 +283,7 @@ def list_studies(root: str | Path) -> list[dict[str, Any]]:
             "modalities": study.get("modalities") or [],
             "consent_tiers": study.get("consent_tiers") or [],
             "retention_days": (study.get("disclosure") or {}).get("retention_days"),
+            "audience": audience_of(study),
             "valid": verdict.ok,
             "reasons": list(verdict.reasons),
         }

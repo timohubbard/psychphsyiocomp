@@ -516,6 +516,21 @@ def test_a_missing_consent_record_is_null_not_the_safest_tier(tmp_path, ctx):
     assert _sessions(tmp_path)[0]["consent_tier"] is None
 
 
+def test_the_audience_is_persisted_and_null_when_never_recorded(tmp_path, ctx):
+    """A self-test must stay distinguishable from a participant forever; a
+    session from before audiences existed is 'not recorded', not either."""
+    w = CanonicalWriter(tmp_path / "a", ctx)
+    w.set_session_metadata({**GOOD_MANIFEST, "study": {"study_id": "m0",
+                                                       "audience": "developer"}})
+    w.close()
+    assert _sessions(tmp_path / "a")[0]["audience"] == "developer"
+
+    w = CanonicalWriter(tmp_path / "b", ctx)
+    w.set_session_metadata(GOOD_MANIFEST)
+    w.close()
+    assert _sessions(tmp_path / "b")[0]["audience"] is None
+
+
 def test_the_protocol_hash_reaches_the_sessions_table(tmp_path):
     """Without this column a session's attributability dies with session.json,
     and the canonical tables are what survives."""

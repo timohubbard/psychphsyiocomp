@@ -71,6 +71,11 @@ function sessionRow(s) {
   if (s.achieved_fps != null) {
     pills.push(pill(`${fmt(s.achieved_fps, 1)} fps`, s.achieved_fps >= MIN_HZ ? '' : 'bad'));
   }
+  // A self-test is labelled wherever a session is listed, so it can never be
+  // mistaken for a participant. NULL predates the field and says so.
+  if (s.audience !== 'participants') {
+    pills.push(pill(s.audience === 'developer' ? 'self-test' : 'audience not recorded', 'warn'));
+  }
 
   return `<div class="sess" data-id="${s.session_id}">
     <div class="id">${s.session_id}</div>

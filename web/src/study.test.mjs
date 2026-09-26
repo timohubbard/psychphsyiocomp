@@ -14,6 +14,7 @@ import { MAX_RETENTION_DAYS } from './consent.js';
 import {
   AUDIO_MODALITIES,
   MODALITIES,
+  audienceOf,
   canonicalise,
   contentHash,
   disclosureFor,
@@ -262,6 +263,108 @@ test('the shipped m0 study hashes to the value the Python mirror pins', async ()
   const fs = await import('node:fs/promises');
   const s = JSON.parse(await fs.readFile('studies/m0.json', 'utf8'));
   assert.equal(await contentHash(s), '5b54b291bc9d74b0');
+});
+
+test('the participant fixture hashes to the value the Python mirror pins', async () => {
+  // Every field added after m0 is set in this fixture. m0's pin proves the
+  // fixed part agrees; this one proves the optional part does too.
+  const fs = await import('node:fs/promises');
+  const s = JSON.parse(await fs.readFile('server/fixtures/participant-study.json', 'utf8'));
+  assert.deepEqual(validateStudy(s).reasons, []);
+  assert.equal(await contentHash(s), 'bbf9131e9314dc57');
+});
+
+// ---------------------------------------------------------------------------
+// who a study may be run on
+// ---------------------------------------------------------------------------
+
+function participantStudy(overrides = {}, disclosure = {}) {
+  const s = study({ audience: 'participants', ...overrides });
+  s.disclosure = {
+    ...s.disclosure,
+    contact: 'a.researcher@uni.ac.uk',
+    irb_reference: 'REC-2026-0417',
+    controller: 'University of Somewhere',
+    lawful_basis: 'UK GDPR Art 6(1)(e)',
+    special_category_basis: 'UK GDPR Art 9(2)(j)',
+    ...disclosure,
+  };
+  return s;
+}
+
+test('a complete participant study validates', () => {
+  assert.deepEqual(validateStudy(participantStudy()).reasons, []);
+});
+
+test('a study with no audience is a developer self-test, and is still valid', () => {
+  // m0 and the other shipped studies: runnable on the developer, flagged as such.
+  assert.equal(audienceOf(study()), 'developer');
+  assert.deepEqual(validateStudy(study()).reasons, []);
+});
+
+test('an unknown audience is refused', () => {
+  assert.match(validateStudy(study({ audience: 'everyone' })).reasons.join(), /unknown audience/);
+});
+
+test('participants without an ethics reference are refused', () => {
+  const s = participantStudy({}, { irb_reference: null });
+  assert.match(validateStudy(s).reasons.join(), /irb_reference/);
+});
+
+test('the shipped placeholder contact is refused for participants', () => {
+  // m0's contact line, verbatim in spirit: non-empty, so the old check passed it.
+  const s = participantStudy({}, {
+    contact: 'Replace this with the investigator and the route to the ethics board.',
+  });
+  assert.match(validateStudy(s).reasons.join(), /placeholder/);
+});
+
+test('a contact with no email or web address is refused for participants', () => {
+  assert.match(validateStudy(participantStudy({}, { contact: 'the PI' })).reasons.join(),
+    /no email address/);
+});
+
+test('an example.org address is a template, not a contact', () => {
+  assert.match(validateStudy(participantStudy({}, { contact: 'pi@example.org' })).reasons.join(),
+    /placeholder/);
+});
+
+test('participants need the controller and the Art 6 basis', () => {
+  const r = validateStudy(participantStudy({}, { controller: null, lawful_basis: null })).reasons.join();
+  assert.match(r, /controller/);
+  assert.match(r, /lawful_basis/);
+});
+
+test('face, voice or respiration need an Art 9 condition; gaze alone does not', () => {
+  assert.match(validateStudy(participantStudy({}, { special_category_basis: null })).reasons.join(),
+    /face recorded but no disclosure.special_category_basis/);
+  const gazeOnly = participantStudy({ modalities: ['gaze'] }, { special_category_basis: null });
+  assert.deepEqual(validateStudy(gazeOnly).reasons, []);
+});
+
+test('present-but-empty disclosure fields are refused whoever the audience', () => {
+  const s = study();
+  s.disclosure.controller = '  ';
+  assert.match(validateStudy(s).reasons.join(), /controller is present but empty/);
+});
+
+test('fields added after m0 are hashed only when set, so older hashes hold', () => {
+  const keys = canonicalise(study()).map(([k]) => k);
+  assert.equal(keys.length, 11);
+  assert.ok(!keys.includes('audience'));
+  const full = canonicalise(participantStudy()).map(([k]) => k);
+  assert.deepEqual(full.slice(11),
+    ['audience', 'controller', 'lawful_basis', 'special_category_basis']);
+});
+
+test('changing the audience changes the hash', async () => {
+  assert.notEqual(await contentHash(study()), await contentHash(study({ audience: 'participants' })));
+});
+
+test('provenance and disclosure carry the audience', async () => {
+  assert.equal((await studyProvenance(study())).audience, 'developer');
+  assert.equal(disclosureFor(participantStudy()).audience, 'participants');
+  assert.equal(disclosureFor(participantStudy()).controller, 'University of Somewhere');
 });
 
 test('non-ASCII disclosure text is not escaped before hashing', async () => {

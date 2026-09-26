@@ -65,6 +65,41 @@ export const MODALITIES = [
 
 export const MODALITY_IDS = MODALITIES.map((m) => m.id);
 
+/**
+ * Who a study may be run on.
+ *
+ * Absent means `developer`: the person who built the software, testing it on
+ * themselves. Every study shipped so far is that, including m0, whose contact
+ * line still reads "Replace this with…". `participants` is the declaration that
+ * the protocol has been through an ethics committee, and it is what unlocks
+ * running it on anyone else — see the participant gate in `validateStudy`.
+ */
+export const AUDIENCES = ['developer', 'participants'];
+
+export function audienceOf(study) {
+  return study?.audience ?? 'developer';
+}
+
+/**
+ * Modalities whose outputs are treated as special-category data by default.
+ *
+ * research/pass5-legal-gaps.md (GDPR section): CJEU C-21/23 and C-252/21 make
+ * the controller's aim and the inference's accuracy irrelevant to whether data
+ * "reveals" health, so respiration and affect-adjacent streams (facial action
+ * units, vocal arousal features) default to Art 9. Gaze alone does not.
+ */
+export const SPECIAL_CATEGORY_MODALITIES = ['face', 'voice', 'respiration'];
+
+/**
+ * A contact line that is still a template. The shipped studies' contact reads
+ * "Replace this with the investigator and the route to the ethics board…", and
+ * a non-empty check lets that straight through to a participant.
+ */
+const PLACEHOLDER = /replace (this|with)|placeholder|\btodo\b|\btbd\b|example\.[a-z]+/i;
+
+/** An email address or a web address: a route a participant can actually use. */
+const CONTACT_ROUTE = /[^\s@]+@[^\s@]+\.[a-z]{2,}|https?:\/\/\S+\.\S+/i;
+
 /** Modalities that cannot be collected without asking for the microphone. */
 export const AUDIO_MODALITIES = MODALITIES
   .filter((m) => m.needs.includes('microphone')).map((m) => m.id);
@@ -110,10 +145,19 @@ export function validateStudy(study) {
       // missing a required element, not merely unfriendly.
       reasons.push('no disclosure.contact — required by 45 CFR 46.116(b)(7)');
     }
-    if (d.irb_reference !== undefined && d.irb_reference !== null
-        && !nonEmpty(d.irb_reference)) {
-      reasons.push('disclosure.irb_reference is present but empty');
+    for (const field of ['irb_reference', 'controller', 'lawful_basis', 'special_category_basis']) {
+      if (d[field] !== undefined && d[field] !== null && !nonEmpty(d[field])) {
+        reasons.push(`disclosure.${field} is present but empty`);
+      }
     }
+  }
+
+  // --- who it may be run on -------------------------------------------------
+  if (study.audience !== undefined && !AUDIENCES.includes(study.audience)) {
+    reasons.push(`unknown audience: ${study.audience} (expected ${AUDIENCES.join(' or ')})`);
+  }
+  if (audienceOf(study) === 'participants' && d && typeof d === 'object') {
+    reasons.push(...participantGate(study, d));
   }
 
   // --- what is offered ----------------------------------------------------
@@ -175,6 +219,42 @@ export function validateStudy(study) {
 }
 
 /**
+ * What a study must carry before it may be run on anyone but the developer.
+ *
+ * The UK/EU route (Tim, 2026-09-26): an ethics committee reference, a contact
+ * that is not a template, and the UK GDPR Art 13 items a participant must be
+ * told at collection — who the controller is (13(1)(a)), the Art 6 lawful
+ * basis (13(1)(c)), and, where face, voice or respiration is recorded, the
+ * Art 9 condition relied on. Each is a refusal, not a warning: the page would
+ * otherwise put an incomplete notice in front of a real person.
+ * Mirrored in server/study.py.
+ */
+function participantGate(study, d) {
+  const reasons = [];
+  if (!nonEmpty(d.irb_reference)) {
+    reasons.push('audience is participants but there is no disclosure.irb_reference '
+      + '(the ethics committee approval reference, REC or IRB)');
+  }
+  if (nonEmpty(d.contact) && (PLACEHOLDER.test(d.contact) || !CONTACT_ROUTE.test(d.contact))) {
+    reasons.push('disclosure.contact is still a placeholder or gives no email address '
+      + 'or web address a participant could use');
+  }
+  if (!nonEmpty(d.controller)) {
+    reasons.push('no disclosure.controller — UK GDPR Art 13(1)(a): who is responsible '
+      + 'for the data');
+  }
+  if (!nonEmpty(d.lawful_basis)) {
+    reasons.push('no disclosure.lawful_basis — UK GDPR Art 13(1)(c): the Art 6 basis');
+  }
+  const special = (study.modalities ?? []).filter((m) => SPECIAL_CATEGORY_MODALITIES.includes(m));
+  if (special.length && !nonEmpty(d.special_category_basis)) {
+    reasons.push(`${special.join(', ')} recorded but no disclosure.special_category_basis `
+      + '— the Art 9 condition relied on for data treated as special category');
+  }
+  return reasons;
+}
+
+/**
  * A stable digest of everything that makes two sessions comparable.
  *
  * Deliberately excludes `name` and any `notes`: retitling a study does not
@@ -191,10 +271,18 @@ export async function contentHash(study) {
     .map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 16);
 }
 
-/** The hashed subset, sorted so key order in the source file cannot matter. */
+/**
+ * The hashed subset, sorted so key order in the source file cannot matter.
+ *
+ * The first eleven entries are fixed. Fields added since are appended ONLY
+ * when a study sets them, in the order below, so every study written before
+ * they existed keeps the hash its sessions recorded — m0's is pinned in both
+ * test suites. Adding a field here means adding it in the same position in
+ * server/study.py's `_OPTIONAL_HASHED`.
+ */
 export function canonicalise(study) {
   const d = study.disclosure ?? {};
-  return [
+  const fixed = [
     ['study_id', study.study_id ?? null],
     ['version', study.version ?? null],
     ['retention_days', d.retention_days ?? null],
@@ -207,6 +295,13 @@ export function canonicalise(study) {
     ['calibration', study.calibration ?? null],
     ['tasks', study.tasks ?? null],
   ];
+  const optional = [
+    ['audience', study.audience],
+    ['controller', d.controller],
+    ['lawful_basis', d.lawful_basis],
+    ['special_category_basis', d.special_category_basis],
+  ];
+  return [...fixed, ...optional.filter(([, v]) => v !== undefined && v !== null)];
 }
 
 /**
@@ -222,6 +317,9 @@ export async function studyProvenance(study) {
     study_version: study.version,
     study_content_hash: await contentHash(study),
     modalities: [...study.modalities].sort(),
+    // Written into every session, so a self-test can never be counted as a
+    // participant later — cohort analysis leaves `developer` sessions out.
+    audience: audienceOf(study),
   };
 }
 
@@ -254,6 +352,10 @@ export function disclosureFor(study) {
     secondaryUse: study.disclosure.secondary_use,
     contact: study.disclosure.contact,
     irbReference: study.disclosure.irb_reference ?? null,
+    controller: study.disclosure.controller ?? null,
+    lawfulBasis: study.disclosure.lawful_basis ?? null,
+    specialCategoryBasis: study.disclosure.special_category_basis ?? null,
+    audience: audienceOf(study),
   };
 }
 

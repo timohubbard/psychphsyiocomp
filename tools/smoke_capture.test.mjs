@@ -16,6 +16,8 @@ function m0Session() {
   const ev = (event_type, extra = {}) => ({ event_type, onset_native_ts: 1, ...extra });
   return {
     study_id: 'm0',
+    study: { study_id: 'm0', audience: 'developer' },
+    consent: { tier: 'features_only', audience: 'developer' },
     geometry: { ok: true, viewing_distance_mm: 501, px_per_mm: 3.775 },
     events: [
       ev('recording_start', { metadata: { mimeType: 'video/webm;codecs=vp9,opus' } }),
@@ -67,6 +69,14 @@ test('a missing calibration point fails', () => {
   has(failuresAfter((s) => {
     s.events.splice(s.events.findIndex((e) => e.event_type === 'calibration_point'), 1);
   }), /12 calibration points/);
+});
+
+test('a session that does not record its audience fails', () => {
+  has(failuresAfter((s) => { delete s.study.audience; }), /does not record its audience/);
+});
+
+test('a consent record whose audience disagrees with the study fails', () => {
+  has(failuresAfter((s) => { s.consent.audience = 'participants'; }), /consent record audience/);
 });
 
 test('a recording with no audio codec fails — m0 needs the microphone', () => {

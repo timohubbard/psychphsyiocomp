@@ -87,10 +87,12 @@ async function main() {
     await until(`document.getElementById('protocolLine')?.textContent.includes('${STUDY}')`,
       `the protocol line to name ${STUDY}`);
     log(`protocol line: ${await js(`document.getElementById('protocolLine').textContent`)}`);
+    const selfTestBanner = await js(`!!document.getElementById('selfTestBanner')`);
 
     await js(`document.getElementById('btnEnable').click()`);
     await until(`!!document.getElementById('consentGo')`, 'the consent screen');
     const consentText = await js(`document.querySelector('.consent-panel').innerText`);
+    const consentWarnsSelfTest = /Developer self-test/.test(consentText);
     log(`consent: ${consentText.split('\n').find((l) => l.startsWith('This session')) ?? '(no summary line)'}`);
     await js(`(() => {
       const r = document.querySelector('input[name="tier"]:checked') ?? document.querySelector('input[name="tier"]');
@@ -142,6 +144,12 @@ async function main() {
     await sleep(3000);   // the video blob is the largest and lands last
 
     const report = checkOutput(OUT, STUDY, { chinrest });
+    // Every shipped study is a developer self-test; the operator and the
+    // participant must both be told so on screen, not just in the manifest.
+    if (report.facts.audience === 'developer') {
+      if (!selfTestBanner) report.failures.push('no DEVELOPER SELF-TEST line under the protocol');
+      if (!consentWarnsSelfTest) report.failures.push('the consent screen does not say this is a self-test');
+    }
     if (errors.length) report.failures.push(`page errors: ${errors.slice(0, 5).join(' | ')}`);
     printReport(report);
     process.exitCode = report.failures.length ? 1 : 0;
@@ -167,6 +175,11 @@ export function checkOutput(dir, studyId, { chinrest = null } = {}) {
   const session = JSON.parse(readFileSync(join(dir, 'session.json'), 'utf8'));
   facts.study_id = session.study_id;
   if (session.study_id !== studyId) failures.push(`session ran ${session.study_id}, not ${studyId}`);
+  facts.audience = session.study?.audience ?? null;
+  if (!facts.audience) failures.push('the session does not record its audience');
+  if (session.consent?.audience !== facts.audience) {
+    failures.push(`consent record audience ${session.consent?.audience} differs from the study's`);
+  }
 
   const events = session.events ?? [];
   const count = (t) => events.filter((e) => e.event_type === t).length;

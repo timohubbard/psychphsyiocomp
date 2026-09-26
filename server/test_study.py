@@ -97,6 +97,97 @@ def _canon(s):
     return canonicalise(s)
 
 
+#: The participant fixture's hash, computed by the BROWSER implementation. Every
+#: field added after m0 is set there, so this pins the optional hashed part the
+#: way M0_CONTENT_HASH pins the fixed part.
+PARTICIPANT_FIXTURE_HASH = "bbf9131e9314dc57"
+
+
+def test_the_participant_fixture_hashes_to_the_browsers_value():
+    s = json.loads((ROOT / "server" / "fixtures" / "participant-study.json")
+                   .read_text(encoding="utf-8"))
+    assert validate_study(s).reasons == ()
+    assert content_hash(s) == PARTICIPANT_FIXTURE_HASH
+
+
+# ---------------------------------------------------------------------------
+# who a study may be run on — mirrors study.test.mjs
+# ---------------------------------------------------------------------------
+
+def participant_study(disclosure=None, **overrides):
+    s = study(audience="participants", **overrides)
+    s["disclosure"] = {
+        **s["disclosure"],
+        "contact": "a.researcher@uni.ac.uk",
+        "irb_reference": "REC-2026-0417",
+        "controller": "University of Somewhere",
+        "lawful_basis": "UK GDPR Art 6(1)(e)",
+        "special_category_basis": "UK GDPR Art 9(2)(j)",
+        **(disclosure or {}),
+    }
+    return s
+
+
+def _reasons(s):
+    return " | ".join(validate_study(s).reasons)
+
+
+def test_a_complete_participant_study_validates():
+    assert validate_study(participant_study()).ok
+
+
+def test_no_audience_is_a_developer_self_test_and_still_valid():
+    from study import audience_of
+    assert audience_of(study()) == "developer"
+    assert validate_study(study()).ok
+
+
+def test_an_unknown_audience_is_refused():
+    assert "unknown audience" in _reasons(study(audience="everyone"))
+
+
+def test_participants_without_an_ethics_reference_are_refused():
+    assert "irb_reference" in _reasons(participant_study({"irb_reference": None}))
+
+
+def test_the_shipped_placeholder_contact_is_refused_for_participants():
+    s = participant_study({"contact": "Replace this with the investigator and the "
+                                      "route to the ethics board."})
+    assert "placeholder" in _reasons(s)
+
+
+def test_a_contact_with_no_route_is_refused_for_participants():
+    assert "no email address" in _reasons(participant_study({"contact": "the PI"}))
+
+
+def test_an_example_org_address_is_a_template():
+    assert "placeholder" in _reasons(participant_study({"contact": "pi@example.org"}))
+
+
+def test_participants_need_the_controller_and_the_art_6_basis():
+    r = _reasons(participant_study({"controller": None, "lawful_basis": None}))
+    assert "controller" in r and "lawful_basis" in r
+
+
+def test_special_category_modalities_need_an_art_9_condition_gaze_does_not():
+    assert "face recorded but no disclosure.special_category_basis" in _reasons(
+        participant_study({"special_category_basis": None}))
+    assert validate_study(participant_study({"special_category_basis": None},
+                                            modalities=["gaze"])).ok
+
+
+def test_present_but_empty_fields_are_refused_whoever_the_audience():
+    s = study()
+    s["disclosure"]["controller"] = "  "
+    assert "controller is present but empty" in _reasons(s)
+
+
+def test_fields_added_after_m0_are_hashed_only_when_set():
+    assert len(_canon(study())) == 11
+    assert [k for k, _ in _canon(participant_study())][11:] == [
+        "audience", "controller", "lawful_basis", "special_category_basis"]
+
+
 # ---------------------------------------------------------------------------
 # refusals, mirroring the browser's
 # ---------------------------------------------------------------------------

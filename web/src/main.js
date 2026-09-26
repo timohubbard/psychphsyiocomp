@@ -21,7 +21,7 @@ import { runVirtualChinrest, CHINREST_CSS } from './chinrest-ui.js';
 import { stimulusSizeErrorFraction } from './chinrest.js';
 import { retainsMedia, runConsent } from './consent.js';
 import {
-  describeStudy, loadStudy, loadStudyIndex, needsAudio, protocolFor,
+  audienceOf, describeStudy, loadStudy, loadStudyIndex, needsAudio, protocolFor,
   studyIdFromUrl, studyProvenance,
 } from './study.js';
 
@@ -175,6 +175,12 @@ async function prepareStudy() {
   try {
     state.study = await loadStudy(studyId);
     line.innerHTML = `Protocol: <strong>${describeStudy(state.study)}</strong>`;
+    // Whoever is running the session sees this before anything is enabled: a
+    // study with no ethics reference must not be run on anyone else.
+    if (audienceOf(state.study) !== 'participants') {
+      line.insertAdjacentHTML('beforeend', ' <span class="cr-error" id="selfTestBanner">'
+        + 'DEVELOPER SELF-TEST — no ethics approval recorded; not for participants</span>');
+    }
   } catch (err) {
     ui.btnEnable.disabled = true;
     line.textContent = 'Protocol: could not be loaded';

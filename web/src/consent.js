@@ -161,7 +161,9 @@ export function tierCopy(tier, { audio = true } = {}) {
  * knowing what they were told retention meant.
  */
 export function consentRecord({ tier, retentionDays, secondaryUse, contact,
-                                irbReference = null, studyId, audio = true }) {
+                                irbReference = null, controller = null, lawfulBasis = null,
+                                specialCategoryBasis = null, audience = 'developer',
+                                studyId, audio = true }) {
   const chosen = tierCopy(CONSENT_TIERS.find((t) => t.id === tier), { audio });
   return {
     tier,
@@ -170,6 +172,12 @@ export function consentRecord({ tier, retentionDays, secondaryUse, contact,
     secondaryUse,
     contact: contact ?? null,
     irb_reference: irbReference,
+    // The UK GDPR Art 13 items, exactly as shown. Null where the study did not
+    // state them, which only a developer self-test is allowed to do.
+    controller,
+    lawful_basis: lawfulBasis,
+    special_category_basis: specialCategoryBasis,
+    audience,
     study_id: studyId ?? null,
     agreed_utc: new Date().toISOString(),
     disclosed: chosen
@@ -231,6 +239,11 @@ export function runConsent(host, protocol) {
     root.innerHTML = `
       <div class="cr-panel consent-panel">
         <h1>Before we start</h1>
+        ${disclosure.audience === 'participants' ? '' : `
+        <p class="cr-error"><strong>Developer self-test.</strong> This study has
+           no ethics approval recorded and is not for participants. If someone
+           has asked you to take part in research through this page, stop here
+           and contact them.</p>`}
         <p>This session records ${activity.records} from your
            ${activity.devices}${doing}.</p>
 
@@ -247,6 +260,11 @@ export function runConsent(host, protocol) {
           ${disclosure.retentionDays} days and then deleted.<br>
           <strong>Who else sees it:</strong> ${disclosure.secondaryUse}<br>
           <strong>Questions or concerns:</strong> ${disclosure.contact}<br>
+          ${disclosure.controller
+            ? `<strong>Responsible for your data:</strong> ${disclosure.controller}<br>` : ''}
+          ${disclosure.lawfulBasis
+            ? `<strong>Legal basis:</strong> ${disclosure.lawfulBasis}${
+              disclosure.specialCategoryBasis ? `; ${disclosure.specialCategoryBasis}` : ''}<br>` : ''}
           ${disclosure.irbReference
             ? `Approved under ${disclosure.irbReference}.<br>` : ''}
           You can stop at any time, and nothing leaves your machine until you
@@ -275,6 +293,10 @@ export function runConsent(host, protocol) {
         secondaryUse: disclosure.secondaryUse,
         contact: disclosure.contact,
         irbReference: disclosure.irbReference,
+        controller: disclosure.controller,
+        lawfulBasis: disclosure.lawfulBasis,
+        specialCategoryBasis: disclosure.specialCategoryBasis,
+        audience: disclosure.audience,
         studyId,
         audio: activity.audio,
       });

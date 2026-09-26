@@ -33,7 +33,7 @@ churns on prose gets ignored.
 | `disclosure.retention_days` | 45 CFR 46.116; capped at 1095 (BIPA's 3-year bound) |
 | `disclosure.secondary_use` | 45 CFR 46.116 |
 | `disclosure.contact` | 45 CFR 46.116(b)(7) — a route back to a human |
-| `disclosure.irb_reference` | optional, but must not be an empty string |
+| `disclosure.irb_reference` | the ethics committee reference (REC or IRB); required for `participants`, and never an empty string |
 | `consent_tiers` | which of the three tiers this study offers |
 | `modalities` | opt-in, enumerated |
 | `calibration.n_points` | required when `gaze` is enabled; ≥ 5 |
@@ -41,6 +41,31 @@ churns on prose gets ignored.
 None of these are defaulted. A study missing a retention period is not a study
 with a sensible default retention period: the element has to be *stated*, and
 inventing one would put an unreviewed promise in front of a participant.
+
+## Who a study may be run on: `audience`
+
+A study with no `audience` is a **developer self-test**: the person who built
+the software, testing it on themselves. Every study shipped here is one. The
+capture page shows a red *DEVELOPER SELF-TEST* line under the protocol name,
+the consent screen tells anyone else to stop, the session records
+`audience: developer`, and the researcher app labels it *self-test*.
+
+`"audience": "participants"` declares that the protocol has been through an
+ethics committee. The route is UK/EU (UK GDPR / GDPR), so the study must then
+also carry everything a participant must be told when the data is collected
+(UK GDPR Art 13):
+
+| field | required for `participants` |
+|---|---|
+| `disclosure.irb_reference` | the REC/IRB approval reference |
+| `disclosure.contact` | must contain an email address or web address, and must not be a template ("Replace this…", `example.org`) |
+| `disclosure.controller` | Art 13(1)(a): who is responsible for the data |
+| `disclosure.lawful_basis` | Art 13(1)(c): the Art 6 basis, e.g. public task |
+| `disclosure.special_category_basis` | when `face`, `voice` or `respiration` is enabled: the Art 9 condition relied on. These streams are treated as special-category data by default (research/pass5-legal-gaps.md) |
+
+All of these are shown on the consent screen and stored in the consent record.
+They are hashed only when set, so adding them did not change the hash of any
+study written before they existed.
 
 ## Modalities
 
@@ -93,7 +118,8 @@ same defect as a stale comment, except a participant acts on it.
 ## Before running a real participant
 
 `m0.json` is the pilot protocol, transcribed from what the capture page used to
-hard-code. Its `contact` field is a placeholder and its `irb_reference` is
-null. Both need real values, and the disclosure text needs to match what your
-ethics board actually approved — this file is not ethics advice and nothing in
-it has been reviewed by anyone.
+hard-code. It is immutable, so do not edit it: copy it to a new `study_id`, set
+`"audience": "participants"` and fill in the fields above. Validation refuses
+the copy until every one is real. The disclosure text needs to match what your
+ethics committee actually approved. This file is not ethics advice, and nothing
+in it has been reviewed by anyone.

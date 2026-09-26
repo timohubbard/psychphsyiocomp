@@ -1,0 +1,25 @@
+{
+  "study_id": "fixture-participants",
+  "name": "Fixture — every optional hashed field set",
+  "version": "1.0.0",
+  "notes": [
+    "Test fixture, not a study. Both test suites hash this file and compare with",
+    "one pinned literal, which is what proves the browser and the server hash",
+    "the fields added after m0 identically. Non-ASCII on purpose: the café test."
+  ],
+  "audience": "participants",
+  "disclosure": {
+    "retention_days": 180,
+    "secondary_use": "Analysed by the named team only; not sold or shared.",
+    "contact": "Dr A. Researcher, a.researcher@uni.ac.uk — Psychology, café wing",
+    "irb_reference": "REC-2026-0417",
+    "controller": "University of Somewhere, Research Data Office",
+    "lawful_basis": "UK GDPR Art 6(1)(e) — a task in the public interest",
+    "special_category_basis": "UK GDPR Art 9(2)(j) with DPA 2018 Sch 1 para 4 — research"
+  },
+  "consent_tiers": ["features_only", "media_retained"],
+  "default_tier": "features_only",
+  "modalities": ["face", "gaze"],
+  "calibration": { "n_points": 13, "randomise_order": true },
+  "tasks": [{ "type": "chinrest" }, { "type": "calibration" }, { "type": "validation" }]
+}
