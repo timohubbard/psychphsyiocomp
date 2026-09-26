@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime, timezone
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -36,6 +37,7 @@ import annotation_store  # noqa: E402
 import aoi_store  # noqa: E402
 from aoi import AOI, AOISet, analyse  # noqa: E402
 from fixations import classify  # noqa: E402
+from retention import collect_sessions, expired  # noqa: E402
 from study import content_hash as study_hash  # noqa: E402
 from study import list_studies, load_study, verify_session_study  # noqa: E402
 from store import (  # noqa: E402
@@ -571,6 +573,15 @@ def main() -> int:
     print(f"  reading          {data_root}")
     print(f"  media            {media_root or 'not configured (--media)'}")
     print(f"  sessions found   {n}\n")
+    # Deletion is an explicit command, never a side effect of starting the app,
+    # but a session kept past what its participant was told must not go unseen.
+    overdue = expired(collect_sessions(data_root, [media_root] if media_root else []),
+                      datetime.now(timezone.utc))
+    if overdue:
+        print(f"  PAST RETENTION   {len(overdue)} session(s): "
+              f"{', '.join(s.session_id for s in overdue)}")
+        print("  Their participants were told this data would be deleted. Run:")
+        print("    npm run retention -- --apply\n")
     if n == 0:
         print("  No processed sessions. Run:")
         print("    npm run py -- server/process_bundle.py <bundle-dir> --out out/\n")

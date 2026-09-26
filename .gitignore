@@ -53,6 +53,11 @@ browser_chunks.json
 # further up, one directory over.
 out/annotations/
 
+# The deletion log (server/retention.py) holds no participant id, but it is a
+# list of which sessions existed and when each was withdrawn — a record about
+# participants, and so local like the data it records the removal of.
+out/deletions.jsonl
+
 # Playback remuxes are derived copies of participant video, so they fall under
 # the same rule as the source — the extension differs, which is exactly the
 # gap that let session.json through once already.

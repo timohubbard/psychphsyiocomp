@@ -52,7 +52,7 @@ seen the evidence behind them.
 **M0 (walking skeleton) complete. M1 (gaze) working end to end. All four
 modalities run on real footage; facial has two AU engines.**
 
-`npm run check` → licence inventory, 700 tests (169 JS + 531 Python), M0 gate
+`npm run check` → licence inventory, 717 tests (169 JS + 548 Python), M0 gate
 PASS. `npm run verify:gaze` → GAZE GATE PASS on the pilot, **FAIL on the second
 session** (83% of fixations on target at 4.5°, need 90%; 3.2° to target vs
 1.5°) — see "The second real session" below.
@@ -73,7 +73,7 @@ session** (83% of fixations on target at 4.5°, need 90%; 3.2° to target vs
 | M2 — `face.pyfeat_aus`, per-AU reliability tiers | done |
 | M2 — inter-engine agreement + relative proportions | done |
 | M2 — `face.opengraphau_aus`, the second AU engine | done |
-| M2 — posed-expression task + per-engine scoring against it | done — needs a recording (`?study=au-expressions`) |
+| M2 — posed-expression task + per-engine scoring against it | done — first recording scored (`s_muirbs2a`) |
 | M3 — `voice.opensmile_egemaps` (88 eGeMAPSv02 functionals) | done |
 | M4 — `resp.motion_profiles`, waveform only | done |
 | M4 — respiration validation study against an RIP belt | not started |
@@ -81,17 +81,22 @@ session** (83% of fixations on target at 4.5°, need 90%; 3.2° to target vs
 | `speech.faster_whisper` — transcripts, consent-gated | done — 13% word error on real read-aloud |
 | Clock alignment from both clappers, placed by expected position | done |
 | End-to-end capture smoke test (headless Chrome, fake camera) | done — `npm run smoke:capture` |
+| Retention sweep and withdrawal, with a deletion log processing honours | done — `npm run retention`, `npm run withdraw` |
 
 ### Picking this up
 
 **Before anyone but the developer is recorded** — from
 `research/pass5-legal-gaps.md`, whose opening synthesis gives the reasons:
 
-- **Make the retention promise true.** The consent screen says data is "kept
-  for N days and then deleted". `features_only` deletion is enforced, but
-  nothing reads `consent_retention_days`, so retained media and all derived
-  data never expire, and there is no per-participant delete path for
-  withdrawal. Keyboard work.
+- **Run the retention sweep on a schedule.** The consent screen's "kept for N
+  days and then deleted" is now enforceable — `npm run retention` lists what
+  has expired under the period each participant was shown and deletes it with
+  `--apply`; `npm run withdraw -- <session or participant id> --apply` removes
+  one person's data. Both are dry runs without `--apply`. Deletion is never a
+  side effect of starting anything, so the promise holds only if someone runs
+  the sweep: schedule it where the data lives. The researcher app names any
+  session past its date at startup, and `process` refuses a deleted or expired
+  session rather than recreate it from a leftover copy.
 - **Name the jurisdiction and the ethics route.** Every study's `contact` is a
   placeholder. Washington's and Colorado's laws exempt Common Rule research and
   otherwise reach non-profits, so `irbReference` should become required for

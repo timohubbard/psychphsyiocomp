@@ -39,6 +39,7 @@ MediaPipeBlendshapesBatch = _face.MediaPipeBlendshapesBatch
 
 _gaze = load_engine_module("gaze.mediapipe_features")
 from pipeline import SessionBundle, process_session  # noqa: E402
+from retention import refusal_for  # noqa: E402
 from tables import read_session  # noqa: E402
 
 MODEL_PATH = ROOT / "models" / "face_landmarker.task"
@@ -224,6 +225,13 @@ def main() -> int:
     args = ap.parse_args()
 
     bundle = SessionBundle.from_dir(args.bundle)
+
+    # Before anything is written: a withdrawn or expired session must not come
+    # back because a copy of its bundle was still lying around. See retention.py.
+    refusal = refusal_for(args.out, bundle.session_id, bundle.metadata)
+    if refusal:
+        print(f"\n  REFUSED  {refusal}")
+        return 2
 
     print("\n  PROCESSING A REAL CAPTURE")
     print("  " + "-" * 72)
