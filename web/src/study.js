@@ -105,6 +105,13 @@ const PLACEHOLDER = /replace (this|with)|placeholder|\btodo\b|\btbd\b|example\.[
 /** An email address or a web address: a route a participant can actually use. */
 const CONTACT_ROUTE = /[^\s@]+@[^\s@]+\.[a-z]{2,}|https?:\/\/\S+\.\S+/i;
 
+/**
+ * Modalities with an engine that runs in the browser. Under
+ * `features_in_browser` nothing else can measure anything — the AU engines,
+ * openSMILE, respiration and transcription all need the recording on a server.
+ */
+export const BROWSER_MODALITIES = ['gaze', 'face'];
+
 /** Modalities that cannot be collected without asking for the microphone. */
 export const AUDIO_MODALITIES = MODALITIES
   .filter((m) => m.needs.includes('microphone')).map((m) => m.id);
@@ -218,6 +225,18 @@ export function validateStudy(study) {
   if (Array.isArray(tiers) && tiers.includes('media_plus_transcript')
       && Array.isArray(mods) && !mods.some((m) => AUDIO_MODALITIES.includes(m))) {
     reasons.push('media_plus_transcript is offered but no modality records audio');
+  }
+
+  // A tier that promises the video never leaves the device cannot be offered
+  // for a modality that can only be measured from the video on a server: the
+  // participant would consent to a measurement that then silently never
+  // happens. Mirrored in server/study.py.
+  if (Array.isArray(tiers) && tiers.includes('features_in_browser') && Array.isArray(mods)) {
+    const serverOnly = mods.filter((m) => !BROWSER_MODALITIES.includes(m));
+    if (serverOnly.length) {
+      reasons.push(`features_in_browser is offered but ${serverOnly.join(', ')} can only `
+        + 'be measured from a recording on the server');
+    }
   }
 
   return { valid: reasons.length === 0, reasons };

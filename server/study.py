@@ -27,7 +27,12 @@ from pathlib import Path
 from typing import Any
 
 #: Mirrors CONSENT_TIERS in web/src/consent.js.
-CONSENT_TIER_IDS = ("features_only", "media_retained", "media_plus_transcript")
+CONSENT_TIER_IDS = ("features_in_browser", "features_only", "media_retained",
+                    "media_plus_transcript")
+
+#: Mirrors BROWSER_MODALITIES: the only modalities measurable when the video
+#: never leaves the participant's browser.
+BROWSER_MODALITY_IDS = ("gaze", "face")
 
 #: Mirrors MODALITIES in web/src/study.js.
 MODALITY_IDS = ("gaze", "face", "voice", "respiration")
@@ -150,6 +155,13 @@ def validate_study(study: Any) -> Verdict:
     if (isinstance(tiers, list) and "media_plus_transcript" in tiers
             and isinstance(mods, list) and not any(m in AUDIO_MODALITY_IDS for m in mods)):
         reasons.append("media_plus_transcript is offered but no modality records audio")
+
+    # Mirrors study.js: the no-video tier cannot promise a server-only measurement.
+    if isinstance(tiers, list) and "features_in_browser" in tiers and isinstance(mods, list):
+        server_only = [m for m in mods if m not in BROWSER_MODALITY_IDS]
+        if server_only:
+            reasons.append(f"features_in_browser is offered but {', '.join(server_only)} "
+                           "can only be measured from a recording on the server")
 
     return Verdict(not reasons, tuple(reasons))
 

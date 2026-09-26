@@ -82,6 +82,8 @@ session** (83% of fixations on target at 4.5°, need 90%; 3.2° to target vs
 | Clock alignment from both clappers, placed by expected position | done |
 | End-to-end capture smoke test (headless Chrome, fake camera) | done — `npm run smoke:capture -- --study m0` drives the chinrest too, and checks the page recovers the distance it was driven at |
 | Retention sweep and withdrawal, with a deletion log processing honours | done — `npm run retention`, `npm run withdraw` |
+| Ethics gate (`audience`), consent wording, DPIA template, `npm run ropa` | done — wording awaits sign-off |
+| `features_in_browser` tier: video never leaves the device; gaze features in the browser | done — not yet run on a real face |
 
 ### Picking this up
 
@@ -105,9 +107,13 @@ session** (83% of fixations on target at 4.5°, need 90%; 3.2° to target vs
   screen, quoted in full under *Awaiting sign-off* below. The DPIA template
   (`docs/dpia-template.md`) and `npm run ropa -- <study>` (the Art 30 record,
   generated from the study file) are ready for a deploying group to complete.
-- **Decide whether to offer an in-browser-only tier.** It is the strongest
-  BIPA/GDPR mitigation (features extracted and video never uploaded), and it
-  cuts against record-first. A decision, not a fix.
+- **The in-browser tier exists** (`features_in_browser`, decided 2026-09-26):
+  the camera feeds only the in-browser engines and no recording is ever
+  made. Gaze features were ported to the browser for it, and pinned to the
+  server engine by a shared golden fixture. The estimator fits on them when
+  there is no video. It is an option a study offers, and record-first stays
+  the default. Not yet seen: a real face through it — the smoke test's fake
+  camera shows none.
 
 #### Awaiting sign-off: consent wording added 2026-09-26
 
@@ -147,6 +153,16 @@ unless noted. Every one is also stored in the session's consent record.
 6. **UK GDPR Art 13 lines**, shown when the study states them:
    > **Responsible for your data:** {controller} ·
    > **Legal basis:** {lawful_basis}; {special_category_basis}
+7. **The `features_in_browser` tier**, offered only by studies that list it:
+   > **Measurements only, made on this device** — Your video never leaves this
+   > computer. The measurements are made here, in your browser, and only the
+   > numbers are saved.
+   > · Numbers computed on your own device — where you looked, how your face
+   > moved. · No video and no audio is ever saved or sent anywhere. · These
+   > numbers are still personal data. Patterns in them could, in principle,
+   > help identify you, so they are protected like any other personal data.
+   > *Only the simpler measurements your browser can make are possible, and
+   > they can never be re-checked against the recording.*
 
 Then, most valuable first. The first four need a person or hardware; the rest
 can be done at a keyboard.

@@ -38,7 +38,8 @@ _face = load_engine_module("face.mediapipe_blendshapes")
 MediaPipeBlendshapesBatch = _face.MediaPipeBlendshapesBatch
 
 _gaze = load_engine_module("gaze.mediapipe_features")
-from pipeline import SessionBundle, process_session  # noqa: E402
+from pipeline import (SessionBundle, no_video_eligibility, process_session,  # noqa: E402
+                      refuse_unconsented_recording)
 from retention import refusal_for  # noqa: E402
 from tables import read_session  # noqa: E402
 
@@ -89,11 +90,23 @@ def _voice_stage(writer, bundle, solution):
 
     from engine_contract import describe_audio
 
+    engine = load_engine_module("voice.opensmile_egemaps").OpenSmileEGeMAPS()
     wav = bundle.ensure_audio()
     if wav is None:
-        return {"status": "no_audio"}
+        # A runs row, not a silent return: "voice never ran because there was
+        # no recording" has to be distinguishable from "nobody ran voice".
+        from engine_contract import Eligibility
+        now = datetime.now(timezone.utc)
+        eligibility = (no_video_eligibility(bundle) if bundle.video_path is None
+                       else Eligibility(eligible=False, reasons=("no_audio",),
+                                        detail="the recording has no audio track"))
+        writer.add_run(run_id=str(uuid.uuid4()), manifest=engine.manifest,
+                       source=engine.source, params={}, media_sha256=None,
+                       started=now, ended=now, status="ineligible",
+                       eligibility=eligibility, solution=solution)
+        return {"status": "no_audio", "reasons": list(eligibility.reasons),
+                "detail": eligibility.detail}
 
-    engine = load_engine_module("voice.opensmile_egemaps").OpenSmileEGeMAPS()
     media = describe_audio(wav, bundle.metadata.get("applied_audio_constraints"))
 
     started = datetime.now(timezone.utc)
@@ -143,9 +156,18 @@ def _transcript_stage_factory(model_dir, params):
 
 
 def _gaze_stage(writer, bundle, solution):
-    """Feature engine plus estimator, as one pipeline stage."""
-    from gaze_pipeline import run_gaze
+    """Feature engine plus estimator, as one pipeline stage.
+
+    With no recording (features_in_browser) the estimator is fitted on the
+    features the browser computed — the only gaze measurement such a session
+    will ever have — and the server engine's absence is a runs row.
+    """
+    from gaze_pipeline import run_gaze, run_gaze_from_browser
     engine = _gaze.MediaPipeGazeFeatures(str(MODEL_PATH))
+    if bundle.video_path is None:
+        return run_gaze_from_browser(writer, bundle, engine, solution,
+                                     feature_channels=_gaze.FEATURE_CHANNELS,
+                                     no_video=no_video_eligibility(bundle))
     return run_gaze(writer, bundle, engine, solution,
                     feature_channels=_gaze.FEATURE_CHANNELS)
 
@@ -233,6 +255,12 @@ def main() -> int:
         print(f"\n  REFUSED  {refusal}")
         return 2
 
+    # Before the clapper scan below decodes a single frame: a recording that a
+    # features_in_browser participant never agreed to send is deleted unread.
+    recording_refused = refuse_unconsented_recording(bundle)
+    if recording_refused:
+        print(f"\n  RECORDING DELETED UNREAD  {recording_refused['flag']}")
+
     print("\n  PROCESSING A REAL CAPTURE")
     print("  " + "-" * 72)
     print(f"  session          {bundle.session_id}  ({bundle.study_id})")
@@ -309,6 +337,8 @@ def main() -> int:
 
     summary = process_session(bundle, engines, args.out, video_luma=luma,
                               extra_stages=stages)
+    if recording_refused:
+        summary["recording_refused"] = recording_refused
 
 
     st = summary.get("study") or {}
@@ -416,9 +446,15 @@ def main() -> int:
             print(f"    not measured {by_verdict}")
         _print_expression_scores(args.out, bundle.session_id)
 
-    print("\n  M0 criterion on REAL data: "
-          f"{'PASS' if len(srcs) >= 2 else 'FAIL'} "
-          f"({len(srcs)} source(s) for this session)")
+    if bundle.video_path is None:
+        # The M0 gate compares two placements of one engine over the same
+        # recording. With no recording there is only one placement, by design.
+        print("\n  M0 criterion: not applicable — no recording (the browser "
+              "placement is the only one)")
+    else:
+        print("\n  M0 criterion on REAL data: "
+              f"{'PASS' if len(srcs) >= 2 else 'FAIL'} "
+              f"({len(srcs)} source(s) for this session)")
     print()
     return 0
 

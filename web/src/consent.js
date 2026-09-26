@@ -46,6 +46,29 @@ export const MAX_RETENTION_DAYS = 3 * 365;
  */
 export const CONSENT_TIERS = [
   {
+    // research/pass5: the strongest available mitigation under both BIPA (no
+    // "collection" without control, G.T. v. Samsung as reported) and GDPR
+    // minimisation (by analogy). The cost is real: only engines that run in
+    // the browser can measure anything (gaze features, blendshapes — no AU
+    // engines, voice or respiration), and nothing can ever be re-analysed.
+    // A study may offer it only when every modality it records has a browser
+    // engine; study.js enforces that.
+    id: 'features_in_browser',
+    label: 'Measurements only, made on this device',
+    summary: 'Your video never leaves this computer. The measurements are made '
+      + 'here, in your browser, and only the numbers are saved.',
+    keeps: [
+      'Numbers computed on your own device — where you looked, how your face moved.',
+      'No video and no audio is ever saved or sent anywhere.',
+      'These numbers are still personal data. Patterns in them could, in '
+      + 'principle, help identify you, so they are protected like any other '
+      + 'personal data.',
+    ],
+    consequence:
+      'Only the simpler measurements your browser can make are possible, and '
+      + 'they can never be re-checked against the recording.',
+  },
+  {
     id: 'features_only',
     label: 'Measurements only',
     summary: 'Your recording is analysed and then deleted.',
@@ -97,6 +120,17 @@ export const CONSENT_TIERS = [
 ];
 
 export const DEFAULT_TIER = 'features_only';
+
+/**
+ * Does this tier permit RECORDING at all?
+ *
+ * Distinct from `retainsMedia`: `features_only` records, uploads and has the
+ * server delete after analysis; `features_in_browser` never records. An
+ * unknown tier records nothing — failing closed, as `retainsMedia` does.
+ */
+export function recordsMedia(tier) {
+  return CONSENT_TIERS.some((t) => t.id === tier) && tier !== 'features_in_browser';
+}
 
 /** Does this tier permit keeping the raw recording? */
 export function retainsMedia(tier) {

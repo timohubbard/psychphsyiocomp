@@ -229,3 +229,28 @@ def test_a_head_turn_reads_as_yaw():
 def test_non_square_matrix_is_rejected():
     with pytest.raises(ValueError):
         euler_from_matrix(np.eye(3))
+
+
+# ---------------------------------------------------------------------------
+# the browser placement computes the same thing — ../browser/features.test.mjs
+# ---------------------------------------------------------------------------
+
+def test_the_golden_fixture_is_what_this_engine_computes():
+    """The JS suite asserts the browser port reproduces these expected values;
+    this asserts they are still what the server engine produces. Together they
+    pin the two placements to each other."""
+    import json
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    golden = json.loads((Path(__file__).resolve().parents[1] / "fixtures"
+                         / "landmarks_golden.json").read_text(encoding="utf-8"))
+    for i, f in enumerate(golden["frames"]):
+        lm = [SimpleNamespace(x=x, y=y) for x, y in f["landmarks"]]
+        got = features_from_landmarks(lm, golden["width_px"], golden["height_px"])
+        if f["expected"] is None:
+            assert got is None, f"frame {i}"
+            continue
+        assert set(got) == set(f["expected"]), f"frame {i}"
+        for ch, v in f["expected"].items():
+            assert got[ch] == pytest.approx(v, abs=1e-12), f"frame {i} {ch}"

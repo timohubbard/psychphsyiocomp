@@ -65,7 +65,13 @@ export class SessionRecorder {
 
   // -- capture ---------------------------------------------------------
 
-  async start({ audio = this.wantsAudio, video = true } = {}) {
+  /**
+   * @param {{audio?: boolean, video?: boolean, record?: boolean}} [opts]
+   *   `record: false` opens the camera for the live engines and creates NO
+   *   MediaRecorder — the `features_in_browser` tier, enforced here because
+   *   this is the only place a recording could come into existence.
+   */
+  async start({ audio = this.wantsAudio, video = true, record = true } = {}) {
     startSessionClock();
 
     this.stream = await navigator.mediaDevices.getUserMedia({
@@ -74,6 +80,14 @@ export class SessionRecorder {
     });
 
     this._recordAppliedConstraints();
+
+    if (!record) {
+      this._recordingStartedAt = now();
+      // Still logged: it is the session's start, and stimulus timing is
+      // relative to it. `mimeType: null` says no file was ever written.
+      this.logEvent('recording_start', { mimeType: null, media_recorded: false });
+      return { mimeType: null, appliedAudioConstraints: this._appliedAudioConstraints };
+    }
 
     const mimeType = pickMimeType();
     this._mediaRecorder = new MediaRecorder(this.stream, {
@@ -129,7 +143,15 @@ export class SessionRecorder {
   }
 
   async stop() {
-    if (!this._mediaRecorder) return null;
+    if (!this._mediaRecorder) {
+      // No recording was made (features_in_browser): release the camera and
+      // say so, rather than leaving the tracks live after the session.
+      if (this.stream) {
+        this.logEvent('recording_stop', { media_recorded: false });
+        this.stream.getTracks().forEach((t) => t.stop());
+      }
+      return null;
+    }
     this.logEvent('recording_stop');
 
     const stopped = new Promise((resolve) => {

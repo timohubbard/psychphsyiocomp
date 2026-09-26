@@ -362,6 +362,21 @@ test('changing the audience changes the hash', async () => {
   assert.notEqual(await contentHash(study()), await contentHash(study({ audience: 'participants' })));
 });
 
+test('the in-browser tier may be offered for gaze and face', () => {
+  const s = study({ consent_tiers: ['features_in_browser', 'features_only'],
+    default_tier: 'features_in_browser', modalities: ['gaze', 'face'] });
+  assert.deepEqual(validateStudy(s).reasons, []);
+});
+
+test('the in-browser tier is refused for modalities only a server can measure', () => {
+  // The participant would consent to a measurement that then never happens.
+  for (const m of ['voice', 'respiration']) {
+    const s = study({ consent_tiers: ['features_in_browser'], default_tier: 'features_in_browser',
+      modalities: ['gaze', m] });
+    assert.match(validateStudy(s).reasons.join(), new RegExp(`${m} can only be measured`));
+  }
+});
+
 test('the consent flow is told what each enabled modality measures, in canonical order', () => {
   const p = protocolFor(study({ modalities: ['face', 'gaze'], tasks: [] }));
   assert.deepEqual(p.activity.measures,

@@ -8,6 +8,7 @@ import {
   allowsTranscript,
   analysisNotice,
   consentRecord,
+  recordsMedia,
   retainsMedia,
   validateConsent,
   withdrawalText,
@@ -38,6 +39,26 @@ test('each tier adds exactly one capability', () => {
 
   assert.equal(allowsTranscript('media_retained'), false);
   assert.equal(allowsTranscript('media_plus_transcript'), true);
+});
+
+test('features_in_browser never records; every other known tier does', () => {
+  assert.equal(recordsMedia('features_in_browser'), false);
+  assert.equal(recordsMedia('features_only'), true);   // recorded, deleted server-side
+  assert.equal(recordsMedia('media_retained'), true);
+  assert.equal(retainsMedia('features_in_browser'), false);
+  assert.equal(allowsTranscript('features_in_browser'), false);
+});
+
+test('an unknown tier does not record — failing closed', () => {
+  assert.equal(recordsMedia('everything'), false);
+  assert.equal(recordsMedia(undefined), false);
+});
+
+test('the in-browser tier says the video never leaves the device, and what that costs', () => {
+  const t = CONSENT_TIERS.find((x) => x.id === 'features_in_browser');
+  assert.match(t.summary, /never leaves this computer/);
+  assert.ok(t.keeps.some((k) => /still personal data/.test(k)));
+  assert.match(t.consequence, /can never be re-checked/);
 });
 
 test('an unknown tier grants nothing', () => {

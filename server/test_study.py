@@ -182,6 +182,19 @@ def test_present_but_empty_fields_are_refused_whoever_the_audience():
     assert "controller is present but empty" in _reasons(s)
 
 
+def test_the_in_browser_tier_may_be_offered_for_gaze_and_face():
+    s = study(consent_tiers=["features_in_browser", "features_only"],
+              default_tier="features_in_browser", modalities=["gaze", "face"])
+    assert validate_study(s).ok
+
+
+def test_the_in_browser_tier_is_refused_for_server_only_modalities():
+    for m in ("voice", "respiration"):
+        s = study(consent_tiers=["features_in_browser"], default_tier="features_in_browser",
+                  modalities=["gaze", m])
+        assert f"{m} can only be measured" in _reasons(s)
+
+
 def test_fields_added_after_m0_are_hashed_only_when_set():
     assert len(_canon(study())) == 11
     assert [k for k, _ in _canon(participant_study())][11:] == [

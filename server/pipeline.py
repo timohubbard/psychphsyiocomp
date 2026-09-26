@@ -48,6 +48,12 @@ class SessionBundle:
     events: list[dict[str, Any]] = field(default_factory=list)
     #: Signals the browser produced live, already on the master clock.
     browser_chunks: list[Any] = field(default_factory=list)
+    #: The `source` each browser chunk declared, index-aligned with
+    #: `browser_chunks`; None (or a short list) means the manifest's
+    #: `browser_source`. More than one browser engine now runs — the gaze
+    #: features beside the blendshapes — and writing them all under one source
+    #: would label gaze rows as a facial engine's output.
+    browser_chunk_sources: list[str | None] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -70,8 +76,9 @@ class SessionBundle:
         # memory. The capture page has always written this file; nothing read it.
         chunks_path = p / "browser_chunks.json"
         browser_chunks: list[Any] = []
+        sources: list[str | None] = []
         if chunks_path.exists():
-            browser_chunks = _load_browser_chunks(chunks_path)
+            browser_chunks, sources = _load_browser_chunks(chunks_path)
 
         return cls(
             session_id=meta["session_id"],
@@ -80,6 +87,7 @@ class SessionBundle:
             video_path=video if video.exists() else None,
             events=meta.get("events", []),
             browser_chunks=browser_chunks,
+            browser_chunk_sources=sources,
             metadata=meta,
         )
 
@@ -110,8 +118,12 @@ class SessionBundle:
         return None
 
 
-def _load_browser_chunks(path: Path) -> list[Any]:
+def _load_browser_chunks(path: Path) -> tuple[list[Any], list[str | None]]:
     """Deserialise the capture page's live-engine output into contract types.
+
+    Returns the chunks and, index-aligned, the `source` each one declared (None
+    for chunks that declare none — every chunk written before the gaze engine
+    ran in the browser).
 
     Rows are rebuilt as ``SignalRow``/``QualityRow`` rather than passed through
     as dicts so that a shape change in the browser fails here, loudly, at the
@@ -125,6 +137,7 @@ def _load_browser_chunks(path: Path) -> list[Any]:
 
     raw = json.loads(path.read_text(encoding="utf-8"))
     chunks: list[Chunk] = []
+    sources: list[str | None] = []
 
     for c in raw:
         signals = tuple(
@@ -150,8 +163,9 @@ def _load_browser_chunks(path: Path) -> list[Any]:
         )
         if signals or quality:
             chunks.append(Chunk(signals=signals, quality=quality))
+            sources.append(c.get("source"))
 
-    return chunks
+    return chunks, sources
 
 
 def build_registry(
@@ -239,6 +253,56 @@ def enforce_consent(bundle, summary: dict[str, Any]) -> dict[str, Any]:
 DEFAULT_STUDIES_ROOT = Path(__file__).resolve().parent.parent / "studies"
 
 
+def refuse_unconsented_recording(bundle) -> dict[str, Any] | None:
+    """Delete a recording that a features_in_browser session should not have.
+
+    Runs BEFORE any engine. The capture page never records under this tier, so
+    a recording here means something upstream broke the participant's choice —
+    and analysing it first, then deleting it, would still be using a video the
+    participant was told never leaves their device. Deleted unread and flagged;
+    the session is then processed from its browser measurements, as consented.
+    """
+    tier = (bundle.metadata.get("consent") or {}).get("tier")
+    if tier != "features_in_browser":
+        return None
+    deleted = []
+    for attr in ("video_path", "audio_path"):
+        path = getattr(bundle, attr)
+        if path and Path(path).exists():
+            Path(path).unlink()
+            deleted.append(Path(path).name)
+        setattr(bundle, attr, None)
+    if not deleted:
+        return None
+    return {"action": "deleted_unread",
+            "deleted": deleted,
+            "flag": "a recording arrived for a features_in_browser session; the "
+                    "participant was told the video never leaves their device"}
+
+
+def no_video_eligibility(bundle) -> Any:
+    """Why a server engine cannot run on this bundle, as an Eligibility."""
+    from engine_contract import Eligibility
+    tier = (bundle.metadata.get("consent") or {}).get("tier")
+    detail = ("the participant chose features_in_browser: the recording never left "
+              "their browser" if tier == "features_in_browser"
+              else "the bundle contains no recording")
+    return Eligibility(eligible=False, reasons=("no_video",), detail=detail)
+
+
+def _record_no_video(writer, summary, engine, params, bundle, solution) -> None:
+    run_id = str(uuid.uuid4())
+    source = getattr(engine, "source", engine.manifest.source)
+    now = datetime.now(timezone.utc)
+    writer.add_run(
+        run_id=run_id, manifest=engine.manifest, source=source, params=params,
+        eligibility=no_video_eligibility(bundle), solution=solution,
+        media_sha256=None, started=now, ended=now, status="ineligible",
+    )
+    summary["runs"].append({"run_id": run_id, "source": source, "status": "ineligible",
+                            "rows": 0, "aligned": False, "unaligned_reason": "no_video"})
+
+
 def _verify_study(bundle: SessionBundle, studies_root: str | Path | None):
     """Does this session's recorded protocol still match the file on disk?
 
@@ -272,6 +336,10 @@ def process_session(
         study_id=bundle.study_id,
     )
     writer = CanonicalWriter(out_root, ctx)
+    # Before anything reads the media: see refuse_unconsented_recording.
+    refused = refuse_unconsented_recording(bundle)
+    if refused:
+        video_luma = None
     registry = build_registry(bundle, video_luma=video_luma)
 
     # Capture-side session facts, including the virtual-chinrest geometry.
@@ -292,19 +360,28 @@ def process_session(
         # server/study.py.
         "study": _verify_study(bundle, studies_root),
     }
+    if refused:
+        summary["recording_refused"] = refused
 
-    # Browser-live output is already on the master clock.
+    # Browser-live output is already on the master clock. Each chunk goes under
+    # the source it declared; undeclared ones are the manifest's browser_source.
     if bundle.browser_chunks:
         master_solution = registry.solve(MASTER_CLOCK)
-        source = bundle.metadata.get(
+        default = bundle.metadata.get(
             "browser_source", "face.mediapipe_blendshapes@0.1.0+browser-live"
         )
-        writer.add_chunks(
-            bundle.browser_chunks, source=source,
-            params=bundle.metadata.get("browser_params", {}),
-            solution=master_solution,
-        )
-        summary["sources"].add(source)
+        by_source: dict[str, list[Any]] = {}
+        for i, chunk in enumerate(bundle.browser_chunks):
+            declared = (bundle.browser_chunk_sources[i]
+                        if i < len(bundle.browser_chunk_sources) else None)
+            by_source.setdefault(declared or default, []).append(chunk)
+        for source, chunks in by_source.items():
+            writer.add_chunks(
+                chunks, source=source,
+                params=bundle.metadata.get("browser_params", {}),
+                solution=master_solution,
+            )
+            summary["sources"].add(source)
 
     # Stimulus events, stamped by the browser against the master clock.
     if bundle.events:
@@ -332,6 +409,11 @@ def process_session(
     # Server-side engines over the stored media.
     for engine, params in engines:
         if bundle.video_path is None:
+            # Recorded, not skipped. This used to `continue` without a trace, so
+            # a session whose participant chose features_in_browser looked
+            # exactly like one where nobody ran the engine.
+            _record_no_video(writer, summary, engine, params, bundle,
+                             registry.solve("video_pts"))
             continue
 
         # From the contract, not from whichever module happens to be named

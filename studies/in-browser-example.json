@@ -1,0 +1,39 @@
+{
+  "study_id": "in-browser-example",
+  "name": "In-browser example — gaze and face, the video never leaves the device",
+  "version": "1.0.0",
+
+  "notes": [
+    "Example of the features_in_browser tier: the capture page opens the camera",
+    "for the live engines and never creates a recording. The bundle is",
+    "session.json and browser_chunks.json only; the gaze estimator is fitted",
+    "on the features the browser computed. Only gaze and face can be offered",
+    "under this tier — every other engine needs the recording on a server.",
+    "A developer self-test (no audience): copy it to a new study_id, set",
+    "\"audience\": \"participants\" and fill in the ethics fields to use it."
+  ],
+
+  "disclosure": {
+    "retention_days": 180,
+    "secondary_use": "Analysed by the named research team only. Not sold, and not shared outside the team without a further, separate agreement.",
+    "contact": "Replace this with the investigator and the route to the ethics board before running anyone other than the developer.",
+    "irb_reference": null
+  },
+
+  "consent_tiers": ["features_in_browser"],
+  "default_tier": "features_in_browser",
+
+  "modalities": ["gaze", "face"],
+
+  "calibration": {
+    "n_points": 13,
+    "randomise_order": true
+  },
+
+  "tasks": [
+    { "type": "chinrest" },
+    { "type": "calibration" },
+    { "type": "validation" },
+    { "type": "rest_fixation", "duration_ms": 20000 }
+  ]
+}

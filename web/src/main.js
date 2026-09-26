@@ -17,9 +17,10 @@ import {
   wantsChinrest,
 } from './sequence.js';
 import { MediaPipeBlendshapesLive } from '../../engines/face.mediapipe_blendshapes/browser/engine.js';
+import { MediaPipeGazeFeaturesLive } from '../../engines/gaze.mediapipe_features/browser/engine.js';
 import { runVirtualChinrest, CHINREST_CSS } from './chinrest-ui.js';
 import { stimulusSizeErrorFraction } from './chinrest.js';
-import { retainsMedia, runConsent } from './consent.js';
+import { recordsMedia, retainsMedia, runConsent } from './consent.js';
 import {
   audienceOf, describeStudy, loadStudy, loadStudyIndex, needsAudio, protocolFor,
   studyIdFromUrl, studyProvenance,
@@ -110,7 +111,11 @@ ui.btnEnable.addEventListener('click', async () => {
 
     state.recorder.setConsent(state.consent);
     state.recorder.setStudy(await studyProvenance(state.study));
-    const { appliedAudioConstraints } = await state.recorder.start();
+    const { appliedAudioConstraints } = await state.recorder.start({
+      // The participant's choice, enforced at the only place it can be: no
+      // MediaRecorder is created, so there is no recording to leave the machine.
+      record: recordsMedia(state.consent.tier),
+    });
     ui.preview.srcObject = state.recorder.stream;
     ui.chkStream.textContent = 'ok';
     ui.chkStream.style.color = 'var(--ok)';
@@ -119,6 +124,14 @@ ui.btnEnable.addEventListener('click', async () => {
 
     state.engine = new MediaPipeBlendshapesLive();
     state.engine.onOutput(onEngineOutput);
+    // Gaze features from the same landmarker result, when the study measures
+    // gaze. Under `features_in_browser` they are the only gaze data there will
+    // ever be; otherwise a second placement beside the server pass.
+    if ((state.study.modalities ?? []).includes('gaze')) {
+      state.gazeEngine = new MediaPipeGazeFeaturesLive();
+      state.gazeEngine.attachTo(state.engine);
+      state.gazeEngine.onOutput(onEngineOutput);
+    }
     await state.engine.init();
 
     ui.hud.classList.add('visible');
@@ -254,6 +267,10 @@ function onEngineOutput(chunk) {
   if (chunk.signals?.length || chunk.events?.length || chunk.quality?.length) {
     state.chunks.push(chunk);
   }
+  // Chunks from the gaze engine carry their own `source`; the HUD reads only
+  // the face engine's, whose face_detect_rate the gaze one would otherwise
+  // overwrite with a differently-windowed value.
+  if (chunk.source) return;
   for (const q of chunk.quality ?? []) {
     if (q.metric === 'achieved_fps') state.quality.fps = q.value;
     if (q.metric === 'face_detect_rate') state.quality.faceRate = q.value;
@@ -716,8 +733,10 @@ async function runExpression(stage) {
 async function finish() {
   stopPreviewLoop();
 
-  const tail = await state.engine.flush(stamp());
+  const finalTs = stamp();
+  const tail = await state.engine.flush(finalTs);
   if (tail) onEngineOutput(tail);
+  if (state.gazeEngine) onEngineOutput(state.gazeEngine.flush(finalTs));
   state.engine.close();
 
   state.videoBlob = await state.recorder.stop();

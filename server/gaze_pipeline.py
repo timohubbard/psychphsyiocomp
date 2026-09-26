@@ -81,14 +81,72 @@ def run_gaze(
         eligibility=eligibility, solution=solution,
     )
 
-    # -- the estimator ----------------------------------------------------
-
     rows = [
         {"channel": s.channel,
          "master_ts": solution.to_master(s.native_ts)[0],
          "value": s.value}
         for c in chunks for s in c.signals
     ]
+    return _fit_and_write(writer, bundle, rows, solution,
+                          feature_channels=feature_channels, criteria=criteria,
+                          roi_radius_px=roi_radius_px, use_pose=use_pose,
+                          feature_source=engine.source)
+
+
+#: The browser placement's source — engines/gaze.mediapipe_features/browser.
+BROWSER_FEATURE_SOURCE = "gaze.mediapipe_features@0.1.0+browser-live"
+
+
+def run_gaze_from_browser(
+    writer,
+    bundle,
+    engine,
+    solution,
+    *,
+    feature_channels,
+    no_video,
+    criteria: GateCriteria | None = None,
+    roi_radius_px: float = 100.0,
+    use_pose: bool = True,
+) -> dict[str, Any]:
+    """Fit the estimator on the features the BROWSER computed.
+
+    For features_in_browser sessions, where there is no recording and so
+    nothing for the server engine to read. The server engine still gets a runs
+    row saying why it did not run. The browser rows are already on the master
+    clock (performance.now), so they are fitted through the identity solution
+    and the estimator's output is stamped the same way.
+    """
+    started = datetime.now(timezone.utc)
+    writer.add_run(
+        run_id=str(uuid.uuid4()), manifest=engine.manifest, source=engine.source,
+        params={}, media_sha256=None, started=started, ended=started,
+        status="ineligible", eligibility=no_video, solution=solution,
+    )
+
+    from alignment import ClockSolution
+    master = ClockSolution(clock_id="performance.now", offset_ms=0.0, rate=1.0,
+                           uncertainty_ms=0.0, n_anchors=0)
+    rows = [
+        {"channel": s.channel, "master_ts": s.native_ts, "value": s.value}
+        for chunk, src in zip(bundle.browser_chunks, bundle.browser_chunk_sources)
+        if src == BROWSER_FEATURE_SOURCE
+        for s in chunk.signals
+    ]
+    if not rows:
+        _write_quality(writer, master, [], {"gaze_fit_refused": 1.0})
+        return {"status": "refused", "refusal": "no_browser_features",
+                "reasons": ["no gaze features were computed in the browser — "
+                            "the study may not have measured gaze, or no face was seen"]}
+    return _fit_and_write(writer, bundle, rows, master,
+                          feature_channels=feature_channels, criteria=criteria,
+                          roi_radius_px=roi_radius_px, use_pose=use_pose,
+                          feature_source=BROWSER_FEATURE_SOURCE)
+
+
+def _fit_and_write(writer, bundle, rows, solution, *, feature_channels, criteria,
+                   roi_radius_px, use_pose, feature_source) -> dict[str, Any]:
+    """The estimator: fit on the calibration spans, score, write — either path."""
     ts, X = feature_matrix(rows, feature_channels)
 
     events = [{
@@ -176,12 +234,16 @@ def run_gaze(
         # distinguishable source instead of silently replacing this one.
         params={"alpha": fit.alpha, "use_pose": use_pose,
                 "n_calibration_targets": fit.n_calibration_targets,
-                "channels": list(feature_channels)},
+                "channels": list(feature_channels),
+                # Which placement's features it was fitted on: a fit on the
+                # browser's features is a different estimate, not the same one.
+                "feature_source": feature_source},
         solution=identity,
     )
 
     return {
         "status": "ok",
+        "feature_source": feature_source,
         "alpha": fit.alpha,
         "n_calibration_targets": fit.n_calibration_targets,
         "n_validation_targets": fit.n_validation_targets,

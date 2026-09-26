@@ -217,9 +217,8 @@ export function checkOutput(dir, studyId, { chinrest = null } = {}) {
     if (session.geometry?.reason !== 'not_in_protocol') failures.push(`geometry reason ${session.geometry?.reason}, expected not_in_protocol`);
   }
 
-  if (studyId === 'm0') {
-    // The pilot protocol: chinrest, 13-point calibration, 5-point validation,
-    // the 60 s fixation, read-aloud and free speech, with the microphone on.
+  if (studyId === 'm0' || studyId === 'in-browser-example') {
+    // Both run the chinrest, the 13-point calibration and 5-point validation.
     const g = session.geometry ?? {};
     facts.geometry = g.ok ? `${(g.viewing_distance_mm / 10).toFixed(1)} cm at ${g.px_per_mm?.toFixed(3)} px/mm`
       : `refused (${g.reason})`;
@@ -238,6 +237,10 @@ export function checkOutput(dir, studyId, { chinrest = null } = {}) {
     facts.validation_points = count('validation_point');
     if (facts.calibration_points !== 13) failures.push(`${facts.calibration_points} calibration points, expected 13`);
     if (facts.validation_points !== 5) failures.push(`${facts.validation_points} validation points, expected 5`);
+  }
+
+  if (studyId === 'm0') {
+    // m0 alone has the speech stages and the microphone.
     for (const t of ['fixation', 'speech_read', 'speech_free']) {
       if (count(t) !== 1) failures.push(`${count(t)} ${t} events, expected 1`);
     }
@@ -248,7 +251,20 @@ export function checkOutput(dir, studyId, { chinrest = null } = {}) {
 
   const video = readdirSync(dir).find((f) => /^capture\.(webm|mp4)$/.test(f));
   facts.video = video ? `${video} ${(statSync(join(dir, video)).size / 1e6).toFixed(1)} MB` : null;
-  if (!video) failures.push('no video downloaded');
+  facts.tier = session.consent?.tier ?? null;
+
+  if (facts.tier === 'features_in_browser') {
+    // The participant was told the video never leaves the device: there must
+    // be no recording at all, and the gaze features must be in the chunks.
+    if (video) failures.push(`${video} was downloaded under features_in_browser`);
+    const start = events.find((e) => e.event_type === 'recording_start');
+    if (start?.metadata?.media_recorded !== false) {
+      failures.push('recording_start does not say that no media was recorded');
+    }
+    const chunks = JSON.parse(readFileSync(join(dir, 'browser_chunks.json'), 'utf8'));
+    facts.gaze_chunks = chunks.filter((c) => c.source?.startsWith('gaze.mediapipe_features')).length;
+    if (!facts.gaze_chunks) failures.push('no browser gaze-feature chunks — gaze would be unmeasurable');
+  } else if (!video) failures.push('no video downloaded');
   else if (statSync(join(dir, video)).size < 100_000) failures.push('video is implausibly small');
   return { facts, failures };
 }

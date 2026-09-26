@@ -39,6 +39,9 @@ export class MediaPipeBlendshapesLive {
     this._landmarker = null;
     this._params = null;
     this._outputCb = null;
+    // Other engines that read the same landmarker result (gaze features), so
+    // a second engine costs no second inference per frame.
+    this._resultCbs = [];
 
     // Quality accounting. REPORT.md §2.1 measured webcam gaze at 9-39 fps,
     // jittered several-fold across participants — the rate is device- and
@@ -93,6 +96,11 @@ export class MediaPipeBlendshapesLive {
     this._outputCb = cb;
   }
 
+  /** Receive each frame's raw landmarker result, with its timestamp and frame size. */
+  onResult(cb) {
+    this._resultCbs.push(cb);
+  }
+
   /**
    * Feed one frame.
    *
@@ -110,6 +118,13 @@ export class MediaPipeBlendshapesLive {
     this._framesSeen += 1;
 
     const result = this._landmarker.detectForVideo(frame, ts.native_ts);
+    if (this._resultCbs.length) {
+      const size = {
+        width: frame.videoWidth ?? frame.displayWidth ?? frame.width,
+        height: frame.videoHeight ?? frame.displayHeight ?? frame.height,
+      };
+      for (const cb of this._resultCbs) cb(result, ts, size);
+    }
 
     const signals = [];
     const events = [];

@@ -34,13 +34,27 @@ churns on prose gets ignored.
 | `disclosure.secondary_use` | 45 CFR 46.116 |
 | `disclosure.contact` | 45 CFR 46.116(b)(7) — a route back to a human |
 | `disclosure.irb_reference` | the ethics committee reference (REC or IRB); required for `participants`, and never an empty string |
-| `consent_tiers` | which of the three tiers this study offers |
+| `consent_tiers` | which of the four tiers this study offers — see *Consent tiers* below |
 | `modalities` | opt-in, enumerated |
 | `calibration.n_points` | required when `gaze` is enabled; ≥ 5 |
 
 None of these are defaulted. A study missing a retention period is not a study
 with a sensible default retention period: the element has to be *stated*, and
 inventing one would put an unreviewed promise in front of a participant.
+
+## Consent tiers
+
+| tier | recording | what can be measured |
+|---|---|---|
+| `features_in_browser` | never made — the camera feeds the in-browser engines only | gaze features and blendshapes, computed on the participant's device. Only `gaze` and `face` may be enabled; a study offering it with `voice` or `respiration` is refused, because those need the recording on a server |
+| `features_only` | made, analysed on the server, then deleted | everything |
+| `media_retained` | kept | everything, and it can be re-analysed |
+| `media_plus_transcript` | kept, plus a transcript of speech | everything, plus the words |
+
+`features_in_browser` is the strongest privacy option (research/pass5): the
+video never leaves the device. The cost is that the AU engines, voice and
+respiration cannot run, and nothing can ever be re-checked against a recording.
+`studies/in-browser-example.json` shows it.
 
 ## Who a study may be run on: `audience`
 
