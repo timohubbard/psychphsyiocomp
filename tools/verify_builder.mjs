@@ -8,6 +8,7 @@
  *
  * It checks that a participant study is refused until its ethics fields are
  * filled, that a picture uploads and becomes a hashed stimulus item, that the
+ * participant's journey shows that picture and leads back to its task, that the
  * consent preview is the capture page's wording, that the saved file is what
  * was built, and that a study with sessions cannot be edited in place — only
  * saved as a new id.
@@ -70,6 +71,17 @@ async function main() {
     const item = built.tasks.find((t) => t.type === 'stimuli').items[0];
     check('the upload became a hashed stimulus item', /^[0-9a-f]{64}$/.test(item.sha256) && item.src.startsWith('stimuli/'),
       `${item.stimulus_id} ${item.src} ${item.sha256.slice(0, 12)}…`);
+
+    // The journey shows the new block, with the uploaded picture itself, and it leads back to its task.
+    await until(`[...document.querySelectorAll('.fb[data-goto] .thumbs img')].some((i) => i.naturalWidth > 0)`,
+      'the journey thumbnail', 10000);
+    const goto = await js(`(() => { const b = [...document.querySelectorAll('.fb[data-goto]')].find((x) => x.querySelector('.thumbs img'));
+      b.click(); const card = document.querySelector('.task[data-task="' + b.dataset.goto + '"]');
+      return JSON.stringify({ blocks: document.querySelectorAll('.fb').length, flashed: !!card?.classList.contains('flash'),
+        type: JSON.parse(document.getElementById('json').value).tasks[Number(b.dataset.goto)]?.type }); })()`);
+    const g = JSON.parse(goto);
+    check('the journey shows it, and leads back to its task', g.flashed && g.type === 'stimuli',
+      `${g.blocks} blocks; click → task card (${g.type})`);
 
     const consent = await js(`document.querySelector('.preview')?.innerText ?? ''`);
     check('the consent preview is the capture page’s wording',

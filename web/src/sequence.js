@@ -280,18 +280,21 @@ export function buildSequence(study, seed = (Date.now() >>> 0), { condition = nu
   // study with conditions always has an arm by the time this runs (it is
   // assigned before consent); with none, arm-limited tasks run for nobody,
   // which validation already refuses as a study.
+  // Each task keeps its position in study.tasks, so every stage it produces
+  // can say which task it came from (`taskIndex`) — the study builder draws
+  // the flow from that. The default protocol has no study tasks: null.
   const tasks = (study?.tasks?.length
-    ? study.tasks
-    : DEFAULT_TASKS.filter((t) => taskIsWanted(t, mods)))
-    .filter((t) => t.arms === undefined || (condition !== null && t.arms.includes(condition)));
+    ? study.tasks.map((t, i) => [t, i])
+    : DEFAULT_TASKS.filter((t) => taskIsWanted(t, mods)).map((t) => [t, null]))
+    .filter(([t]) => t.arms === undefined || (condition !== null && t.arms.includes(condition)));
 
   const body = [];
-  for (const task of tasks) {
+  for (const [task, taskIndex] of tasks) {
     const stages = stagesForTask(task, { calPoints, valPoints, wantsGaze, wantsVoice, seed });
     if (stages === null) {
       throw new Error(`study asks for an unknown task type: ${task.type}`);
     }
-    body.push(...stages);
+    body.push(...(taskIndex === null ? stages : stages.map((s) => ({ ...s, taskIndex }))));
   }
 
   const parts = countParts(body, calPoints.length, valPoints.length);

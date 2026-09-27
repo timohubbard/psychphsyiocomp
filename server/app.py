@@ -177,6 +177,8 @@ class Handler(SimpleHTTPRequestHandler):
 
         if path.startswith("/src/"):
             return self._capture_module(path)
+        if path.startswith("/stimuli/"):
+            return self._stimulus_file(path)
         if not path.startswith("/api/"):
             return super().do_GET()
 
@@ -321,6 +323,26 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Content-Type", "text/javascript; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+        return None
+
+    def _stimulus_file(self, path: str):
+        """A study's picture, read-only, for the thumbnails in the builder's journey.
+
+        Pictures only: the journey marks a video with ▶ rather than loading it.
+        """
+        name = path[len("/stimuli/"):]
+        kinds = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
+        ctype = kinds.get(Path(name).suffix.lower())
+        file = STUDIES_ROOT / "stimuli" / name
+        if (ctype is None or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,80}", name)
+                or ".." in name or not file.is_file()):
+            return self._json({"error": "not_found", "detail": path}, status=404)
+        body = file.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
         return None

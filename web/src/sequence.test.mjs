@@ -696,3 +696,25 @@ test('a task limited to an arm runs only for that arm', () => {
   assert.deepEqual(fixations('A'), [1000]);
   assert.deepEqual(fixations('B'), [1000, 2000]);
 });
+
+test('each stage names the study task it came from, skipping tasks another arm runs', () => {
+  const study = {
+    modalities: ['gaze', 'face'],
+    calibration: { n_points: 5 },
+    conditions: { arms: ['A', 'B'] },
+    tasks: [
+      { type: 'calibration' },
+      { type: 'rest_fixation', duration_ms: 1000, arms: ['B'] },
+      { type: 'rest_fixation', duration_ms: 2000 },
+    ],
+  };
+  const tagged = (arm) => buildSequence(study, 1, { condition: arm })
+    .filter((s) => s.taskIndex !== undefined).map((s) => `${s.taskIndex}:${s.type}`);
+  assert.ok(tagged('A').includes('0:calibration_point'));
+  assert.ok(!tagged('A').some((t) => t.startsWith('1:')), 'arm A never runs task 1');
+  assert.ok(tagged('B').includes('1:fixation'));
+  assert.ok(tagged('A').includes('2:fixation'));
+  // Bracketing stages (overview, flashes) belong to no task.
+  const untagged = buildSequence(study, 1, { condition: 'A' }).filter((s) => s.taskIndex === undefined);
+  assert.ok(untagged.some((s) => s.type === 'sync_clapper'));
+});

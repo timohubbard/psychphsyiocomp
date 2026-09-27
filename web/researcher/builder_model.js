@@ -75,10 +75,3 @@ export function stimulusIdFrom(filename) {
   const slug = stem.replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^[^A-Za-z0-9]+/, '').slice(0, 64);
   return slug || 'stimulus';
 }
-
-/** Counts of each stage type in a built sequence, in first-seen order. */
-export function summarise(sequence) {
-  const counts = new Map();
-  for (const s of sequence) counts.set(s.type, (counts.get(s.type) ?? 0) + 1);
-  return [...counts.entries()].map(([type, n]) => ({ type, n }));
-}

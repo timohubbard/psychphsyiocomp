@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { validateStudy } from '../src/study.js';
 import {
-  TASK_TYPES, blankStudy, getPath, parseList, setPath, stimulusIdFrom, summarise,
+  TASK_TYPES, blankStudy, getPath, parseList, setPath, stimulusIdFrom,
 } from './builder_model.js';
 
 test('a blank study is valid as it stands', () => {
@@ -38,9 +38,4 @@ test('lists and stimulus ids are cleaned up', () => {
   assert.deepEqual(parseList(' A, B ,,C '), ['A', 'B', 'C']);
   assert.equal(stimulusIdFrom('My Forest (1).png'), 'My_Forest_1_');
   assert.equal(stimulusIdFrom('.png'), 'stimulus');
-});
-
-test('summarise counts stage types in order', () => {
-  assert.deepEqual(summarise([{ type: 'a' }, { type: 'b' }, { type: 'a' }]),
-    [{ type: 'a', n: 2 }, { type: 'b', n: 1 }]);
 });

@@ -12,9 +12,9 @@
 import { MODALITIES, SPECIAL_CATEGORY_MODALITIES, BROWSER_MODALITIES, contentHash,
   protocolFor, validateStudy } from '/src/study.js';
 import { CONSENT_TIERS, analysisNotice, joinAnd, withdrawalText } from '/src/consent.js';
-import { buildSequence, estimateDurationMs } from '/src/sequence.js';
-import { TASK_TYPES, blankStudy, getPath, parseList, setPath, stimulusIdFrom,
-  summarise } from './builder_model.js';
+import { buildSequence, estimateDurationMs, wantsChinrest } from '/src/sequence.js';
+import { TASK_TYPES, blankStudy, getPath, parseList, setPath, stimulusIdFrom } from './builder_model.js';
+import { KINDS, flowModels } from './flow.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -133,7 +133,7 @@ function taskCard(t, i, arms) {
   if (t.type === 'stimuli') body = stimuliBody(t, i);
   const armBoxes = arms.length ? `<div class="muted">Only for arms:
     ${arms.map((a) => check(a, at('arms'), a)).join('')}</div>` : '';
-  return `<div class="task"><div class="head"><b>${i + 1}. ${esc(TASK_TYPES[t.type]?.label ?? t.type)}</b>
+  return `<div class="task" data-task="${i}"><div class="head"><b>${i + 1}. ${esc(TASK_TYPES[t.type]?.label ?? t.type)}</b>
       <button data-move="${i}" data-dir="-1">↑</button><button data-move="${i}" data-dir="1">↓</button>
       <button data-remove='${esc(JSON.stringify(['tasks', i]))}'>✕</button></div>${body}${armBoxes}</div>`;
 }
@@ -225,6 +225,17 @@ function onChange(ev) {
 }
 
 function onClick(ev) {
+  const block = ev.target.closest('[data-goto]');
+  if (block) {
+    // From the diagram to the task it came from.
+    const card = document.querySelector(`.task[data-task="${block.dataset.goto}"]`);
+    if (card) {
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      card.classList.add('flash');
+      setTimeout(() => card.classList.remove('flash'), 1200);
+    }
+    return;
+  }
   const el = ev.target.closest('button');
   if (!el) return;
   if (el.dataset.remove) {
@@ -302,16 +313,12 @@ async function refresh() {
   let hash = '';
   try { hash = await contentHash(study); } catch { /* shown as blank */ }
 
-  let seqHtml = '';
   const arms = study.conditions?.arms?.length ? study.conditions.arms : [null];
-  for (const arm of arms) {
-    try {
-      const seq = buildSequence(study, 1, { condition: arm });
-      seqHtml += `<div class="muted">${arm ? `arm ${esc(arm)} · ` : ''}about ${Math.round(estimateDurationMs(seq) / 60000 * 10) / 10} min</div>
-        <table class="seq">${summarise(seq).map((r) => `<tr><td>${esc(r.type)}</td><td class="mono">${r.n}</td></tr>`).join('')}</table>`;
-    } catch (err) {
-      seqHtml += `<div class="bad">${esc(err.message)}</div>`;
-    }
+  let seqHtml;
+  try {
+    seqHtml = flowHtml(flowModels(study, { buildSequence, estimateDurationMs, wantsChinrest }));
+  } catch (err) {
+    seqHtml = `<div class="bad">${esc(err.message)}</div>`;
   }
 
   let consentHtml = '<div class="muted">Shown once the study is valid.</div>';
@@ -343,11 +350,52 @@ async function refresh() {
     <div class="muted">content hash <span class="mono" id="hash">${esc(hash)}</span></div>
     <p><button class="primary" id="btnSave" ${valid ? '' : 'disabled'}>Save studies/${esc(study.study_id)}.json</button></p>
     <div id="saveResult"></div>
-    <h2>What participants do</h2>${seqHtml}
+    <h2>The participant's journey</h2>${seqHtml}
     <h2>What participants are told</h2>${consentHtml}
     <h2>JSON</h2>
     <textarea id="json">${esc(JSON.stringify(study, null, 2))}</textarea>
     <div class="row"><button id="btnApplyJson">Apply edited JSON</button><span class="bad" id="jsonError"></span></div>`;
+}
+
+/**
+ * The flow diagram: one lane per arm. A to-scale strip of the recording, then
+ * the journey top to bottom — before, during, after — each recording block
+ * coloured by what it measures, taller for longer, and clickable to its task.
+ */
+function flowHtml(lanes) {
+  const minutes = (ms) => Math.round(ms / 6000) / 10;
+  const used = new Set(lanes.flatMap((l) => l.blocks.map((b) => b.kind)));
+  const legend = Object.entries(KINDS).filter(([k]) => used.has(k))
+    .map(([, v]) => `<span class="chip"><i style="background:${v.color}"></i>${esc(v.label)}</span>`).join('');
+  const card = (b, total) => {
+    const clickable = b.taskIndex !== null && b.taskIndex !== undefined;
+    const h = Math.round(30 + Math.min(1, b.ms / Math.max(total, 1)) * 170);
+    const thumbs = (b.items ?? []).map((it) => (it.kind === 'image'
+      ? `<img src="/${esc(it.src)}" alt="${esc(it.id)}" title="${esc(it.id)}">`
+      : `<span class="vid" title="${esc(it.id)}">▶</span>`)).join('');
+    return `<div class="fb${clickable ? ' click' : ''}" ${clickable ? `data-goto="${b.taskIndex}"` : ''}
+        style="border-left-color:${KINDS[b.kind]?.color ?? '#555'}; min-height:${h}px">
+      <div class="fh"><b>${esc(b.title)}</b><span class="mono">${b.ms ? esc(fmtMs(b.ms)) : ''}</span></div>
+      ${b.detail ? `<div class="muted">${esc(b.detail)}</div>` : ''}
+      ${thumbs ? `<div class="thumbs">${thumbs}</div>` : ''}</div>`;
+  };
+  const small = (b) => `<div class="fs" style="border-left-color:${KINDS[b.kind].color}">
+      <b>${esc(b.title)}</b> <span class="muted">${esc(b.detail)}</span></div>`;
+  return `<div class="legend">${legend}</div>
+    <div class="lanes" style="grid-template-columns: repeat(${lanes.length}, minmax(0, 1fr))">
+    ${lanes.map((l) => `<div class="lane">
+      <div class="lh">${l.arm ? `Arm <b>${esc(l.arm)}</b> · ` : ''}about ${minutes(l.totalMs)} min</div>
+      <div class="strip">${l.blocks.map((b) => `<i style="flex:${Math.max(b.ms, 1)};background:${KINDS[b.kind]?.color}"
+        title="${esc(b.title)}"></i>`).join('')}</div>
+      <div class="phase">Before recording</div>${l.before.map(small).join('')}
+      <div class="phase">Recording · ${esc(l.records)}</div>${l.blocks.map((b) => card(b, l.totalMs)).join('')}
+      <div class="phase">After</div>${l.after.map(small).join('')}
+    </div>`).join('')}</div>`;
+}
+
+function fmtMs(ms) {
+  const s = Math.round(ms / 1000);
+  return s < 90 ? `${s} s` : `${Math.round(s / 6) / 10} min`;
 }
 
 async function save(overwrite) {

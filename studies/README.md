@@ -26,8 +26,21 @@ Beside the form, live:
 
 - whether the capture page will accept the study, with every reason if not;
 - its content hash;
-- the task sequence and its length, per condition;
+- **the participant's journey**: what they go through, in order, per condition;
 - **the consent text a participant will read**.
+
+The journey has one lane per condition, side by side, so a difference between
+arms shows at a glance. Each lane has a strip across the top with the session
+to scale. Below it:
+
+- what happens before recording (consent, camera, the screen-distance check);
+- the recording, one block per task, sized by its length and coloured by kind,
+  with thumbnails of its pictures and videos;
+- what happens after (upload or download, and the panel's completion link).
+
+Click a block to jump to its task in the form. It is drawn from the same
+`buildSequence` the capture page runs, so it cannot show an order the
+participant would not get.
 
 These come from the capture page's own modules, so the builder cannot call a
 study valid that a participant's page would refuse.
