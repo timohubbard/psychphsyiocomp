@@ -1,0 +1,64 @@
+# Caddy in front of the capture page, for remote collection.
+#
+# Caddy is here for three things: HTTPS (automatic, from Let's Encrypt — the
+# camera needs a secure context), headers, and logs that do not undo the
+# pseudonymisation. It proxies to ONE local service, tools/serve.mjs --ingest
+# on 127.0.0.1:5173, which serves only the page code and forwards /ingest/* to
+# server/ingest.py with the token. The researcher app (5174) and the ingest
+# service (5175) are never proxied: reach the app over SSH (deploy/README.md).
+#
+# NOT YET RUN: written 2026-09-27 on a machine without Caddy. Validate with
+# `caddy validate --config /etc/caddy/Caddyfile` before starting it, and run
+# `npm run deploy:check -- https://<domain>` from outside afterwards.
+#
+# The domain comes from the environment (deploy/env.example).
+
+{$MYIMOTIONS_DOMAIN} {
+	encode zstd gzip
+
+	# A 10-minute 720p capture at the recorder's 4 Mbps is ~300 MB. ingest.py
+	# caps each file itself (2 GB for a capture); this is the outer bound.
+	request_body /ingest/* {
+		max_size 2GB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		# The page asks for the camera and microphone itself; nothing else may.
+		Permissions-Policy "camera=(self), microphone=(self), geolocation=()"
+		-Server
+	}
+
+	reverse_proxy 127.0.0.1:5173
+
+	# THE LOG MUST NOT HOLD A PANEL ID. A Prolific link is
+	# /?study=…&PROLIFIC_PID=…&STUDY_ID=…&SESSION_ID=…, and a default access log
+	# would copy every participant's raw ID into a file the pseudonymisation
+	# (server/pseudonym.py) never sees. The query parameters are deleted, the
+	# Referer (which repeats the URL) is dropped, and client addresses are
+	# truncated — an IP address is personal data too.
+	log {
+		output file /var/log/caddy/myimotions.log {
+			roll_size 50MiB
+			roll_keep 5
+			roll_keep_for 720h
+		}
+		format filter {
+			wrap json
+			fields {
+				request>uri query {
+					delete PROLIFIC_PID
+					delete STUDY_ID
+					delete SESSION_ID
+					delete pid
+				}
+				request>headers>Referer delete
+				request>headers>Cookie delete
+				request>remote_ip ip_mask 16 32
+				request>client_ip ip_mask 16 32
+			}
+		}
+	}
+}

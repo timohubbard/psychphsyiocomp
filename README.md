@@ -150,16 +150,27 @@ session** (83% of fixations on target at 4.5°, need 90%; 3.2° to target vs
   stage (every target within ±0.03). The only systematic error is +0.087
   vertically, on the channel already tiered low.
 
-#### Deploying for remote collection (not done)
+#### Deploying for remote collection (written, not yet run on a server)
 
-Everything runs on localhost. To collect from participants' own machines:
+**`deploy/README.md` is the full procedure.** One Linux host:
+
+- Caddy, for HTTPS and headers;
+- systemd units for the capture server, the ingest service, and a daily
+  retention timer;
+- the researcher app, reached over an SSH tunnel.
+
+`npm run deploy:check -- https://<domain>` then checks the deployment from
+outside. It was rehearsed against local servers, where it caught an ingest bug
+(a rejected upload left an empty folder in the inbox), now fixed. The Caddy
+config strips Prolific IDs and client addresses from its access logs: a default
+log would have held every participant's raw panel ID. What remains is a host,
+a domain and an approved study. To run it locally:
 
 1. Start the ingest service: `INGEST_TOKEN=<secret ≥16 chars> npm run ingest`.
    It writes to `tempdata/inbox/<session_id>/`.
 2. Start the capture server with the same token: `npm run serve -- --ingest`.
-3. Put both behind an HTTPS reverse proxy on a host you control. Camera access
-   needs a secure context. Both processes bind 127.0.0.1 on purpose and are
-   not meant to face the internet directly.
+3. Both bind 127.0.0.1 on purpose. Put them behind HTTPS as
+   `deploy/README.md` describes.
 
 The participant then sees *Send to the study* beside *Download*. The ingest
 service:

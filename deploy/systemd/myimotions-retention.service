@@ -1,0 +1,19 @@
+# One retention sweep (server/retention.py): deletes what has passed the period
+# each participant was shown, and records the run. Started by the .timer.
+# NOT YET RUN — check with `systemd-analyze verify` on the host.
+
+[Unit]
+Description=myimotions retention sweep
+
+[Service]
+Type=oneshot
+User=myimotions
+Group=myimotions
+WorkingDirectory=/opt/myimotions
+ExecStart=/usr/bin/node tools/py.mjs server/retention.py sweep --apply --record
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/myimotions/tempdata /opt/myimotions/out

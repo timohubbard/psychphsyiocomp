@@ -124,23 +124,21 @@ def receive_file(inbox: Path, out: Path, session_id: str, name: str,
             digest.update(block)
             received += len(block)
     if received != length:
-        part.unlink(missing_ok=True)
+        _discard(part, folder)
         raise IngestError(400, f"body ended after {received} of {length} bytes")
 
     if name == "session.json":
         try:
             manifest = json.loads(part.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError):
-            part.unlink(missing_ok=True)
+            _discard(part, folder)
             raise IngestError(400, "session.json is not JSON") from None
         if manifest.get("session_id") != session_id:
-            part.unlink(missing_ok=True)
+            _discard(part, folder)
             raise IngestError(400, "session.json names a different session")
         refusal = refusal_for(out, session_id, manifest)
         if refusal:
-            part.unlink(missing_ok=True)
-            if not any(folder.iterdir()):
-                folder.rmdir()
+            _discard(part, folder)
             raise IngestError(410, refusal)
 
     os.replace(part, folder / name)
@@ -148,6 +146,21 @@ def receive_file(inbox: Path, out: Path, session_id: str, name: str,
     status["updated_utc"] = datetime.now(timezone.utc).isoformat()
     _write_status(folder, status)
     return {"stored": name, "bytes": received}
+
+
+def _discard(part: Path, folder: Path) -> None:
+    """Drop a refused file, and its session folder if the refusal left it empty.
+
+    Every refusal path, not just one: a folder left behind by a rejected upload
+    is litter the retention sweep then has to reason about, and repeated junk
+    requests would fill the inbox with it.
+    """
+    part.unlink(missing_ok=True)
+    try:
+        if folder.exists() and not any(folder.iterdir()):
+            folder.rmdir()
+    except OSError:
+        pass
 
 
 def complete(inbox: Path, session_id: str) -> dict[str, Any]:

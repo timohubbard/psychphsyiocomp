@@ -1,0 +1,26 @@
+# Receives uploaded bundles (server/ingest.py). Localhost only; reached through
+# the capture server's /ingest proxy, which adds INGEST_TOKEN.
+# NOT YET RUN — check with `systemd-analyze verify` on the host.
+
+[Unit]
+Description=myimotions ingest (uploaded session bundles)
+After=network.target
+
+[Service]
+User=myimotions
+Group=myimotions
+WorkingDirectory=/opt/myimotions
+EnvironmentFile=/etc/myimotions/env
+ExecStart=/opt/myimotions/.venv/bin/python server/ingest.py
+Restart=on-failure
+
+# Writes only the inbox and out/ (the tombstone check reads out/).
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/myimotions/tempdata /opt/myimotions/out
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -37,6 +37,7 @@
     "smoke:capture": "node tools/smoke_capture.mjs",
     "verify:playback": "node tools/verify_playback.mjs",
     "verify:playback:control": "node tools/verify_playback.mjs --control",
-    "verify:cohort-view": "node tools/verify_cohort_view.mjs"
+    "verify:cohort-view": "node tools/verify_cohort_view.mjs",
+    "deploy:check": "node tools/deploy_check.mjs"
   }
 }

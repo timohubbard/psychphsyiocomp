@@ -1,0 +1,25 @@
+# The capture page (tools/serve.mjs --ingest), behind Caddy. Serves only web/,
+# engines/ and studies/, binds 127.0.0.1, and proxies /ingest/* with the token.
+# NOT YET RUN — check with `systemd-analyze verify` on the host.
+
+[Unit]
+Description=myimotions capture page
+After=network.target myimotions-ingest.service
+Wants=myimotions-ingest.service
+
+[Service]
+User=myimotions
+Group=myimotions
+WorkingDirectory=/opt/myimotions
+EnvironmentFile=/etc/myimotions/env
+ExecStart=/usr/bin/node tools/serve.mjs --ingest
+Restart=on-failure
+
+# Reads the repo; writes nothing.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

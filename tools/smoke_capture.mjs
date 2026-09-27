@@ -40,6 +40,9 @@ const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, all) =>
 }, []));
 const STUDY = args.study ?? 'au-expressions';
 const PORT = Number(args.port ?? 5173);
+// --base runs the whole participant flow against a deployment instead of the
+// local dev server, e.g. --base https://study.example.ac.uk (deploy/README.md).
+const BASE = String(args.base ?? `http://localhost:${PORT}`).replace(/\/$/, '');
 const OUT = resolve(args.out ?? join('tempdata', `smoke-${STUDY}`));
 const TIMEOUT_MS = Number(args['timeout-s'] ?? 900) * 1000;
 
@@ -79,7 +82,7 @@ async function main() {
     // and the one that dropped the query string.
     // --query adds panel parameters the way Prolific appends them.
     const extra = typeof args.query === 'string' ? `&${args.query}` : '';
-    const url = `http://localhost:${PORT}/?study=${encodeURIComponent(STUDY)}${extra}`;
+    const url = `${BASE}/?study=${encodeURIComponent(STUDY)}${extra}`;
     log(`opening ${url}`);
     await page.send('Page.navigate', { url });
 

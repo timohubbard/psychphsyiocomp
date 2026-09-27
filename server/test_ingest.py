@@ -135,3 +135,12 @@ def test_it_cannot_complete_without_the_manifest_and_chunks(server):
 
 def test_the_inbox_is_a_retention_root_by_default():
     assert retention.ROOT / "tempdata" / "inbox" in retention.default_media_roots()
+
+
+def test_a_refused_first_upload_leaves_no_folder_behind(server):
+    """Found by deploy_check's probe: a rejected manifest used to leave an
+    empty session folder in the inbox."""
+    base, inbox, _ = server
+    assert call(base, "PUT", "/ingest/s1/session.json", manifest(sid="s2"))[0] == 400
+    assert call(base, "PUT", "/ingest/s2/session.json", b"not json")[0] == 400
+    assert not (inbox / "s1").exists() and not (inbox / "s2").exists()

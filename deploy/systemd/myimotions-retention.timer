@@ -1,0 +1,14 @@
+# Daily retention sweep. Persistent: a run missed while the host was down
+# happens at next boot rather than being skipped — the promise to participants
+# is a date, not "if the server was up at 03:00".
+
+[Unit]
+Description=Daily myimotions retention sweep
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+RandomizedDelaySec=10m
+
+[Install]
+WantedBy=timers.target
