@@ -312,9 +312,11 @@ def decide(lever: Lever, units: list[Unit], base: dict[str, Score], mine: dict[s
     if len(worse) > rule.max_worse_units or any(d_prim[s] > rule.max_worse_deg for s in worse):
         reasons.append(f"worse on {', '.join(f'{s} (+{d_prim[s]:.2f} deg)' for s in worse)}")
     base_mean = float(np.mean(list(base_prim.values())))
-    if gain < rule.min_gain_deg or gain < rule.min_gain_fraction * base_mean:
-        reasons.append(f"mean gain {gain:+.2f} deg is below {rule.min_gain_deg} deg "
-                       f"and {rule.min_gain_fraction:.0%} of {base_mean:.2f}")
+    bar = max(rule.min_gain_deg, rule.min_gain_fraction * base_mean)
+    if gain < bar:
+        reasons.append(f"mean gain {gain:+.2f} deg is under the bar of {bar:.2f} deg "
+                       f"(the larger of {rule.min_gain_deg} deg and {rule.min_gain_fraction:.0%} "
+                       f"of the default's {base_mean:.2f})")
     if not d_sec:
         reasons.append("no secondary figure to corroborate it")
     elif np.mean(list(d_sec.values())) >= 0:

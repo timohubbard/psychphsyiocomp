@@ -62,9 +62,10 @@ What it still needs is a deployment, an ethics approval and people (see
 *Picking this up*).
 
 `npm run check` → licence inventory, 917 tests (266 JS + 651 Python), M0 gate
-PASS. `npm run verify:gaze` → GAZE GATE PASS on the pilot, **FAIL on the second
-session** (83% of fixations on target at 4.5°, need 90%; 3.2° to target vs
-1.5°) — see "The second real session" below.
+PASS. `npm run verify:gaze` now gates on **held-out targets only** (2026-09-27):
+PASS on the pilot (5/5), **FAIL on the other three** (4/5, 4/5, 3/5). The old
+gate pooled in the 13 targets the model was fitted on. See *The gaze
+benchmark*.
 
 | | |
 |---|---|
@@ -253,13 +254,16 @@ can be done at a keyboard.
    *Protocol* line names it, record (~4.5 min), Download into its own
    `tempdata/<folder>/`, then `npm run process -- tempdata/<folder> --out out
    --aus` (~18 min, almost all Py-Feat).
-3. **Why gaze failed its gate on the second session** (3.2° vs 1.5°). Needs
-   more sessions with lighting, distance and frame rate varied one at a time.
-   Frame rate first: the failing session and the one after it captured at
-   ~20 fps against a 30 fps request. Every session at ~30 fps has passed: the
-   pilot at 29.9, and both 2026-09-27 sessions at 29.9 and 30.0 (2.26° and
-   4.44°). This is suggestive, not controlled — distance differed too (45.7 vs
-   38.8 cm).
+3. **Gaze accuracy.** On held-out targets only the pilot passes. The benchmark
+   (`npm run bench:gaze`, *The gaze benchmark* below) tested eight cheap
+   changes to the estimator and none passed the pre-registered rule.
+   - The frame-rate story no longer holds: two ~30 fps sessions also fail on
+     held-out targets.
+   - What would help most now is **one more in-browser session**. Turning pose
+     off for browser features is the only candidate: it improved both browser
+     sessions by 0.82° on average, but the rule needs three.
+   - After that, a better estimator (L2CS-Net, item 5), not further tuning of
+     this one.
 4. **Respiration validation** against an RIP belt, before any rate is emitted.
 5. L2CS-Net fine-tune (not started; its gaze datasets carry research-only EULAs
    someone has to accept by hand).
@@ -718,6 +722,71 @@ randomized" — and in the design matrix, which carries only iris terms plus hea
 pose. Eyelid aperture and inter-ocular distance are quality gates, not gaze
 signals, and handing a drifting quantity to a regression is an invitation.
 
+### The gaze benchmark (2026-09-27)
+
+`npm run bench:gaze` re-fits every calibrated session from the eye and head
+features already stored in `out/`. It needs no video and writes nothing.
+
+Each (session, feature source) is scored three ways:
+
+- **held-out error:** fit on 13 targets, error on 5;
+- **leave-one-target-out error** over all 18;
+- **held-out gate hit rate.**
+
+It refuses to report unless the shipped estimator reproduces every stored
+figure to 0.01°, and it does. The levers and the adoption rule were committed
+(`aa3cfce`) before the first run.
+
+Held-out error in degrees, with the held-out gate hit rate at 4.5°:
+
+| config | mujs3eue browser | mujrz6x7 server | mujrz6x7 browser | mud6trnr server | mucntzzh server* |
+|---|---|---|---|---|---|
+| shipped | 4.44 · 60% | 2.26 · 80% | 3.23 · 60% | 2.61 · 80% | 1.65 · 100% |
+| pose off | 3.91 · 60% | 2.53 · 80% | 2.11 · 80% | 2.88 · 100% | 1.30 · 80% |
+| trim 0.1 | 4.29 · 60% | 3.06 · 80% | 3.23 · 60% | 2.86 · 100% | 1.65 · 100% |
+| trim 0.4 | 4.35 · 60% | 2.23 · 80% | 3.30 · 60% | 2.73 · 100% | 1.90 · 100% |
+| per-frame fit | 4.22 · 60% | 2.27 · 100% | 4.95 · 40% | 3.56 · 60% | 1.59 · 100% |
+| dy ÷ openness | 4.53 · 60% | 2.00 · 100% | 3.37 · 60% | 3.56 · 80% | 1.98 · 100% |
+| clamp inputs | 4.44 · 60% | 2.27 · 80% | 3.21 · 60% | 2.65 · 100% | 1.62 · 100% |
+| bias correction | 5.19 · 80% | 2.25 · 100% | 2.29 · 100% | 2.98 · 80% | 1.85 · 100% |
+
+\* The pilot ran in a fixed presentation order, so it does not vote (see *The
+trap* above). Its column is shown for continuity.
+
+**The rule.**
+
+- Only seeded sessions vote, one vote per session.
+- At most one session may get worse, by no more than 0.10°.
+- The mean gain must be at least 0.2° and at least 8%.
+- The leave-one-target-out figure must agree, and no held-out gate may fall.
+- A lever for one feature source needs three sessions of that source.
+
+**Verdicts.**
+
+- **Nothing adopted.**
+- Pose off everywhere made s_mud6trnr 0.26° worse. Its mean gain of 0.23° is
+  under the bar of 0.26°, which is 8% of 3.26°.
+- Pose off for browser features only is a **candidate**. It improved both
+  browser sessions (−0.53° and −1.12°), and the leave-one-target-out figure
+  agrees on every voting session. But two sessions are not three.
+- The remaining six levers each made at least two sessions worse.
+
+**What the diagnostics say about why.**
+
+- **The error is not a shared offset.** The signed error points in different
+  directions on different sessions, and on the two feature sources of one
+  session: dy +1.95° from server features against −2.63° from browser
+  features. That is why subtracting it fails.
+- **Clamping moved the on-screen rate by one point at most.** So the
+  off-screen predictions do not come from iris values outside the calibrated
+  range.
+- **Not run, with the reasons recorded in `gaze_bench.NOT_TESTED`:**
+  - roll de-rotation: roll's SD in dwell windows is 0.15–0.27°;
+  - fixation-model tuning: the HMM already adapts to the sample rate.
+
+The honest reading is that this estimator is near what these features can
+give. The next gain is a better estimator, not a better-tuned ridge.
+
 ### Never single-engine on facial
 
 §2.2 is the most consequential finding in the evidence base for this modality:
@@ -904,12 +973,18 @@ different claim and took eight fixes to reach. It passes: four sources,
 ~796,000 rows, all aligned.
 
 **`npm run verify:gaze`** — the strongest check available, because the answer is
-known in advance. During each calibration dwell exactly one dot was on screen
-and the participant was told to look at it, so a working pipeline must put the
+known in advance. During each dwell exactly one dot was on screen and the
+participant was told to look at it, so a working pipeline must put the
 fixation there.
 
+Since 2026-09-27 the gate scores only the 5 validation targets the estimator
+never saw. Calibration rows are still printed, labelled "in-sample — fitted on,
+not evidence". The ladder below is the pilot under the **superseded**
+18-target gate, kept for continuity. Held out, the pilot scores 5/5 at 4.5°
+(1.66°). With n = 5, one miss is 20 points, and the gate says so.
+
 ```
-  pad (deg)   hit rate    mean error
+  pad (deg)   hit rate    mean error          (superseded: all 18 targets)
         0.0         0%      1.50 deg
         1.0        39%      1.50 deg
         2.0        78%      1.50 deg
@@ -1016,6 +1091,7 @@ npm run app                       # researcher app
 npm run verify:playback -- <id>   # does that recording play in real Chrome? (needs app --media)
 npm run check                     # licences + all tests + M0 gate
 npm run verify:gaze               # do fixations land on the right target?
+npm run bench:gaze                # re-fit every session's gaze from stored features; judge variants
 npm run verify:m0                 # M0 gate on a synthetic clip
 npm test / test:py / test:all     # JS / Python / both
 npm run licenses                  # licence inventory
