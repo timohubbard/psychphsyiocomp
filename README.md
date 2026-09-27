@@ -61,7 +61,7 @@ it can run a study end to end:**
 What it still needs is a deployment, an ethics approval and people (see
 *Picking this up*).
 
-`npm run check` → licence inventory, 873 tests (244 JS + 629 Python), M0 gate
+`npm run check` → licence inventory, 917 tests (266 JS + 651 Python), M0 gate
 PASS. `npm run verify:gaze` → GAZE GATE PASS on the pilot, **FAIL on the second
 session** (83% of fixations on target at 4.5°, need 90%; 3.2° to target vs
 1.5°) — see "The second real session" below.
@@ -100,6 +100,7 @@ session** (83% of fixations on target at 4.5°, need 90%; 3.2° to target vs
 | Per-stimulus gaze/AOI/face results, degree-blurred heatmaps, audited export zip (CSV + BIDS-style) | done — `npm run export -- <study>` |
 | Cohort page in the researcher app (funnel, epoch curves, heatmaps) | done — `/cohort.html`; `npm run verify:cohort-view` |
 | Study builder: form, live validation + consent preview, participant-journey diagram per condition, stimulus upload, used studies fixed | done — `/builder.html`; `tools/verify_builder.mjs` |
+| Codebook builder: defined categories, moments typed / gridded / sampled at random / picked from a recording, the rater's view, versions | done — `/codebook.html`; `npm run verify:codebook` |
 
 ### Picking this up
 
@@ -449,6 +450,39 @@ caught that.
 An item any rater left blank is dropped from the matrix rather than imputed.
 Filling it with the majority would manufacture agreement out of someone's
 uncertainty.
+
+**Building a codebook.** In the app, open **Codebooks** (`/codebook.html`).
+There you set:
+
+- **The categories.** Each needs a definition, because an undefined category is
+  where raters silently disagree. Their order sets the number key a rater
+  presses.
+- **The moments.** A moment is a time into each session's recording, and every
+  session coded with the codebook is asked about the same moments. There are
+  four ways to add them:
+  - typed times;
+  - an even grid;
+  - a random sample from a seed, which the page recommends: moments picked by
+    eye are the ones where something visibly happens, and a reference built
+    from those flatters every engine;
+  - picked while playing a session. This needs `--media`, and only works for
+    sessions whose participant kept the recording.
+
+On every edit the page asks the server whether the codebook is valid and what
+hash it would be saved under (`POST /api/codebooks?check=1`). The rules
+therefore live only in `annotation_store.py`. The preview draws the coding page's
+own buttons from `annotate_view.js`.
+
+Saving changed content makes a new version. Before you save, the page says how
+many label sets are filed under the earlier versions. Those stay where they are
+and are never pooled with the new one.
+
+Moments have one spelling everywhere: whole milliseconds as integers
+(`annotation_store.item_key`). Before this, the browser keyed a label `"1000"`
+while the store expected `"1000.0"` for a codebook written with floats, so every
+label from the coding page would have been refused. A moment listed twice is
+refused too, because its two labels would collapse into one and the rater could
+never be counted complete.
 
 The app serves recordings for this with `--media <dir>`, and refuses with a
 **403 rather than a 404** when the consent tier did not retain the recording —
@@ -954,7 +988,8 @@ server/
   app.py                        researcher app
 web/
   index.html, src/              participant capture page
-  researcher/                   researcher UI
+  researcher/                   researcher UI: sessions, cohort, study and codebook
+                                builders, annotation; site.css is shared by all
 studies/                        one JSON file per protocol, immutable once used
 tools/license-inventory/        "what would we rip out to go commercial?"
 ```

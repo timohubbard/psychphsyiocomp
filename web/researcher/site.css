@@ -73,3 +73,102 @@ th { text-align: left; color: var(--muted); font-weight: 550; padding: 7px 10px;
 th::first-letter { text-transform: uppercase; }
 td { padding: 6px 10px; border-bottom: 1px solid #1c2027; vertical-align: top; }
 tr:hover td { background: #14171c; }
+
+/* ---- the coding screen: what a rater sees for one moment (annotate_view.js) ---- */
+.cats { display: grid; gap: 8px; margin: 16px 0; }
+.cat { display: grid; grid-template-columns: 28px 1fr; gap: 10px; align-items: start;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+  cursor: pointer; text-align: left; width: 100%; color: inherit; font: inherit; }
+.cat:hover:not(:disabled) { border-color: var(--accent); background: var(--panel2); }
+.cat.chosen { border-color: var(--ok); }
+.cat .key { display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid var(--border2);
+  border-radius: 5px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cat.chosen .key { color: var(--ok); border-color: var(--ok); }
+.cat .lbl { font-weight: 600; display: inline; margin: 0; font-size: 13.5px; color: var(--fg); }
+.cat .desc { color: var(--muted); font-size: 12px; }
+
+/* ==== pages that edit something (the study and codebook builders) ==== */
+/* The header's controls, the save banner, section cards with labelled fields,
+   the problem list and the preview tabs. */
+/* ---- header: open a study, whether it is valid, and Save ---- */
+.open { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; }
+.open select { width: auto; min-width: 190px; }
+.dirty { font-size: 12px; color: var(--warn); display: inline-flex; align-items: center; gap: 6px; }
+.dirty[hidden] { display: none; }
+.dirty::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
+.status { border-radius: 999px; padding: 5px 12px 5px 10px; font-size: 12.5px; display: inline-flex;
+  align-items: center; gap: 7px; cursor: pointer; }
+.status::before { font-weight: 700; }
+.status.ok, .status.ok:hover:not(:disabled) { color: var(--ok); border-color: #2d5a42; background: #14241c; }
+.status.ok::before { content: "✓"; }
+.status.bad, .status.bad:hover:not(:disabled) { color: #f0a09d; border-color: #6b2f2d; background: #2a1716; }
+.status.bad::before { content: "!"; width: 16px; height: 16px; border-radius: 50%; background: var(--bad);
+  color: #fff; font-size: 11px; display: inline-flex; align-items: center; justify-content: center; }
+#btnSave .mono { opacity: .8; font-size: 11.5px; margin-left: 4px; }
+
+.banner { margin: 10px 18px 0; padding: 10px 40px 10px 14px; border-radius: var(--r); border: 1px solid var(--border2);
+  background: var(--panel2); font-size: 13px; position: relative; }
+.banner[hidden] { display: none; }
+.banner.ok { border-color: #2d5a42; background: #121d17; }
+.banner.warn { border-color: #5a4a1c; background: #1c1810; }
+.banner.bad { border-color: #6b2f2d; background: #1f1312; }
+.banner .x { position: absolute; top: 6px; right: 6px; }
+.banner p { margin: 4px 0; }
+
+/* ---- inputs fill their field here ---- */
+#form input, #form select, #form textarea, #side textarea { width: 100%; }
+#form input[type=checkbox], #form input[type=radio] { width: auto; }
+textarea { resize: vertical; min-height: 60px; }
+button.icon.rm:hover:not(:disabled) { color: var(--bad); }
+button.add { background: transparent; border-style: dashed; color: var(--muted); }
+button.add:hover { color: var(--fg); }
+
+/* sections */
+section.card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  margin: 0 0 18px; scroll-margin-top: 14px; }
+section.card > header { display: flex; gap: 12px; align-items: flex-start; padding: 14px 18px 12px;
+  border-bottom: 1px solid var(--border); }
+section.card > header .n { flex: 0 0 26px; height: 26px; border-radius: 50%; background: var(--panel3);
+  display: inline-flex; align-items: center; justify-content: center; font-size: 12px; color: var(--muted); margin-top: 1px; }
+section.card > header h3 { margin: 0; font-size: 15px; font-weight: 620; }
+section.card > header p { margin: 1px 0 0; font-size: 12.5px; color: var(--muted); }
+section.card > header .grow { flex: 1; }
+.badge { font-size: 11.5px; border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
+.badge.has { background: #3a1d1c; color: #f0a09d; }
+.badge.good { color: var(--ok); }
+.body { padding: 14px 18px 16px; }
+.secprob { margin: 0 18px 14px; }
+.secprob:empty { display: none; }
+
+/* fields: label above, help and problem below */
+.field { margin: 0 0 14px; }
+.field:last-child { margin-bottom: 0; }
+.field label { display: block; }
+.lbl { display: block; font-size: 12.5px; font-weight: 550; margin-bottom: 5px; color: #cfd3d8; }
+.req { font-style: normal; font-weight: 400; font-size: 11.5px; color: var(--faint); margin-left: 6px; }
+.field.invalid .req { color: var(--bad); }
+.help { font-size: 12px; color: var(--muted); margin-top: 5px; }
+.err { font-size: 12.5px; color: #f0a09d; margin-top: 5px; }
+.err:empty { display: none; }
+.field.invalid input, .field.invalid textarea, .field.invalid select { border-color: var(--bad); }
+.suffix { display: flex; align-items: stretch; }
+.suffix input { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.suffix i { font-style: normal; font-size: 12.5px; color: var(--muted); border: 1px solid var(--border2); border-left: 0;
+  border-radius: 0 7px 7px 0; padding: 7px 10px; background: var(--panel2); white-space: nowrap; }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 12px; }
+
+/* ---- side: problems, then journey / consent / JSON ---- */
+.problems { border: 1px solid #6b2f2d; background: #1f1312; border-radius: var(--r); padding: 10px 12px; margin-bottom: 14px; }
+.problems .ph { font-weight: 600; color: #f0a09d; font-size: 13px; margin-bottom: 4px; }
+ul.reasons { margin: 0; padding: 0; list-style: none; font-size: 12.5px; }
+ul.reasons li { padding: 5px 6px; border-radius: 6px; cursor: pointer; color: #e3c0be; }
+ul.reasons li:hover { background: #2c1a19; }
+ul.reasons li span { display: block; color: #a87f7c; font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; }
+.hashline { font-size: 12px; color: var(--muted); margin: 0 0 14px; }
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
+.tab { background: transparent; border: 0; border-bottom: 2px solid transparent; border-radius: 0; color: var(--muted);
+  padding: 8px 12px; font-size: 13px; margin-bottom: -1px; }
+.tab:hover:not(:disabled) { background: transparent; border: 0; border-bottom: 2px solid var(--border2); color: var(--fg); }
+.tab.on { color: var(--fg); border-bottom: 2px solid var(--accent); }
+.pane[hidden] { display: none; }

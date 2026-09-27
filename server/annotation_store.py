@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -134,10 +135,46 @@ def validate_codebook(codebook: Any) -> tuple[bool, list[str]]:
     items = codebook.get("items")
     if not isinstance(items, list) or not items:
         reasons.append("no items to annotate")
-    elif not all(isinstance(t, (int, float)) for t in items):
+    elif not all(isinstance(t, (int, float)) and not isinstance(t, bool) for t in items):
         reasons.append("items must be timestamps in milliseconds")
+    elif not all(math.isfinite(t) and t >= 0 for t in items):
+        reasons.append("items must be finite, non-negative milliseconds into the recording")
+    elif len({float(t) for t in items}) != len(items):
+        # Labels are keyed by the moment, so a repeated moment collapses into
+        # one label: the rater answers it once and is never counted complete.
+        reasons.append("an item appears twice — each moment can be asked about once")
 
     return not reasons, reasons
+
+
+def item_key(t: float | int | str) -> str:
+    """The one spelling of a moment, used wherever labels are keyed by it.
+
+    A browser writes 1000 as "1000" and Python writes 1000.0 as "1000.0"; keyed
+    naively, a codebook stored with floats refused every label the coding page
+    sent. Whole milliseconds are spelled as integers, everything else as the
+    float's repr.
+    """
+    f = float(t)
+    return str(int(f)) if f.is_integer() else repr(f)
+
+
+def _canonical_items(items: list[Any]) -> list[int | float]:
+    return [int(float(t)) if float(t).is_integer() else float(t) for t in items]
+
+
+def check_codebook(codebook: Any) -> dict[str, Any]:
+    """Validity, reasons and the hash it would be saved under — without saving.
+
+    The codebook builder asks this on every edit, so the page never mirrors
+    these rules in JavaScript that could drift from them.
+    """
+    ok, reasons = validate_codebook(codebook)
+    try:
+        content = codebook_hash(codebook) if isinstance(codebook, dict) else None
+    except (TypeError, ValueError):
+        content = None
+    return {"valid": ok, "reasons": reasons, "content_hash": content}
 
 
 def save_codebook(root: str | Path, codebook: dict[str, Any]) -> dict[str, Any]:
@@ -151,6 +188,7 @@ def save_codebook(root: str | Path, codebook: dict[str, Any]) -> dict[str, Any]:
 
     content = codebook_hash(codebook)
     record = dict(codebook)
+    record["items"] = _canonical_items(codebook["items"])   # see item_key
     record["content_hash"] = content
     record["created_utc"] = datetime.now(timezone.utc).isoformat()
 
@@ -195,6 +233,10 @@ def list_codebooks(root: str | Path) -> list[dict[str, Any]]:
             raw = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             continue
+        # How much coding sits under this version — counts only, never labels,
+        # so the builder can say what a change would leave behind without
+        # anyone seeing what a rater chose.
+        filed = list((_dir(root) / f"{raw.get('codebook_id')}.{raw.get('content_hash')}").glob("*.json"))
         out.append({
             "codebook_id": raw.get("codebook_id"),
             "name": raw.get("name"),
@@ -202,6 +244,8 @@ def list_codebooks(root: str | Path) -> list[dict[str, Any]]:
             "created_utc": raw.get("created_utc"),
             "n_categories": len(raw.get("categories") or []),
             "n_items": len(raw.get("items") or []),
+            "n_label_sets": len(filed),
+            "n_sessions_coded": len({p.name.split(".")[0] for p in filed}),
         })
     out.sort(key=lambda r: (r["codebook_id"] or "", r["created_utc"] or ""),
              reverse=True)
@@ -239,7 +283,11 @@ def save_annotation(root: str | Path, *, codebook_id: str, content_hash: str,
     if unknown:
         raise ValueError(f"labels not in this codebook version: {unknown}")
 
-    items = {str(t) for t in codebook["items"]}
+    items = {item_key(t) for t in codebook["items"]}
+    try:
+        labels = {item_key(k): v for k, v in labels.items()}
+    except (TypeError, ValueError):
+        raise ValueError("labels must be keyed by the item's milliseconds") from None
     stray = sorted(set(labels) - items)
     if stray:
         raise ValueError(f"labels for items not in this codebook: {stray[:5]}")
@@ -335,7 +383,7 @@ def label_matrix(root: str | Path, *, codebook_id: str, content_hash: str,
     if not rows:
         return {"raters": [], "items": [], "labels": [], "n_dropped": 0}
 
-    items = [str(t) for t in codebook["items"]]
+    items = [item_key(t) for t in codebook["items"]]
     common = [t for t in items if all(t in r["labels"] for r in rows)]
 
     return {

@@ -27,7 +27,7 @@
   .fstep { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 12px; align-items: start;
     background: var(--panel); border: 1px solid var(--border); border-radius: var(--r); padding: 9px 12px; }
   .fstep .n { font-family: var(--mono); font-size: 16px; text-align: right; }
-  .fstep .lbl { font-size: 13px; }
+  .fstep .lbl { font-size: 13px; font-weight: 400; margin: 0; color: var(--fg); }
   .bar { height: 6px; background: var(--panel3); border-radius: 3px; margin-top: 6px; overflow: hidden; }
   .bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
   .fstep.cut .bar i { background: var(--warn); }
@@ -52,7 +52,7 @@
 <body>
 <header class="top">
   <a class="brand" href="./index.html"><i></i>Researcher</a>
-  <nav class="pages"><a href="./index.html">Sessions</a><a href="./cohort.html" aria-current="page">Cohort</a><a href="./builder.html">Study builder</a><a href="./annotate.html">Annotate</a></nav>
+  <nav class="pages"><a href="./index.html">Sessions</a><a href="./cohort.html" aria-current="page">Cohort</a><a href="./builder.html">Study builder</a><a href="./codebook.html">Codebooks</a><a href="./annotate.html">Annotate</a></nav>
 </header>
 <div class="toolbar">
   <label class="study">Study <select id="study"></select></label>

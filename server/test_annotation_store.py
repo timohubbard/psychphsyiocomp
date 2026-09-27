@@ -14,6 +14,7 @@ import json
 import pytest
 
 from annotation_store import (
+    check_codebook,
     codebook_hash,
     label_matrix,
     list_codebooks,
@@ -23,6 +24,7 @@ from annotation_store import (
     save_annotation,
     save_codebook,
     validate_codebook,
+    item_key,
 )
 
 
@@ -152,8 +154,8 @@ def test_two_raters_are_stored_separately(root):
                         session_id="s001", rater_id="r1")
     b = load_annotation(root, codebook_id="looking-at", content_hash=saved_hash(root),
                         session_id="s001", rater_id="r2")
-    assert a["labels"]["2000.0"] == "screen"
-    assert b["labels"]["2000.0"] == "away"
+    assert a["labels"]["2000"] == "screen"
+    assert b["labels"]["2000"] == "away"
 
 
 def test_a_rater_resubmitting_replaces_only_their_own_work(root):
@@ -163,7 +165,7 @@ def test_a_rater_resubmitting_replaces_only_their_own_work(root):
 
     b = load_annotation(root, codebook_id="looking-at", content_hash=saved_hash(root),
                         session_id="s001", rater_id="r2")
-    assert b["labels"]["2000.0"] == "away", "r1's revision touched r2's file"
+    assert b["labels"]["2000"] == "away", "r1's revision touched r2's file"
 
 
 def test_progress_is_visible_without_the_labels(root):
@@ -250,7 +252,7 @@ def test_the_matrix_aligns_raters_on_shared_items(root):
     m = label_matrix(root, codebook_id="looking-at",
                      content_hash=saved_hash(root), session_id="s001")
     assert m["raters"] == ["r1", "r2"]
-    assert m["items"] == ["1000.0", "2000.0", "3000.0", "4000.0"]
+    assert m["items"] == ["1000", "2000", "3000", "4000"]
     assert m["labels"][0][2] == "screen"
     assert m["labels"][1][2] == "away"
 
@@ -265,7 +267,7 @@ def test_an_item_one_rater_skipped_is_dropped_not_imputed(root):
 
     m = label_matrix(root, codebook_id="looking-at",
                      content_hash=saved_hash(root), session_id="s001")
-    assert "3000.0" not in m["items"]
+    assert "3000" not in m["items"]
     assert m["n_dropped"] == 1
     assert all(len(row) == 3 for row in m["labels"])
 
@@ -347,3 +349,60 @@ def test_reordering_the_items_changes_the_hash():
     reason calibration order is."""
     assert codebook_hash(codebook()) != codebook_hash(
         codebook(items=[4000.0, 3000.0, 2000.0, 1000.0]))
+
+
+# ---------------------------------------------------------------------------
+# one spelling per moment, and what the codebook builder asks of the store
+# ---------------------------------------------------------------------------
+
+def test_a_label_keyed_as_the_browser_writes_it_is_accepted(root):
+    """The coding page sends String(1000) = "1000"; Python's str(1000.0) is
+    "1000.0". Keyed naively, a codebook given float items refused every label
+    the page sent. Both spellings now land on one key."""
+    rec = submit(root, "r1", {"1000": "screen", "2000.0": "away"})
+    assert set(rec["labels"]) == {"1000", "2000"}
+    assert rec["n_labelled"] == 2
+
+
+def test_items_are_stored_as_the_browser_will_read_them(root):
+    """Stored whole milliseconds are integers, so the page's String(t) is the
+    same key the store files labels under, and resuming finds them."""
+    assert load_codebook(root, "looking-at")["items"] == [1000, 2000, 3000, 4000]
+    assert [item_key(t) for t in (1000, 1000.0, "1000", 1234.5)] == ["1000", "1000", "1000", "1234.5"]
+
+
+def test_a_moment_asked_twice_is_refused():
+    """Labels are keyed by the moment, so a repeat collapses into one label and
+    the rater could never be counted complete."""
+    ok, reasons = validate_codebook(codebook(items=[1000, 2000, 1000.0]))
+    assert not ok and any("twice" in r for r in reasons)
+
+
+def test_a_moment_before_the_recording_is_refused():
+    assert not validate_codebook(codebook(items=[-5, 1000]))[0]
+    assert not validate_codebook(codebook(items=[float("inf")]))[0]
+
+
+def test_checking_a_codebook_writes_nothing_and_gives_the_hash_it_would_have(tmp_path):
+    cb = codebook(codebook_id="draft")
+    got = check_codebook(cb)
+    assert got == {"valid": True, "reasons": [], "content_hash": codebook_hash(cb)}
+    assert list_codebooks(tmp_path) == []
+    assert save_codebook(tmp_path, cb)["content_hash"] == got["content_hash"]
+
+
+def test_checking_an_invalid_codebook_says_why():
+    got = check_codebook(codebook(categories=[]))
+    assert not got["valid"] and got["reasons"]
+    assert check_codebook("not a codebook")["content_hash"] is None
+
+
+def test_the_list_says_how_much_coding_each_version_holds_without_labels(root):
+    """The builder warns what a change leaves behind; counts, never labels."""
+    submit(root, "r1", ALL_SCREEN)
+    submit(root, "r2", ALL_SCREEN)
+    save_annotation(root, codebook_id="looking-at", content_hash=saved_hash(root),
+                    session_id="s002", rater_id="r1", labels=ALL_SCREEN)
+    [row] = list_codebooks(root)
+    assert (row["n_label_sets"], row["n_sessions_coded"]) == (3, 2)
+    assert "labels" not in row

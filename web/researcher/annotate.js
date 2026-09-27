@@ -23,6 +23,8 @@
  *   ones, because a ceiling measured on the easy half is not the ceiling.
  */
 
+import { NO_DEFAULT_NOTE, categoriesHtml } from './annotate_view.js';
+
 const $ = (id) => document.getElementById(id);
 
 const state = {
@@ -58,7 +60,7 @@ async function start() {
       between and the moments they are asked about; it is versioned and hashed
       like an AOI set, because a category means something different once its
       description changes.
-      <br><br>Create one by POSTing to <code>/api/codebooks</code>.</div>`;
+      <br><br><a href="./codebook.html">Build one in the codebook builder</a>.</div>`;
     $('sub').textContent = '';
     return;
   }
@@ -180,27 +182,14 @@ function render() {
       <span class="sub" id="tstamp"></span>
     </div>
 
-    <div class="cats" id="cats">${cb.categories.map((c, i) => `
-      <button class="cat" data-id="${c.id}">
-        <span class="key">${i + 1}</span>
-        <span>
-          <span class="lbl">${c.label}</span><br>
-          <span class="desc">${c.description}</span>
-        </span>
-      </button>`).join('')}</div>
+    <div class="cats" id="cats">${categoriesHtml(cb.categories)}</div>
 
     <div class="row">
       <button id="back" ${state.index === 0 ? 'disabled' : ''}>Back</button>
       <button class="primary" id="save">Save and stop</button>
     </div>
 
-    <div class="note">
-      Nothing is preselected, and there is no "unsure" option. A default is the
-      answer a tired coder gives, and one that happens to match the majority
-      manufactures agreement that was never there. If a moment genuinely does
-      not fit any category, that is a finding about the codebook — stop and
-      say so, rather than picking the nearest.
-    </div>
+    <div class="note">${NO_DEFAULT_NOTE}</div>
     <p class="note bad" id="err" style="display:none"></p>`;
 
   state.video = $('vid');

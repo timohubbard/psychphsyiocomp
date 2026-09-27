@@ -368,7 +368,7 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/stimuli":
             return self._post_stimulus(parse_qs(parsed.query))
         if parsed.path == "/api/codebooks":
-            return self._post_codebook()
+            return self._post_codebook(parse_qs(parsed.query))
         if parsed.path == "/api/annotations":
             return self._post_annotation()
         if parsed.path != "/api/aoi-sets":
@@ -518,10 +518,17 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json({"error": "refused", "detail": str(exc), **exc.extra},
                               status=exc.status)
 
-    def _post_codebook(self):
+    def _post_codebook(self, query):
+        """Save a codebook version — or, with ?check=1, only say whether it would save.
+
+        The check is how the codebook builder validates as you type: the rules
+        live here once, in annotation_store, and the page never mirrors them.
+        """
         try:
-            return self._json(annotation_store.save_codebook(
-                self.data_root, self._body()))
+            body = self._body()
+            if (query.get("check") or [""])[0] == "1":
+                return self._json(annotation_store.check_codebook(body))
+            return self._json(annotation_store.save_codebook(self.data_root, body))
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             return self._json({"error": "bad_request", "detail": str(exc)}, status=400)
 

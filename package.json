@@ -38,6 +38,7 @@
     "verify:playback": "node tools/verify_playback.mjs",
     "verify:playback:control": "node tools/verify_playback.mjs --control",
     "verify:cohort-view": "node tools/verify_cohort_view.mjs",
+    "verify:codebook": "node tools/verify_codebook.mjs",
     "deploy:check": "node tools/deploy_check.mjs"
   }
 }
