@@ -132,10 +132,22 @@ session** (83% of fixations on target at 4.5°, need 90%; 3.2° to target vs
   generated from the study file) are ready for a deploying group to complete.
 - **Deploy behind HTTPS** — see *Deploying for remote collection*. Nothing
   faces the internet yet.
-- **Run the in-browser tier on a real face.** `features_in_browser` records
-  nothing and measures gaze and face in the browser. Its maths is pinned to the
-  server engine by a shared fixture, but the smoke test's fake camera shows no
-  face, so the tier has only been seen refusing gracefully.
+- **First real sessions through the new paths (2026-09-27).** Both at
+  30 fps, both passed the gaze gate:
+  - `s_mujrz6x7` (stimulus-example): gaze 2.26° from the server's features.
+  - `s_mujs3eue` (in-browser-example, no recording at all): gaze 4.44° from
+    the browser's features.
+
+  On the same session and the same targets, the browser's features gave
+  **3.23° against the server's 2.26°**. So on this evidence the in-browser tier
+  costs about 1° of gaze accuracy for never recording, from one session.
+
+  Per-stimulus results, AOIs on the picture, heatmaps, cohort and export all
+  ran on it without a refusal. On both mirror-image pictures, gaze stayed on
+  the right half, whichever shape was there. That is how the participant
+  looked, not estimator bias: horizontal validation error is −0.008 of the
+  stage (every target within ±0.03). The only systematic error is +0.087
+  vertically, on the channel already tiered low.
 
 #### Deploying for remote collection (not done)
 
@@ -227,8 +239,11 @@ can be done at a keyboard.
    --aus` (~18 min, almost all Py-Feat).
 3. **Why gaze failed its gate on the second session** (3.2° vs 1.5°). Needs
    more sessions with lighting, distance and frame rate varied one at a time.
-   Frame rate first: the two most recent sessions both captured at ~20 fps
-   against a 30 fps request, and the passing one ran at 29.9.
+   Frame rate first: the failing session and the one after it captured at
+   ~20 fps against a 30 fps request. Every session at ~30 fps has passed: the
+   pilot at 29.9, and both 2026-09-27 sessions at 29.9 and 30.0 (2.26° and
+   4.44°). This is suggestive, not controlled — distance differed too (45.7 vs
+   38.8 cm).
 4. **Respiration validation** against an RIP belt, before any rate is emitted.
 5. L2CS-Net fine-tune (not started; its gaze datasets carry research-only EULAs
    someone has to accept by hand).

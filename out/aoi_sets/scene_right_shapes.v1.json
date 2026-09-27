@@ -1,0 +1,31 @@
+{
+  "name": "scene_right_shapes",
+  "version": "1",
+  "content_hash": "e9ebcb1d823afc3f",
+  "created_utc": "2026-09-27T12:15:57.293783+00:00",
+  "stimulus_id": "scene_right",
+  "aois": [
+    {
+      "aoi_id": "disc",
+      "shape": "circle",
+      "coords": [
+        0.72,
+        0.5,
+        0.1171875
+      ],
+      "label": "bright disc"
+    },
+    {
+      "aoi_id": "bar",
+      "shape": "rect",
+      "coords": [
+        0.18,
+        0.4166666666666667,
+        0.289375,
+        0.5833333333333334
+      ],
+      "label": "dim bar"
+    }
+  ],
+  "note": "AOI hit rates are highly sensitive to boundary definition. REPORT.md \u00a74.2 records one tool's hit rate moving 77%->88%->93% purely from refining the same definitions on the same gaze data. Report this content_hash and the padding alongside any hit rate computed from it."
+}
