@@ -11,23 +11,29 @@ that does not validate does not run — see `web/src/study.js`.
 ## Building a study: the study builder
 
 `npm run app`, then **Study builder** (`/builder.html`). It is a form over
-everything in this file:
+everything in this file, in seven numbered sections:
 
-- identity and who the study may be run on;
-- what participants are told, and what is measured;
-- the consent tiers offered;
-- tasks in order, including pictures and videos uploaded straight into
-  `stimuli/` with their hashes computed;
-- conditions and the completion link;
-- the analysis plan;
-- the raw JSON, for anything else.
+1. basics, and who the study may be run on;
+2. what participants are told;
+3. what is measured;
+4. the consent options offered, and which is pre-selected;
+5. tasks in order, including pictures and videos dropped straight into
+   `stimuli/` with their hashes computed;
+6. conditions and the completion link;
+7. the analysis plan.
+
+The header always shows whether the capture page will accept the study and
+holds the Save button. Every problem is shown where it is fixed: under the
+field it names, or at the foot of its section. The section list on the left
+counts each section's problems.
 
 Beside the form, live:
 
-- whether the capture page will accept the study, with every reason if not;
-- its content hash;
+- every problem in full, each a link to where it is fixed;
+- the protocol hash;
 - **the participant's journey**: what they go through, in order, per condition;
-- **the consent text a participant will read**.
+- **the consent screen**, in the words a participant will read;
+- the raw JSON, for anything the form does not cover.
 
 The journey has one lane per condition, side by side, so a difference between
 arms shows at a glance. Each lane has a strip across the top with the session

@@ -45,11 +45,15 @@ async function main() {
     await until(`!!document.getElementById('validity')`, 'the builder');
     check('a blank study starts valid', /^Valid/.test(await validity()), await validity());
 
-    await js(`(() => { const s = document.getElementById('audience'); s.value = 'participants';
-      s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
-    const reasons = await js(`document.querySelector('ul.reasons')?.innerText ?? ''`);
+    await js(`(() => { document.querySelector('input[name=audience][value=participants]').click(); return true; })()`);
+    await until(`!!document.querySelector('#side ul.reasons')`, 'the refusal');
+    const reasons = await js(`document.querySelector('#side ul.reasons')?.innerText ?? ''`);
+    // Each shown where it is fixed, too: under the field it names.
+    const flagged = await js(`[...document.querySelectorAll('.field.invalid')].map((f) => f.dataset.field).join(',')`);
     check('participants are refused without the ethics fields',
-      /irb_reference/.test(reasons) && /controller/.test(reasons), reasons.split('\n').length + ' reasons');
+      /irb_reference/.test(reasons) && /controller/.test(reasons)
+      && /disclosure\.irb_reference/.test(flagged) && /disclosure\.controller/.test(flagged),
+      `${reasons.split('\n').length} reasons; fields flagged: ${flagged.split(',').length}`);
 
     await setField(['study_id'], 'builder-demo');
     await setField(['disclosure', 'contact'], 'Dr A. Researcher, a.researcher@uni.ac.uk');
@@ -60,8 +64,7 @@ async function main() {
     check('filled in, it validates', /^Valid/.test(await validity()), await validity());
 
     // A pictures task, and an upload through the real file input.
-    await js(`(() => { document.getElementById('addTask').value = 'stimuli';
-      document.getElementById('btnAddTask').click(); return true; })()`);
+    await js(`(() => { document.querySelector('[data-add-task=stimuli]').click(); return true; })()`);
     const { root } = await page.send('DOM.getDocument', { depth: -1 });
     const { nodeId } = await page.send('DOM.querySelector', { nodeId: root.nodeId, selector: 'input[data-upload]' });
     await page.send('DOM.setFileInputFiles', { nodeId, files: [STIMULUS] });
@@ -83,6 +86,7 @@ async function main() {
     check('the journey shows it, and leads back to its task', g.flashed && g.type === 'stimuli',
       `${g.blocks} blocks; click → task card (${g.type})`);
 
+    await js(`document.querySelector('[data-tab=consent]').click()`);
     const consent = await js(`document.querySelector('.preview')?.innerText ?? ''`);
     check('the consent preview is the capture page’s wording',
       /Automated analysis/.test(consent) && /Responsible for your data: University of Somewhere/.test(consent)

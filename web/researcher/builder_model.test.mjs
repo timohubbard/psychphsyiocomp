@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { validateStudy } from '../src/study.js';
 import {
-  TASK_TYPES, blankStudy, getPath, parseList, setPath, stimulusIdFrom,
+  SECTIONS, TASK_TYPES, blankStudy, fieldOf, getPath, parseList, sectionOf, setPath, stimulusIdFrom,
 } from './builder_model.js';
 
 test('a blank study is valid as it stands', () => {
@@ -38,4 +38,43 @@ test('lists and stimulus ids are cleaned up', () => {
   assert.deepEqual(parseList(' A, B ,,C '), ['A', 'B', 'C']);
   assert.equal(stimulusIdFrom('My Forest (1).png'), 'My_Forest_1_');
   assert.equal(stimulusIdFrom('.png'), 'stimulus');
+});
+
+// The routing is tested on the capture page's real refusal text, not copies of
+// it, so a reworded reason in web/src/study.js shows up here as a failure.
+const reasonsOf = (edit) => { const s = blankStudy(); edit(s); return validateStudy(s).reasons; };
+const routed = (edit) => reasonsOf(edit).map((r) => [sectionOf(r), fieldOf(r)]);
+
+test('the participant gate lands on the ethics fields', () => {
+  const got = routed((s) => { s.audience = 'participants'; });
+  assert.ok(got.length >= 5 && got.every(([sec]) => sec === 'told'), JSON.stringify(got));
+  const fields = got.map(([, f]) => f);
+  for (const f of ['disclosure.irb_reference', 'disclosure.contact', 'disclosure.controller',
+    'disclosure.lawful_basis', 'disclosure.special_category_basis']) assert.ok(fields.includes(f), f);
+});
+
+test('each part of a broken study is routed to its own section', () => {
+  const cases = [
+    [(s) => { s.study_id = 'no spaces'; }, 'basics', 'study_id'],
+    [(s) => { delete s.name; }, 'basics', 'name'],
+    [(s) => { s.modalities = []; }, 'measures', null],
+    [(s) => { s.modalities = ['gaze']; s.calibration = { n_points: 3 }; }, 'measures', 'calibration.n_points'],
+    [(s) => { s.consent_tiers = ['features_only', 'media_plus_transcript']; }, 'consent', null],
+    [(s) => { s.tasks = [{ type: 'stimuli', items: [] }]; }, 'tasks', null],
+    [(s) => { s.conditions = { arms: ['A'] }; }, 'conditions', null],
+    [(s) => { s.recruitment = { completion_url: 'http://example.com' }; }, 'conditions', 'recruitment.completion_url'],
+    [(s) => { s.analysis = { aoi_pad_deg: 40 }; }, 'analysis', 'analysis.aoi_pad_deg'],
+    [(s) => { s.analysis = { exclusions: [{ metric: 'x' }] }; }, 'analysis', null],
+  ];
+  for (const [edit, section, fieldPath] of cases) {
+    const got = routed(edit);
+    assert.equal(got.length, 1, JSON.stringify(reasonsOf(edit)));
+    assert.deepEqual(got[0], [section, fieldPath], reasonsOf(edit)[0]);
+  }
+});
+
+test('every section a reason can be routed to is one the form draws', () => {
+  const ids = new Set(SECTIONS.map((s) => s.id));
+  for (const r of ['anything unforeseen', 'unknown audience: x']) assert.ok(ids.has(sectionOf(r)));
+  for (const t of Object.values(TASK_TYPES)) assert.ok(t.kind && t.hint, t.label);
 });
