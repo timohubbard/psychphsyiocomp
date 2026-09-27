@@ -248,3 +248,32 @@ def test_the_commands_are_dry_runs_unless_told(roots, capsys):
     assert retention.main(["sweep", *common, "--apply"]) == 0
     assert not (out / "session_id=old").exists() and not b.exists()
     assert tombstones(out)["old"]["reason"] == "retention_expired"
+
+
+# -- the schedule can be seen to run -------------------------------------------
+
+def test_a_recorded_sweep_is_what_the_health_check_reads(roots):
+    out, media = roots
+    assert retention.last_sweep(out) is None
+    assert "never been recorded" in retention.sweep_health(out, START)
+
+    processed(out, "old", days=1)
+    assert retention.main(["sweep", "--out", str(out), "--media", str(media),
+                           "--apply", "--record"]) == 0
+    last = retention.last_sweep(out)
+    assert last["applied"] is True and last["expired"] == ["old"]
+    assert retention.sweep_health(out, retention._utc(last["ran_utc"])) is None
+
+
+def test_a_dry_run_does_not_count_as_the_sweep_having_run(roots):
+    out, media = roots
+    retention.main(["sweep", "--out", str(out), "--media", str(media), "--record"])
+    assert retention.last_sweep(out) is None, "only an applied sweep keeps the promise"
+
+
+def test_a_sweep_that_stopped_running_is_named(roots):
+    out, _ = roots
+    retention.record_run(out, found=0, expired=[], applied=True, manual=0, now=START)
+    assert retention.sweep_health(out, START + timedelta(hours=47)) is None
+    warning = retention.sweep_health(out, START + timedelta(days=3))
+    assert "3 day(s) ago" in warning and "scheduled task" in warning

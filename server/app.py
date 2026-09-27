@@ -37,7 +37,7 @@ import annotation_store  # noqa: E402
 import aoi_store  # noqa: E402
 from aoi import AOI, AOISet, analyse  # noqa: E402
 from fixations import classify  # noqa: E402
-from retention import collect_sessions, expired  # noqa: E402
+from retention import collect_sessions, expired, last_sweep, sweep_health  # noqa: E402
 from study import content_hash as study_hash  # noqa: E402
 from study import list_studies, load_study, verify_session_study  # noqa: E402
 from store import (  # noqa: E402
@@ -644,6 +644,13 @@ def main() -> int:
               f"{', '.join(s.session_id for s in overdue)}")
         print("  Their participants were told this data would be deleted. Run:")
         print("    npm run retention -- --apply\n")
+    # Whether the scheduled sweep is actually running — a task that silently
+    # stopped looks exactly like one that is working until something expires.
+    health = sweep_health(data_root, datetime.now(timezone.utc))
+    last = last_sweep(data_root)
+    print(f"  retention sweep  {'last ran ' + last['ran_utc'][:16] + ' UTC' if last else 'never recorded'}")
+    if health:
+        print(f"  WARNING          {health}\n")
     if n == 0:
         print("  No processed sessions. Run:")
         print("    npm run py -- server/process_bundle.py <bundle-dir> --out out/\n")

@@ -66,6 +66,11 @@ import pyarrow.parquet as pq
 
 ROOT = Path(__file__).resolve().parents[1]
 TOMBSTONES = "deletions.jsonl"
+#: One line per recorded sweep (--record), so a schedule can be seen to run.
+RUNS = "retention_runs.jsonl"
+#: How long without a recorded sweep before the researcher app warns. Daily
+#: schedule, plus a day's grace for a machine that was off.
+SWEEP_OVERDUE_HOURS = 48
 
 
 @dataclass(frozen=True)
@@ -391,6 +396,45 @@ def _run(targets: list[SessionRecord], out: Path, media: list[Path], reason: str
     return 0
 
 
+def record_run(out: Path, *, found: int, expired: list[str], applied: bool,
+               manual: int, now: datetime) -> None:
+    """Append this sweep to the run log.
+
+    The scheduled task has no terminal, so its output goes nowhere; this line
+    is how anyone can tell the sweep is actually running. Session ids only —
+    the same pseudonymous ids the tombstones hold.
+    """
+    Path(out).mkdir(parents=True, exist_ok=True)
+    with open(Path(out) / RUNS, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"ran_utc": now.isoformat(), "found": found,
+                             "expired": expired, "applied": applied,
+                             "manual": manual}, sort_keys=True) + "\n")
+
+
+def last_sweep(out: Path) -> dict[str, Any] | None:
+    """The most recent recorded sweep that APPLIED its deletions, or None."""
+    path = Path(out) / RUNS
+    if not path.exists():
+        return None
+    runs = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()]
+    applied = [r for r in runs if r.get("applied")]
+    return applied[-1] if applied else None
+
+
+def sweep_health(out: Path, now: datetime) -> str | None:
+    """A warning when no applied sweep is on record recently, or None."""
+    last = last_sweep(out)
+    if last is None:
+        return ("the retention sweep has never been recorded as run — participants "
+                "were told their data is deleted on time. Run `npm run retention:schedule`.")
+    age = now - _utc(last["ran_utc"])
+    if age > timedelta(hours=SWEEP_OVERDUE_HOURS):
+        return (f"the retention sweep last ran {age.days} day(s) ago "
+                f"({last['ran_utc'][:16]}) — is the scheduled task still running?")
+    return None
+
+
 def default_media_roots() -> list[Path]:
     """Where raw bundles land: hand-placed downloads, and the upload inbox
     (server/ingest.py), whose folders sit one level deeper. An uploaded
@@ -410,6 +454,8 @@ def main(argv: list[str] | None = None) -> int:
     sw = sub.add_parser("sweep", parents=[common],
                         help="delete sessions past their retention period")
     sw.add_argument("--apply", action="store_true")
+    sw.add_argument("--record", action="store_true",
+                    help="append this run to out/retention_runs.jsonl (the scheduled task does)")
     wd = sub.add_parser("withdraw", parents=[common],
                         help="delete one participant's or session's data")
     wd.add_argument("identifier", help="a session id or a participant id")
@@ -440,9 +486,12 @@ def main(argv: list[str] | None = None) -> int:
                  else f"EXPIRED {exp.date()}" if exp <= now
                  else f"kept until {exp.date()}")
         print(f"    {s.session_id:<22} {str(s.consent_tier):<22} {state}")
-    if not due:
-        return 0
-    return _run(due, args.out, media, "retention_expired", args.apply, now)
+    status = 0 if not due else _run(due, args.out, media, "retention_expired", args.apply, now)
+    if args.record:
+        manual = sum(len(plan_deletion(s.session_id, args.out, media).manual) for s in due)
+        record_run(args.out, found=len(sessions), expired=[s.session_id for s in due],
+                   applied=args.apply, manual=manual, now=now)
+    return status
 
 
 if __name__ == "__main__":

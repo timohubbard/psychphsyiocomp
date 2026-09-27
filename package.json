@@ -27,6 +27,8 @@
     "process": "node tools/py.mjs server/process_bundle.py",
     "retention": "node tools/py.mjs server/retention.py sweep",
     "withdraw": "node tools/py.mjs server/retention.py withdraw",
+    "retention:schedule": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/schedule_retention.ps1",
+    "retention:unschedule": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/schedule_retention.ps1 -Remove",
     "ropa": "node tools/py.mjs server/ropa.py",
     "ingest": "node tools/py.mjs server/ingest.py",
     "cohort": "node tools/py.mjs server/cohort.py",

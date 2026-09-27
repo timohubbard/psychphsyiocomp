@@ -105,15 +105,16 @@ session** (83% of fixations on target at 4.5°, need 90%; 3.2° to target vs
 **Before anyone but the developer is recorded** — from
 `research/pass5-legal-gaps.md`, whose opening synthesis gives the reasons:
 
-- **Run the retention sweep on a schedule.** The consent screen's "kept for N
-  days and then deleted" is now enforceable — `npm run retention` lists what
-  has expired under the period each participant was shown and deletes it with
-  `--apply`; `npm run withdraw -- <session or participant id> --apply` removes
-  one person's data. Both are dry runs without `--apply`. Deletion is never a
-  side effect of starting anything, so the promise holds only if someone runs
-  the sweep: schedule it where the data lives. The researcher app names any
-  session past its date at startup, and `process` refuses a deleted or expired
-  session rather than recreate it from a leftover copy.
+- **The retention sweep runs on a schedule on this machine** (since
+  2026-09-27). `npm run retention:schedule` registers a daily Windows task
+  (03:00; it runs late if the machine was off) that deletes whatever has passed
+  the period each participant was shown, and records each run in
+  `out/retention_runs.jsonl`. The researcher app prints when the sweep last ran
+  and warns if no run has been recorded in 48 hours. Wherever the data is
+  deployed, schedule it there too. On Linux, a daily cron line running
+  `node tools/py.mjs server/retention.py sweep --apply --record` does the same.
+  `npm run withdraw -- <session, pseudonym or Prolific ID> --apply` removes one
+  person's data. `npm run retention` on its own is a dry run.
 - **Get a real study approved and filled in.** The route is UK/EU, decided
   2026-09-26, and the gate is built: a study runs on anyone but the developer
   only with `"audience": "participants"`. Validation then refuses it until it
