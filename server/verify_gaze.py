@@ -41,6 +41,47 @@ GATE_PAD_DEG = 4.5
 GATE_HIT_RATE = 0.9
 
 
+def dwell_targets(events) -> dict[str, list[tuple[float, float, float, float]]]:
+    """Known targets by kind — 'validation' (held out) and 'calibration' (fitted on).
+
+    Events as `store.session_detail` returns them (onset/offset on the master clock).
+    """
+    out: dict[str, list[tuple[float, float, float, float]]] = {"validation": [], "calibration": []}
+    for e in events:
+        et = e["event_type"]
+        if et.endswith("_point_sampling") and e.get("onset") and e.get("offset"):
+            meta = e.get("metadata") or {}
+            if "x" in meta:
+                kind = "validation" if et.startswith("validation") else "calibration"
+                out[kind].append((float(meta["x"]), float(meta["y"]), e["onset"], e["offset"]))
+    return out
+
+
+def hit_table(fixations, targets, *, dpp: float, viewport, pads=PAD_LADDER):
+    """Per padding: (pad, hits, checked, mean error in degrees) over the given targets.
+
+    For each target, the fixation overlapping its dwell window the most is the
+    one tested — the participant was told to look at that dot, then.
+    """
+    rows = []
+    for pad in pads:
+        hits = checked = 0
+        errors: list[float] = []
+        for tx, ty, t0, t1 in targets:
+            overlapping = [f for f in fixations if f.onset_ts < t1 and f.offset_ts > t0]
+            if not overlapping:
+                continue
+            checked += 1
+            f = max(overlapping, key=lambda f: min(f.offset_ts, t1) - max(f.onset_ts, t0))
+            # A point AOI, so padding alone decides the tolerance. Any other
+            # radius would mix the boundary choice into the thing being measured.
+            s = AOISet("target", "1", (AOI("t", "circle", (tx, ty, 0.001)),))
+            hits += analyse([f], s, pad_deg=pad, degrees_per_px=dpp, viewport_px=viewport).n_hits
+            errors.append(float(np.hypot((f.x - tx) * viewport[0], (f.y - ty) * viewport[1]) * dpp))
+        rows.append((pad, hits, checked, float(np.mean(errors)) if errors else float("nan")))
+    return rows
+
+
 def load_gaze(out: str, session_id: str):
     d = session_detail(out, session_id)
     m = d["meta"]
@@ -95,55 +136,44 @@ def main() -> int:
     fixations = [e for e in result.events if e.kind == "fixation"]
     print(f"  fixations        {len(fixations)}  (HMM, not I-VT)")
 
-    targets = []
-    for e in d["events"]:
-        if e["event_type"].endswith("_point_sampling") and e["onset"] and e["offset"]:
-            meta = e["metadata"] or {}
-            if "x" in meta:
-                targets.append((float(meta["x"]), float(meta["y"]), e["onset"], e["offset"]))
-
-    if not targets:
-        print("  REFUSED: no calibration or validation dwell windows in this session")
+    targets = dwell_targets(d["events"])
+    held_out, fitted = targets["validation"], targets["calibration"]
+    if not held_out:
+        print("  REFUSED: no validation dwell windows — the gate is scored on targets")
+        print("           the model was never fitted on, and this session has none")
         return 1
-    print(f"  known targets    {len(targets)}")
+    print(f"  known targets    {len(held_out)} held out (validation), {len(fitted)} fitted on (calibration)")
 
-    print(f"\n  {'pad (deg)':>10} {'hit rate':>10}   {'mean error':>12}")
-    print("  " + "-" * 40)
+    def ladder(title, rows):
+        print(f"\n  {title}")
+        print(f"  {'pad (deg)':>10} {'hit rate':>10}   {'mean error':>12}")
+        print("  " + "-" * 40)
+        for pad, hits, checked, err in rows:
+            print(f"  {pad:>10.1f} {hits / max(checked, 1):>9.0%}   {err:>10.2f} deg   (n={checked})")
 
-    gate_rate = 0.0
-    errors: list[float] = []
-    for pad in PAD_LADDER:
-        hits = checked = 0
-        errors = []
-        for tx, ty, t0, t1 in targets:
-            overlapping = [f for f in fixations if f.onset_ts < t1 and f.offset_ts > t0]
-            if not overlapping:
-                continue
-            checked += 1
-            f = max(overlapping,
-                    key=lambda f: min(f.offset_ts, t1) - max(f.onset_ts, t0))
-            # A point AOI, so padding alone decides the tolerance. Any other
-            # radius would mix the boundary choice into the thing being measured.
-            s = AOISet("target", "1", (AOI("t", "circle", (tx, ty, 0.001)),))
-            hits += analyse([f], s, pad_deg=pad, degrees_per_px=dpp,
-                            viewport_px=viewport).n_hits
-            errors.append(float(np.hypot((f.x - tx) * viewport[0],
-                                         (f.y - ty) * viewport[1]) * dpp))
+    gate_rows = hit_table(fixations, held_out, dpp=dpp, viewport=viewport)
+    ladder("HELD OUT — the gate. Validation targets the estimator never saw:", gate_rows)
+    # Printed for continuity with earlier reports, never gated on. Until
+    # 2026-09-27 the gate pooled these 13 with the 5 held-out ones, so most of
+    # its evidence was the model reproducing points it had been fitted to.
+    if fitted:
+        ladder("IN-SAMPLE — fitted on, not evidence. Calibration targets:",
+               hit_table(fixations, fitted, dpp=dpp, viewport=viewport))
 
-        rate = hits / max(checked, 1)
-        if pad == GATE_PAD_DEG:
-            gate_rate = rate
-        print(f"  {pad:>10.1f} {rate:>9.0%}   {np.mean(errors):>10.2f} deg   (n={checked})")
-
-    mean_err = float(np.mean(errors)) if errors else float("nan")
+    gate_pad = next(r for r in gate_rows if r[0] == GATE_PAD_DEG)
+    gate_rate = gate_pad[1] / max(gate_pad[2], 1)
+    mean_err = gate_pad[3]
     print("\n  " + "-" * 72)
-    print(f"  mean error to the target actually on screen: {mean_err:.2f} deg")
+    print(f"  mean error to the held-out target actually on screen: {mean_err:.2f} deg")
     print("  Compare against the validation figure — they are measured")
     print("  independently, so agreement is evidence and divergence is a fault.")
+    if gate_pad[2] and gate_pad[2] < 10:
+        print(f"  With n={gate_pad[2]} held-out targets, one miss moves the rate by "
+              f"{1 / gate_pad[2]:.0%} — a single miss can fail a {GATE_HIT_RATE:.0%} gate.")
 
     ok = gate_rate >= GATE_HIT_RATE
     print(f"\n  GAZE GATE: {'PASS' if ok else 'FAIL'}  "
-          f"({gate_rate:.0%} of fixations on target at {GATE_PAD_DEG} deg padding, "
+          f"({gate_rate:.0%} of held-out fixations on target at {GATE_PAD_DEG} deg padding, "
           f"need {GATE_HIT_RATE:.0%})")
     print("\n  Note the ladder above. Identical gaze and identical fixations give")
     print("  wildly different hit rates purely from the boundary choice — §4.2")

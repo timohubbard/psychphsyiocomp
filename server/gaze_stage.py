@@ -83,6 +83,65 @@ def design_from_channels(X: np.ndarray, channels: Sequence[str], *,
 
 
 @dataclass(frozen=True)
+class EstimatorConfig:
+    """How the estimator turns features into gaze. The default is what shipped.
+
+    One object, used by the pipeline (gaze_pipeline._fit_and_write) and by the
+    offline benchmark (gaze_bench.py), so a variant that wins the benchmark is
+    the variant that runs — not a re-implementation of it.
+
+    use_pose         linear head yaw/pitch/roll beside the iris terms.
+    trim_fraction    share of each dwell window dropped as settling time.
+    per_frame        fit on every trimmed frame rather than one median per
+                     target; alpha is then chosen by leave-one-TARGET-out, since
+                     frames of one target are not independent evidence.
+    dy_norm          divide vertical iris offset by eyelid openness. The iris is
+                     partly hidden by the lid when looking down, so the offset
+                     measured against eye WIDTH understates vertical movement.
+    clamp_features   clamp iris offsets to the range seen during calibration
+                     before the quadratic expansion, which diverges outside it.
+    bias_correction  subtract the mean validation residual from every
+                     prediction. Its own validation figure is then scored by
+                     leaving each validation point out of the bias it corrects.
+    """
+
+    use_pose: bool = True
+    trim_fraction: float = 0.25
+    per_frame: bool = False
+    dy_norm: bool = False
+    clamp_features: bool = False
+    bias_correction: bool = False
+
+    def changed(self) -> dict[str, Any]:
+        """The fields that differ from the shipped default, for params and reports."""
+        base = EstimatorConfig()
+        return {k: getattr(self, k) for k in self.__dataclass_fields__
+                if getattr(self, k) != getattr(base, k)}
+
+
+OPENNESS_FOR = {"eye.left_iris_dy": "eye.left_openness", "eye.right_iris_dy": "eye.right_openness"}
+
+
+def prepare_features(X: np.ndarray, channels: Sequence[str], config: EstimatorConfig,
+                     clamp: dict[int, tuple[float, float]] | None = None) -> np.ndarray:
+    """Apply the config's feature-level changes to raw features, before the design."""
+    X = np.array(X, dtype=float, copy=True)
+    idx = {c: i for i, c in enumerate(channels)}
+    if config.dy_norm:
+        for dy, lid in OPENNESS_FOR.items():
+            if dy not in idx or lid not in idx:
+                raise ValueError(f"dy_norm needs {lid} beside {dy}")
+            open_ = X[:, idx[lid]]
+            # A shut eye has no meaningful offset; the frame is already dropped
+            # upstream below MIN_OPENNESS, so this guard only stops a divide by 0.
+            X[:, idx[dy]] = X[:, idx[dy]] / np.where(np.abs(open_) < 1e-6, np.nan, open_)
+    if clamp:
+        for col, (lo, hi) in clamp.items():
+            X[:, col] = np.clip(X[:, col], lo, hi)
+    return X
+
+
+@dataclass(frozen=True)
 class TargetSpan:
     """A stimulus target and the master-clock window it was being looked at."""
 
@@ -213,6 +272,78 @@ class GazeFitResult:
     passed: bool
     reasons: list[str]
     refusal: str | None = None
+    config: EstimatorConfig = EstimatorConfig()
+    channels: tuple[str, ...] | None = None
+    clamp: dict[int, tuple[float, float]] | None = None
+    bias: np.ndarray | None = None
+
+    def design(self, X_raw: np.ndarray) -> np.ndarray:
+        """Raw features (in ``channels`` order) → this fit's design matrix."""
+        if self.channels is None:
+            return np.asarray(X_raw, dtype=float)
+        Xp = prepare_features(X_raw, self.channels, self.config, self.clamp)
+        return design_from_channels(Xp, self.channels, use_pose=self.config.use_pose)
+
+    def predict(self, X_raw: np.ndarray) -> np.ndarray:
+        """Gaze for raw feature rows, with every step the fit used — including the bias."""
+        pred = self.model.predict(self.design(X_raw))
+        return pred - self.bias if self.bias is not None else pred
+
+
+def frame_rows(timestamps: np.ndarray, X: np.ndarray, spans: Sequence[TargetSpan], *,
+               min_frames: int = 3, trim_fraction: float = 0.25):
+    """Every trimmed frame as its own row, with the index of the target it belongs to."""
+    rows, targets, groups, kept = [], [], [], []
+    for span in spans:
+        lo = span.start_ts + (span.end_ts - span.start_ts) * trim_fraction
+        sel = (timestamps >= lo) & (timestamps <= span.end_ts)
+        if int(sel.sum()) < min_frames:
+            continue
+        rows.append(X[sel])
+        targets.append(np.tile([span.x, span.y], (int(sel.sum()), 1)))
+        groups.append(np.full(int(sel.sum()), len(kept)))
+        kept.append(span)
+    if not rows:
+        return np.empty((0, X.shape[1])), np.empty((0, 2)), np.empty(0, dtype=int), []
+    return np.vstack(rows), np.vstack(targets), np.concatenate(groups), kept
+
+
+def fit_grouped(X: np.ndarray, y: np.ndarray, groups: np.ndarray,
+                alphas: np.ndarray | None = None) -> tuple[RidgeGaze, float]:
+    """Ridge with alpha chosen by leaving one TARGET out, not one frame.
+
+    The hat-matrix shortcut in RidgeGaze.fit_with_loocv holds out a single row.
+    With per-frame rows, the frames beside a held-out one sit at the same target
+    and stay in training, so the held-out error measures nothing — every alpha
+    looks good and the smallest one wins. Holding out whole targets restores the
+    question actually being asked: how well does it do at a point it never saw.
+    """
+    alphas = np.logspace(-3, 3, 25) if alphas is None else alphas
+    ids = np.unique(groups)
+    best_alpha, best_err = None, np.inf
+    for a in alphas:
+        errs = []
+        for g in ids:
+            test = groups == g
+            m = RidgeGaze(alpha=float(a)).fit(X[~test], y[~test])
+            p = np.median(m.predict(X[test]), axis=0)
+            errs.append(float(np.hypot(*(p - y[test][0]))))
+        err = float(np.mean(errs))
+        if err < best_err:
+            best_alpha, best_err = float(a), err
+    return RidgeGaze(alpha=best_alpha).fit(X, y), best_alpha
+
+
+def loo_bias_corrected(pred: np.ndarray, targets: np.ndarray) -> np.ndarray:
+    """Each prediction corrected by the mean residual of the OTHER points.
+
+    How a bias correction is scored honestly. Correcting a point by a mean it
+    contributed to would subtract part of its own error and flatter the figure;
+    with five validation points, a fifth of each point's error would vanish.
+    """
+    resid = pred - targets
+    n = len(resid)
+    return pred - (resid.sum(axis=0) - resid) / (n - 1)
 
 
 def fit_session(
@@ -224,6 +355,7 @@ def fit_session(
     degrees_per_px: float | None,
     channels: Sequence[str] | None = None,
     use_pose: bool = True,
+    config: EstimatorConfig | None = None,
     criteria: GateCriteria | None = None,
     roi_radius_px: float = 100.0,
     min_calibration_targets: int = 6,
@@ -234,56 +366,94 @@ def fit_session(
     validation points fall BETWEEN calibration points; scoring on fitted
     coordinates would measure memorisation, and ridge with a small alpha can
     memorise 13 points almost exactly.
+
+    ``config`` defaults to the shipped estimator (with ``use_pose`` as given),
+    and that default path is unchanged from before the config existed — the
+    benchmark checks it still reproduces every stored figure.
     """
     criteria = criteria or GateCriteria()
-
-    # Expand to the design matrix BEFORE pooling, so the quadratic terms are
-    # medianed the same way the linear ones are.
-    if channels is not None:
-        X = design_from_channels(X, channels, use_pose=use_pose)
+    config = config or EstimatorConfig(use_pose=use_pose)
+    trim = config.trim_fraction
 
     cal = [s for s in spans if s.kind == "calibration_point"]
     val = [s for s in spans if s.kind == "validation_point"]
 
-    Xc, yc, kept_cal = pool_spans(timestamps, X, cal)
+    # Expand to the design matrix BEFORE pooling, so the quadratic terms are
+    # medianed the same way the linear ones are.
+    clamp = None
+    if channels is not None:
+        if config.clamp_features:
+            raw = prepare_features(X, channels, EstimatorConfig(dy_norm=config.dy_norm))
+            pooled, _, _ = pool_spans(timestamps, raw, cal, trim_fraction=trim)
+            iris = [i for i, c in enumerate(channels) if c in IRIS_CHANNELS]
+            if len(pooled):
+                clamp = {i: (float(pooled[:, i].min()), float(pooled[:, i].max())) for i in iris}
+        X = design_from_channels(prepare_features(X, channels, config, clamp), channels,
+                                 use_pose=config.use_pose)
+        # dy_norm can leave a row undefined; such a frame is dropped, not imputed.
+        keep = np.all(np.isfinite(X), axis=1)
+        timestamps, X = timestamps[keep], X[keep]
+
+    def result(model, alpha, n_cal, n_val, validation, passed, reasons, refusal=None, bias=None):
+        return GazeFitResult(model, alpha, n_cal, n_val, validation, passed, reasons, refusal,
+                             config=config, channels=tuple(channels) if channels is not None else None,
+                             clamp=clamp, bias=bias)
+
+    if config.per_frame:
+        Xc, yc, groups, kept_cal = frame_rows(timestamps, X, cal, trim_fraction=trim)
+    else:
+        Xc, yc, kept_cal = pool_spans(timestamps, X, cal, trim_fraction=trim)
     if len(kept_cal) < min_calibration_targets:
-        return GazeFitResult(
-            None, None, len(kept_cal), 0, None, False,
-            [f"only {len(kept_cal)} calibration targets had usable frames"],
-            refusal="insufficient_calibration",
-        )
+        return result(None, None, len(kept_cal), 0, None, False,
+                      [f"only {len(kept_cal)} calibration targets had usable frames"],
+                      refusal="insufficient_calibration")
 
-    model, alpha, _ = RidgeGaze.fit_with_loocv(Xc, yc)
+    if config.per_frame:
+        model, alpha = fit_grouped(Xc, yc, groups)
+    else:
+        model, alpha, _ = RidgeGaze.fit_with_loocv(Xc, yc)
 
-    Xv, yv, kept_val = pool_spans(timestamps, X, val)
+    if config.per_frame:
+        Fv, yf, gv, kept_val = frame_rows(timestamps, X, val, trim_fraction=trim)
+        yv = np.array([[s.x, s.y] for s in kept_val], dtype=float).reshape(-1, 2)
+        pred = (np.array([np.median(model.predict(Fv[gv == g]), axis=0) for g in range(len(kept_val))])
+                if kept_val else np.empty((0, 2)))
+    else:
+        Xv, yv, kept_val = pool_spans(timestamps, X, val, trim_fraction=trim)
+        pred = model.predict(Xv) if len(kept_val) else np.empty((0, 2))
     if len(kept_val) == 0:
-        return GazeFitResult(
-            model, alpha, len(kept_cal), 0, None, False,
-            ["no validation targets had usable frames"],
-            refusal="no_validation",
-        )
+        return result(model, alpha, len(kept_cal), 0, None, False,
+                      ["no validation targets had usable frames"], refusal="no_validation")
+
+    bias = None
+    if config.bias_correction:
+        if len(pred) < 2:
+            return result(model, alpha, len(kept_cal), len(pred), None, False,
+                          ["bias correction needs at least two validation targets"],
+                          refusal="no_validation")
+        bias = (pred - yv).mean(axis=0)
+        pred = loo_bias_corrected(pred, yv)
 
     # One pooled sample per target, so the rate reported here is not a sampling
     # rate. It is computed separately, from the raw feature timestamps.
-    pred = model.predict(Xv)
-    result = validate(
+    result_v = validate(
         yv, pred,
         np.array([s.start_ts for s in kept_val]),
         viewport_px=viewport_px,
         roi_radius_px=roi_radius_px,
         degrees_per_px=degrees_per_px,
     )
-    result = ValidationResult(
-        average_offset_px=result.average_offset_px,
-        average_offset_deg=result.average_offset_deg,
-        percent_in_roi=result.percent_in_roi,
+    validation = ValidationResult(
+        average_offset_px=result_v.average_offset_px,
+        average_offset_deg=result_v.average_offset_deg,
+        percent_in_roi=result_v.percent_in_roi,
         samples_per_sec=effective_rate(timestamps),
-        n_samples=result.n_samples,
-        n_targets=result.n_targets,
+        n_samples=result_v.n_samples,
+        n_targets=result_v.n_targets,
     )
 
-    ok, reasons = gate(result, criteria)
-    return GazeFitResult(model, alpha, len(kept_cal), len(kept_val), result, ok, reasons)
+    ok, reasons = gate(validation, criteria)
+    return result(model, alpha, len(kept_cal), len(kept_val), validation, ok, reasons, bias=bias)
 
 
 def effective_rate(timestamps: np.ndarray) -> float:

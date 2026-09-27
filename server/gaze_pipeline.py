@@ -23,6 +23,7 @@ from engine_contract import Chunk, QualityRow, SignalRow
 from gaze_ridge import GateCriteria
 from fixations import classify as classify_fixations
 from gaze_stage import (
+    EstimatorConfig,
     extrapolation_distance,
     feature_matrix,
     fit_session,
@@ -145,7 +146,8 @@ def run_gaze_from_browser(
 
 
 def _fit_and_write(writer, bundle, rows, solution, *, feature_channels, criteria,
-                   roi_radius_px, use_pose, feature_source) -> dict[str, Any]:
+                   roi_radius_px, use_pose, feature_source,
+                   config: EstimatorConfig | None = None) -> dict[str, Any]:
     """The estimator: fit on the calibration spans, score, write — either path."""
     ts, X = feature_matrix(rows, feature_channels)
 
@@ -162,8 +164,9 @@ def _fit_and_write(writer, bundle, rows, solution, *, feature_channels, criteria
     viewport = (float(screen.get("width_px") or 1920), float(screen.get("height_px") or 1080))
     dpp = writer.degrees_per_px()
 
+    config = config or EstimatorConfig(use_pose=use_pose)
     fit = fit_session(ts, X, spans, viewport_px=viewport, degrees_per_px=dpp,
-                      channels=list(feature_channels), use_pose=use_pose,
+                      channels=list(feature_channels), config=config,
                       criteria=criteria or GateCriteria(), roi_radius_px=roi_radius_px)
 
     if fit.refusal:
@@ -174,14 +177,15 @@ def _fit_and_write(writer, bundle, rows, solution, *, feature_channels, criteria
         return {"status": "refused", "refusal": fit.refusal, "reasons": fit.reasons}
 
     # Predicted gaze for every usable frame, as ordinary signals so they join
-    # against everything else on the master clock.
-    from gaze_stage import design_from_channels
-    pred = fit.model.predict(
-        design_from_channels(X, list(feature_channels), use_pose=use_pose))
-
-    design = design_from_channels(X, list(feature_channels), use_pose=use_pose)
+    # against everything else on the master clock. Through the fit itself, so
+    # every step it was scored with (clamp, bias, dy_norm) is the step applied.
+    design = fit.design(X)
+    usable = np.all(np.isfinite(design), axis=1)
+    ts, X, design = ts[usable], X[usable], design[usable]
+    pred = fit.predict(X)
     cal_design, _, _ = pool_spans(
-        ts, design, [s for s in spans if s.kind == "calibration_point"])
+        ts, design, [s for s in spans if s.kind == "calibration_point"],
+        trim_fraction=config.trim_fraction)
     extrap = extrapolation_distance(design, cal_design)
     onscreen = onscreen_mask(pred)
 
@@ -232,12 +236,16 @@ def _fit_and_write(writer, bundle, rows, solution, *, feature_channels, criteria
         source=ESTIMATOR_SOURCE,
         # The fit IS the parameterisation. Recording it means a re-fit appends a
         # distinguishable source instead of silently replacing this one.
-        params={"alpha": fit.alpha, "use_pose": use_pose,
+        params={"alpha": fit.alpha, "use_pose": config.use_pose,
                 "n_calibration_targets": fit.n_calibration_targets,
                 "channels": list(feature_channels),
                 # Which placement's features it was fitted on: a fit on the
                 # browser's features is a different estimate, not the same one.
-                "feature_source": feature_source},
+                "feature_source": feature_source,
+                # Only when it differs from the shipped estimator, so a default
+                # re-fit keeps the params hash it always had.
+                **({"estimator": config.changed()} if config.changed() else {}),
+                **({"bias": [float(b) for b in fit.bias]} if fit.bias is not None else {})},
         solution=identity,
     )
 
