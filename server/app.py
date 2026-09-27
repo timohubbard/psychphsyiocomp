@@ -36,6 +36,7 @@ sys.path.insert(0, str(ROOT / "server"))
 
 import annotation_store  # noqa: E402
 import aoi_store  # noqa: E402
+import scoring_rules  # noqa: E402
 import study_store  # noqa: E402
 from aoi import AOI, AOISet, analyse  # noqa: E402
 from fixations import classify  # noqa: E402
@@ -268,6 +269,13 @@ class Handler(SimpleHTTPRequestHandler):
         if parts == ["api", "codebooks"]:
             return {"codebooks": annotation_store.list_codebooks(self.data_root)}
 
+        if parts == ["api", "scoring-rules"]:
+            return {"rules": scoring_rules.list_rules(
+                self.data_root, (query.get("codebook") or [None])[0], (query.get("version") or [None])[0])}
+
+        if len(parts) == 3 and parts[:2] == ["api", "scoring-rules"]:
+            return scoring_rules.load_rule(self.data_root, parts[2], (query.get("version") or [""])[0])
+
         if len(parts) == 3 and parts[:2] == ["api", "codebooks"]:
             return annotation_store.load_codebook(
                 self.data_root, parts[2],
@@ -374,6 +382,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self._post_stimulus(parse_qs(parsed.query))
         if parsed.path == "/api/codebooks":
             return self._post_codebook(parse_qs(parsed.query))
+        if parsed.path == "/api/scoring-rules":
+            return self._post_scoring_rule(parse_qs(parsed.query))
         if parsed.path == "/api/annotations":
             return self._post_annotation()
         if parsed.path != "/api/aoi-sets":
@@ -585,11 +595,37 @@ class Handler(SimpleHTTPRequestHandler):
             k = cohens_kappa(matrix["labels"][0], matrix["labels"][1])
             out["kappa"] = k.as_dict() if k else {"refusal": k.reason}
 
-        # An engine arm would be scored here. Until a channel is mapped onto a
-        # codebook's categories there is nothing to score, and inventing a
-        # mapping in the UI is how a result stops being attributable.
+        # The engine arm, only under a declared, hashed scoring rule
+        # (server/scoring_rules.py) — inventing a mapping in the UI is how a
+        # result stops being attributable. No rule named, no engine score.
         out["engine"] = None
+        rule_ref = (query.get("rule") or [""])[0]
+        if rule_ref:
+            rule_id, _, version = rule_ref.partition("@")
+            rule = scoring_rules.load_rule(self.data_root, rule_id, version)
+            out["engine"] = scoring_rules.engine_arm(
+                self.data_root, session_id, rule, matrix, use=use, origin=self._pts_origin(session_id))
         return out
+
+    def _pts_origin(self, session_id: str):
+        """Whether this session's recording, and the copy raters played, start at 0."""
+        if self.media_root is None:
+            return None
+        path = _find_media(self.media_root, session_id)
+        if path is None:
+            return {"ok": False, "reasons": [f"no recording found for {session_id} under the media folder"]}
+        from engine_contract import prepare_playback
+        return scoring_rules.pts_origin(path, prepare_playback(path))
+
+    def _post_scoring_rule(self, query):
+        """Save a scoring rule version — or, with ?check=1, only say whether it would save."""
+        try:
+            body = self._body()
+            if (query.get("check") or [""])[0] == "1":
+                return self._json(scoring_rules.check_rule(self.data_root, body))
+            return self._json(scoring_rules.save_rule(self.data_root, body))
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            return self._json({"error": "bad_request", "detail": str(exc)}, status=400)
 
     def _aoi_analysis(self, session_id: str, query):
         """Run a saved AOI set against a session's fixations."""

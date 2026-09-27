@@ -101,6 +101,7 @@ benchmark*.
 | Per-stimulus gaze/AOI/face results, degree-blurred heatmaps, audited export zip (CSV + BIDS-style) | done — `npm run export -- <study>` |
 | Cohort page in the researcher app (funnel, epoch curves, heatmaps) | done — `/cohort.html`; `npm run verify:cohort-view` |
 | Statistics between arms: declared contrasts, participant-first means, permutation + cluster tests, Holm, generated R (lme4/mgcv) | done — `server/inference.py`; on the cohort page and in the export |
+| Engines scored against human labels: versioned scoring rules, coverage-honest scoring, the recording's time origin checked, a Reliability page | done — `server/scoring_rules.py`, `/reliability.html`; `npm run verify:reliability`, `npm run verify:pts-origin` |
 | Questions on the capture page: rating scales, choices, sliders, opt-in typed answers, with reaction times | done — `studies/questions-example.json`; `npm run smoke:capture -- --study questions-example` |
 | Study builder: form, live validation + consent preview, participant-journey diagram per condition, stimulus upload, used studies fixed | done — `/builder.html`; `tools/verify_builder.mjs` |
 | Codebook builder: defined categories, moments typed / gridded / sampled at random / picked from a recording, the rater's view, versions | done — `/codebook.html`; `npm run verify:codebook` |
@@ -260,7 +261,11 @@ can be done at a keyboard.
 1. **Human labels on the posed recording** (`s_muirbs2a`, in `tempdata/s_test/`)
    via the annotation page (`npm run app -- --media tempdata`), at least two
    raters — the reference standard `server/evaluation.py` scores engines
-   against. The engine-vs-request scores are in "What the two engines say about
+   against. The tooling for this is complete:
+   - build the codebook on the Codebooks page;
+   - raters code on Annotate;
+   - write a scoring rule and read the engine against the raters' ceiling on
+     the Reliability page. The engine-vs-request scores are in "What the two engines say about
    each other"; AU20 is the unit only labels can settle. More posed sessions,
    from other faces, are what would turn n = 2 per AU into a figure.
 2. To record another: `npm run serve` (fresh — an old server keeps its old
@@ -468,6 +473,44 @@ caught that.
 An item any rater left blank is dropped from the matrix rather than imputed.
 Filling it with the majority would manufacture agreement out of someone's
 uncertainty.
+
+**Scoring an engine against the labels.** An engine's output becomes a
+codebook category only through a **scoring rule** (`server/scoring_rules.py`).
+A rule is stored as an immutable, hashed record under `out/scoring_rules/`,
+bound to one codebook version. It fixes:
+
+- exactly one source (never "any"): two engines are two measurements;
+- one channel, or `derived: gaze_onscreen` on the gaze estimate;
+- the window around each moment;
+- the statistic;
+- the minimum number of samples;
+- ordered bins from value to category.
+
+A rule that can never produce one of the categories is allowed, and says so.
+
+The Reliability page (`/reliability.html`, or `/api/reliability/<session>?rule=`)
+then shows:
+
+- rater progress, as counts only;
+- the ceiling the raters set;
+- the engine's score, read against that ceiling on the same moments.
+
+Three safeguards:
+
+- **Moments are recording time.** Each one is converted once through the
+  session's recording clock (master = item × rate + offset, from the runs
+  table), and signals are selected on the master clock.
+- **The recording's zero is checked, not assumed.**
+  - The server reads the start time of the raw recording and of the playback
+    copy raters watch; anything but 0 refuses the engine arm.
+  - `npm run verify:pts-origin -- <session>` plays that copy in headless
+    Chrome and finds each sync flash where the clock solution predicts it.
+  - On `s_mud6trnr` and `s_muirbs2a`, all four flashes land at +25 ms, within
+    one 51 ms frame.
+- **An engine that abstains is not scored on the easy half.**
+  - Moments with too few samples get no prediction.
+  - The reference is recomputed on the answered moments only.
+  - Coverage is reported, and below 80% the score is refused.
 
 **Building a codebook.** In the app, open **Codebooks** (`/codebook.html`).
 There you set:

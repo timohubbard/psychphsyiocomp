@@ -285,6 +285,11 @@ def _run_summary(runs) -> list[dict[str, Any]]:
         "license_commercial_use": r.get("license_commercial_use"),
         "clock_uncertainty_ms": r.get("clock_uncertainty_ms"),
         "unaligned_reason": r.get("unaligned_reason"),
+        # The solution itself, so a consumer can map recording time to the
+        # master clock (tools/verify_pts_origin.mjs checks the browser agrees).
+        "clock_id": r.get("clock_id"),
+        "clock_offset_ms": r.get("clock_offset_ms"),
+        "clock_rate": r.get("clock_rate"),
     } for r in runs.to_pylist()]
 
 
