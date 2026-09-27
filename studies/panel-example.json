@@ -32,6 +32,20 @@
     "completion_url": "https://app.prolific.com/submissions/complete?cc=EXAMPLE00"
   },
 
+  "analysis": {
+    "epochs": [
+      { "name": "smile_on_picture", "event_type": "stimulus",
+        "channels": ["blendshape.mouthSmileLeft"],
+        "source": "face.mediapipe_blendshapes@0.1.0+browser-live",
+        "pre_ms": 500, "post_ms": 3000, "baseline_ms": [-500, 0] }
+    ],
+    "contrasts": [
+      { "name": "smile_a_vs_b", "epochs": "smile_on_picture", "channel": "blendshape.mouthSmileLeft",
+        "arms": ["A", "B"], "window_ms": [300, 2500],
+        "n_permutations": 5000, "seed": 20260927, "cluster": { "p_threshold": 0.05 } }
+    ]
+  },
+
   "tasks": [
     {
       "type": "stimuli", "arms": ["A"],

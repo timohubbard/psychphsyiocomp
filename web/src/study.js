@@ -222,7 +222,7 @@ export function validateStudy(study) {
     reasons.push(...stimuliReasons(study.tasks));
   }
   reasons.push(...conditionReasons(study));
-  reasons.push(...analysisReasons(study.analysis));
+  reasons.push(...analysisReasons(study.analysis, study));
   const url = study.recruitment?.completion_url;
   if (study.recruitment !== undefined && url !== undefined && !isSafeCompletionUrl(url)) {
     reasons.push('recruitment.completion_url must be an https address (or localhost for testing)');
@@ -286,7 +286,7 @@ function conditionReasons(study) {
  * discovered at analysis time. Not in the content hash — see server/cohort.py
  * analysis_hash. Mirrored in server/study.py.
  */
-function analysisReasons(a) {
+function analysisReasons(a, study) {
   if (a === undefined || a === null) return [];
   if (typeof a !== 'object' || Array.isArray(a)) return ['analysis must be an object'];
   const reasons = [];
@@ -330,6 +330,71 @@ function analysisReasons(a) {
     }
     const hz = e.resample_hz ?? 30;
     if (!(num(hz) && hz > 0 && hz <= 1000)) reasons.push(`${where}: resample_hz must be between 0 and 1000`);
+  });
+  reasons.push(...contrastReasons(a, study));
+  return reasons;
+}
+
+const CONTRAST_KEYS = new Set(['name', 'epochs', 'channel', 'arms', 'window_ms', 'n_permutations',
+  'seed', 'alpha', 'tail', 'cluster']);
+
+/**
+ * Declared contrasts between two arms (server/inference.py). Everything the
+ * test needs is fixed here — the window, the permutation budget and the seed —
+ * so nothing about it is chosen after the data is seen. Unknown keys are
+ * refused: a misspelt "windows_ms" silently ignored would test the wrong
+ * thing. Mirrored in server/study.py.
+ */
+function contrastReasons(a, study) {
+  if (a.contrasts === undefined) return [];
+  if (!Array.isArray(a.contrasts)) return ['analysis.contrasts must be a list'];
+  const num = (v) => typeof v === 'number' && Number.isFinite(v);
+  const sets = new Map((Array.isArray(a.epochs) ? a.epochs : [])
+    .filter((e) => e && typeof e === 'object').map((e) => [e.name, e]));
+  const arms = Array.isArray(study?.conditions?.arms) ? study.conditions.arms : [];
+  const reasons = [];
+  const names = new Set();
+  a.contrasts.forEach((c, i) => {
+    const where = `analysis.contrasts[${i}]`;
+    if (!c || typeof c !== 'object' || Array.isArray(c)) { reasons.push(`${where} must be an object`); return; }
+    const extra = Object.keys(c).filter((k) => !CONTRAST_KEYS.has(k)).sort();
+    if (extra.length) reasons.push(`${where} has unknown keys: ${extra.join(', ')}`);
+    if (!isId(c.name) || names.has(c.name)) reasons.push(`${where} needs a unique slug name`);
+    names.add(c.name);
+    const set = sets.get(c.epochs);
+    if (!set) reasons.push(`${where}: epochs must name an epoch set in analysis.epochs`);
+    else if (!Array.isArray(set.channels) || !set.channels.includes(c.channel)) {
+      reasons.push(`${where}: channel must be one of that epoch set's channels`);
+    }
+    if (!arms.length) reasons.push(`${where}: a contrast compares arms, and the study defines no conditions`);
+    else if (!Array.isArray(c.arms) || c.arms.length !== 2 || c.arms[0] === c.arms[1]
+        || !c.arms.every((x) => arms.includes(x))) {
+      reasons.push(`${where}: arms must be two different arms from conditions.arms`);
+    }
+    const w = c.window_ms;
+    if (!(Array.isArray(w) && w.length === 2 && w.every(num) && w[0] < w[1] && set
+        && num(set.pre_ms) && num(set.post_ms) && w[0] >= -set.pre_ms && w[1] <= set.post_ms)) {
+      reasons.push(`${where}: window_ms must be [start, end] inside the epoch`);
+    }
+    if (!(Number.isInteger(c.n_permutations) && c.n_permutations >= 1000 && c.n_permutations <= 100000)) {
+      reasons.push(`${where}: n_permutations must be a whole number from 1000 to 100000`);
+    }
+    if (!Number.isInteger(c.seed)) {
+      reasons.push(`${where}: seed must be a whole number — the test is random, and the seed makes it repeatable`);
+    }
+    const alpha = c.alpha ?? 0.05;
+    if (!(num(alpha) && alpha > 0 && alpha <= 0.5)) reasons.push(`${where}: alpha must be above 0 and at most 0.5`);
+    if (!['two', 'greater', 'less'].includes(c.tail ?? 'two')) reasons.push(`${where}: tail must be two, greater or less`);
+    if (c.cluster !== undefined && c.cluster !== null) {
+      const k = c.cluster;
+      if (typeof k !== 'object' || Array.isArray(k)) reasons.push(`${where}.cluster must be an object`);
+      else {
+        const ex = Object.keys(k).filter((x) => x !== 'p_threshold').sort();
+        if (ex.length) reasons.push(`${where}.cluster has unknown keys: ${ex.join(', ')}`);
+        const p = k.p_threshold ?? 0.05;
+        if (!(num(p) && p > 0 && p <= 0.5)) reasons.push(`${where}.cluster: p_threshold must be above 0 and at most 0.5`);
+      }
+    }
   });
   return reasons;
 }

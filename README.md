@@ -100,6 +100,7 @@ benchmark*.
 | Cohort: declared exclusions, attrition funnel, baseline-corrected epochs | done — `npm run cohort -- <study>` |
 | Per-stimulus gaze/AOI/face results, degree-blurred heatmaps, audited export zip (CSV + BIDS-style) | done — `npm run export -- <study>` |
 | Cohort page in the researcher app (funnel, epoch curves, heatmaps) | done — `/cohort.html`; `npm run verify:cohort-view` |
+| Statistics between arms: declared contrasts, participant-first means, permutation + cluster tests, Holm, generated R (lme4/mgcv) | done — `server/inference.py`; on the cohort page and in the export |
 | Study builder: form, live validation + consent preview, participant-journey diagram per condition, stimulus upload, used studies fixed | done — `/builder.html`; `tools/verify_builder.mjs` |
 | Codebook builder: defined categories, moments typed / gridded / sampled at random / picked from a recording, the rater's view, versions | done — `/codebook.html`; `npm run verify:codebook` |
 
@@ -515,6 +516,66 @@ loads, decodes and even plays, but reports duration `NaN` and cannot seek. That
 is the failure a coder would actually hit, since they could not jump to a
 moment. (The readyState-0 stall above was the 119 MB capture served without
 ranges.)
+
+### Statistics between arms
+
+A study declares its contrasts in `analysis.contrasts` before anyone is
+recorded. Each one fixes:
+
+- the epoch set and channel;
+- the two arms;
+- the window;
+- the number of permutations and the seed;
+- the tail;
+- optionally, a cluster threshold.
+
+Both mirrors validate it (`web/src/study.js` and `server/study.py`). It is
+covered by the analysis hash, not the protocol hash, so declaring one never
+changes what participants did. `studies/panel-example.json` carries one.
+
+`server/inference.py` runs it:
+
+- **Participants, not epochs, are the unit.** Each participant's epochs are
+  averaged first. Before this, the cohort page pooled epochs, so whoever sat
+  longest dominated the curve.
+  - A participant recorded in two arms is refused.
+  - Self-test sessions share the id "anonymous" but are not one person, so
+    each counts on its own.
+- **The window test** gives:
+  - the difference in arm means;
+  - a permutation p-value, enumerated exactly when the arrangements fit the
+    budget;
+  - a within-arm bootstrap CI;
+  - Hedges' g;
+  - Holm correction across every contrast in the plan.
+- **The cluster-based permutation test** (Maris & Oostenveld 2007) covers the
+  whole time course. Clusters are contiguous runs where Welch's t crosses the
+  threshold, scored by their summed t, against the largest cluster under
+  permuted labels.
+  - Its p belongs to the cluster, not to its edges.
+  - Time points with fewer than 3 participants per arm break a cluster rather
+    than join it.
+- **Refusals, not small numbers:**
+  - `too_few_per_arm`, below 3;
+  - `underpowered_by_construction`, when even perfect separation could not
+    reach alpha (3 vs 3 gives 20 arrangements, so the smallest two-sided p is
+    0.10);
+  - `no_conditions`.
+
+The tests plant effects and nulls. A planted effect is found where it was put.
+On 100 null cohorts the window test stays under the 99% binomial bound for
+α = .05, and so does the cluster test on 60. Bootstrap coverage is at least
+88%. The same seed gives the same numbers.
+
+The export adds:
+
+- `csv/contrasts.csv`, `csv/clusters.csv` and `csv/participant_epochs_<set>.csv`,
+  each stamped with the analysis hash and the seed;
+- `analysis/<contrast>.R`, which contains `lmer` on window means and a
+  `mgcv::bam` GAMM on the time course. It is marked **generated, not run**:
+  the random-effects structure is the researcher's to defend (REPORT.md §4.4).
+  A new compiled Python dependency was not an option here, because Windows
+  Application Control blocks new `.pyd` files.
 
 ## Core design decisions
 

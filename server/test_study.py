@@ -263,6 +263,38 @@ def test_analysis_refusals_mirror_the_browser():
     assert "resample_hz" in r({"epochs": [{**base, "resample_hz": 0}]})
 
 
+def _with_contrast(**over):
+    epochs = [{"name": "e", "event_type": "stimulus", "channels": ["c"], "pre_ms": 500, "post_ms": 2000}]
+    c = {"name": "k", "epochs": "e", "channel": "c", "arms": ["A", "B"], "window_ms": [200, 1000],
+         "n_permutations": 5000, "seed": 1, "cluster": {"p_threshold": 0.05}}
+    c.update(over)
+    return study(conditions={"arms": ["A", "B"]}, analysis={"epochs": epochs, "contrasts": [c]})
+
+
+def test_a_declared_contrast_validates_and_leaves_the_protocol_hash_alone():
+    assert validate_study(_with_contrast()).ok, _reasons(_with_contrast())
+    assert content_hash(_with_contrast()) == content_hash(study(conditions={"arms": ["A", "B"]}))
+
+
+def test_contrast_refusals_mirror_the_browser():
+    r = lambda **o: _reasons(_with_contrast(**o))  # noqa: E731
+    assert "unknown keys: windows_ms" in r(windows_ms=[0, 1])
+    assert "epoch set in analysis.epochs" in r(epochs="nope")
+    assert "one of that epoch set's channels" in r(channel="x")
+    assert "two different arms" in r(arms=["A", "A"])
+    assert "two different arms" in r(arms=["A", "C"])
+    assert "inside the epoch" in r(window_ms=[-900, 100])
+    assert "from 1000 to 100000" in r(n_permutations=10)
+    assert "seed must be a whole number" in r(seed=True)
+    assert "seed must be a whole number" not in r(seed=3.0)        # 3.0 is whole in JS too
+    assert "tail must be" in r(tail="both")
+    assert "p_threshold" in r(cluster={"p_threshold": 2})
+    assert "cluster has unknown keys: tail" in r(cluster={"tail": "two"})
+    no_arms = study(analysis=_with_contrast()["analysis"])
+    assert "defines no conditions" in _reasons(no_arms)
+    assert "must be a list" in _reasons(study(analysis={"contrasts": None}))
+
+
 def test_the_in_browser_tier_may_be_offered_for_gaze_and_face():
     s = study(consent_tiers=["features_in_browser", "features_only"],
               default_tier="features_in_browser", modalities=["gaze", "face"])

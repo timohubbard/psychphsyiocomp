@@ -423,6 +423,36 @@ test('analysis refusals mirror server/study.py', () => {
   assert.equal(r({ exclusions: [{ metric: 'achieved_fps', min: 5 }], epochs: [base] }), '');
 });
 
+const withContrast = (over = {}) => {
+  const epochs = [{ name: 'e', event_type: 'stimulus', channels: ['c'], pre_ms: 500, post_ms: 2000 }];
+  const c = { name: 'k', epochs: 'e', channel: 'c', arms: ['A', 'B'], window_ms: [200, 1000],
+    n_permutations: 5000, seed: 1, cluster: { p_threshold: 0.05 }, ...over };
+  return study({ conditions: { arms: ['A', 'B'] }, analysis: { epochs, contrasts: [c] } });
+};
+
+test('a declared contrast validates and leaves the protocol hash alone', async () => {
+  assert.deepEqual(validateStudy(withContrast()).reasons, []);
+  assert.equal(await contentHash(withContrast()), await contentHash(study({ conditions: { arms: ['A', 'B'] } })));
+});
+
+test('contrast refusals mirror server/study.py', () => {
+  const r = (over) => validateStudy(withContrast(over)).reasons.join(' | ');
+  assert.match(r({ windows_ms: [0, 1] }), /unknown keys: windows_ms/);
+  assert.match(r({ epochs: 'nope' }), /epoch set in analysis\.epochs/);
+  assert.match(r({ channel: 'x' }), /one of that epoch set's channels/);
+  assert.match(r({ arms: ['A', 'A'] }), /two different arms/);
+  assert.match(r({ arms: ['A', 'C'] }), /two different arms/);
+  assert.match(r({ window_ms: [-900, 100] }), /inside the epoch/);
+  assert.match(r({ n_permutations: 10 }), /from 1000 to 100000/);
+  assert.match(r({ seed: true }), /seed must be a whole number/);
+  assert.doesNotMatch(r({ seed: 3.0 }), /seed must be a whole number/);
+  assert.match(r({ tail: 'both' }), /tail must be/);
+  assert.match(r({ cluster: { p_threshold: 2 } }), /p_threshold/);
+  assert.match(r({ cluster: { tail: 'two' } }), /cluster has unknown keys: tail/);
+  assert.match(validateStudy(study({ analysis: withContrast().analysis })).reasons.join(), /defines no conditions/);
+  assert.match(validateStudy(study({ analysis: { contrasts: null } })).reasons.join(), /must be a list/);
+});
+
 test('the shipped stimulus example validates', async () => {
   const fs = await import('node:fs/promises');
   const s = JSON.parse(await fs.readFile('studies/stimulus-example.json', 'utf8'));

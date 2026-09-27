@@ -113,22 +113,27 @@ def cohort_view(data_root: Path, study: dict, *, include_developer: bool,
     from cohort import EpochSpec, epochs, select
     from stimulus_summary import DEFAULT_HEATMAP_SIGMA_DEG, heatmap
 
+    from inference import participant_curves, pooled_mean, run_contrasts
+
     c = select(data_root, study, include_developer=include_developer, allow_mixed=allow_mixed)
     analysis = study.get("analysis") or {}
-    epoch_sets = []
+    epoch_sets, rows_by_set = [], {}
     for d in analysis.get("epochs", []):
         spec = EpochSpec.from_study(d)
         rows, refusals = epochs(data_root, c.included, spec)
-        curves: dict[str, dict[float, list[float]]] = {}
-        for r in rows:
-            curves.setdefault(r["channel"], {}).setdefault(r["t_ms"], []).append(r["value_bc"])
+        rows_by_set[spec.name] = rows
+        # Mean of PARTICIPANT means: someone with ten epochs is one person, and
+        # pooling epochs let whoever sat longest dominate the curve.
+        per = {ch: participant_curves(rows, ch) for ch in spec.channels}
         epoch_sets.append({
             "name": spec.name, "event_type": spec.event_type,
             "n_epochs": len({(r["session_id"], r["epoch"]) for r in rows}),
+            "n_participants": max((len(pc.by_participant) for pc in per.values()), default=0),
+            "averaging": "mean of participant means",
             "refusals": len(refusals),
-            "curves": {ch: [{"t_ms": t, "mean": sum(v) / len(v), "n": len(v)}
-                            for t, v in sorted(pts.items())] for ch, pts in curves.items()},
+            "curves": {ch: pooled_mean(pc) for ch, pc in per.items() if pc.by_participant},
         })
+    contrasts = run_contrasts(analysis, rows_by_set) if analysis.get("contrasts") else []
     sigma = analysis.get("heatmap_sigma_deg", DEFAULT_HEATMAP_SIGMA_DEG)
     heatmaps = []
     for t in study.get("tasks") or []:
@@ -146,7 +151,7 @@ def cohort_view(data_root: Path, study: dict, *, include_developer: bool,
         "funnel": [{"step": f.label, "remaining": f.remaining,
                     "excluded": [{"session_id": s, "reason": r} for s, r in f.excluded]}
                    for f in c.funnel],
-        "epochs": epoch_sets, "heatmaps": heatmaps,
+        "epochs": epoch_sets, "heatmaps": heatmaps, "contrasts": contrasts,
     }
 
 

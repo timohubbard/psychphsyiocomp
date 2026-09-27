@@ -35,12 +35,25 @@ async function main() {
         return { w: c.width, h: c.height, lit };
       }),
       pictures: [...document.querySelectorAll('.heat img')].map((i) => i.naturalWidth),
+      heatPanels: document.querySelectorAll('.heat').length,
+      contrasts: [...document.querySelectorAll('.contrast')].map((p) => ({
+        curves: p.querySelectorAll('.arm-curve').length,
+        refused: /Refused —/.test(p.innerText),
+        text: p.querySelector('.t')?.innerText ?? '' })),
       error: document.querySelector('#main .note.bad')?.textContent ?? null,
     }))()`);
     checks.push(['funnel rendered', r.rows.length > 0, r.rows.join(' | ')]);
     checks.push(['an epoch curve was drawn', r.curves > 0, `${r.curves} curve(s)`]);
-    checks.push(['a heatmap was painted', r.canvases.some((c) => c.lit > 0),
-      r.canvases.map((c) => `${c.w}x${c.h} lit ${c.lit}`).join(', ') || 'none']);
+    // Only a study that shows stimuli has heatmaps to paint.
+    if (r.heatPanels) {
+      checks.push(['a heatmap was painted', r.canvases.some((c) => c.lit > 0),
+        r.canvases.map((c) => `${c.w}x${c.h} lit ${c.lit}`).join(', ')]);
+    }
+    // A declared contrast renders as both arms' curves — or as a refusal in words.
+    for (const c of r.contrasts) {
+      checks.push([`contrast ${c.text.split(':')[0]}`, c.refused || c.curves === 2,
+        c.refused ? 'refused, with its reason shown' : `${c.curves} arm curves`]);
+    }
     // A picture's heatmap is only readable over the picture; a video has none underneath.
     checks.push(['pictures under the heatmaps', r.pictures.every((w) => w > 0),
       r.pictures.length ? `${r.pictures.length} loaded` : 'no picture stimuli']);

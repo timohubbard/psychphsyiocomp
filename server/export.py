@@ -39,6 +39,7 @@ sys.path.insert(0, str(ROOT / "packages" / "engine-contract" / "python"))
 sys.path.insert(0, str(ROOT / "server"))
 
 from cohort import EpochSpec, attrition_rows, epochs, select  # noqa: E402
+from inference import as_rows, participant_curves, participant_rows, run_contrasts  # noqa: E402
 from pseudonym import links  # noqa: E402
 from stimulus_summary import (DEFAULT_HEATMAP_SIGMA_DEG, heatmap, heatmap_png,  # noqa: E402
                               session_summary)
@@ -110,6 +111,25 @@ def build(out: Path, study: dict[str, Any], zip_path: Path, *,
         files[f"csv/epochs_{spec.name}.csv"] = _csv_bytes(rows)
     files["csv/epoch_refusals.csv"] = _csv_bytes(refusals)
 
+    # What every test below ran on: one curve per participant, not per epoch.
+    for name, (spec, rows) in epoch_rows_by.items():
+        prow = []
+        for ch in spec.channels:
+            prow += participant_rows(participant_curves(rows, ch), name, ch)
+        files[f"csv/participant_epochs_{name}.csv"] = _csv_bytes(prow)
+    contrast_summary = []
+    if analysis.get("contrasts"):
+        results = run_contrasts(analysis, {n: rows for n, (_, rows) in epoch_rows_by.items()})
+        crow, clrow = as_rows(results, cohort.analysis_hash)
+        files["csv/contrasts.csv"] = _csv_bytes(crow)
+        files["csv/clusters.csv"] = _csv_bytes(clrow)
+        for c in analysis["contrasts"]:
+            files[f"analysis/{c['name']}.R"] = r_script(
+                c, epoch_rows_by[c["epochs"]][0], study_id=cohort.study_id,
+                protocol=cohort.content_hash, analysis=cohort.analysis_hash).encode("utf-8")
+        contrast_summary = [{"name": r["name"], "seed": r["seed"], "n_permutations": r["n_permutations"],
+                             "refusal": (r.get("refusal") or {}).get("reason")} for r in results]
+
     # Facial response per stimulus: the mean baseline-corrected value over the
     # time the stimulus was up, from every epoch set locked to stimuli.
     face = {}
@@ -165,6 +185,7 @@ def build(out: Path, study: dict[str, Any], zip_path: Path, *,
         "include_developer": include_developer, "allow_mixed": allow_mixed,
         "funnel": [{"step": f.label, "remaining": f.remaining} for f in cohort.funnel],
         "heatmaps": heat_summary,
+        "contrasts": contrast_summary,
         "participant_ids": "pseudonymous (server/pseudonym.py); no raw panel identifier "
                            "is in this archive — audited before it was written",
     }, indent=2).encode("utf-8")
@@ -176,6 +197,55 @@ def build(out: Path, study: dict[str, Any], zip_path: Path, *,
             z.writestr(name, data)
     return {"zip": str(zip_path), "files": len(files), "sessions": len(sessions),
             "funnel": [(f.label, f.remaining) for f in cohort.funnel]}
+
+
+def r_script(contrast: dict[str, Any], spec: EpochSpec, *, study_id: str, protocol: str,
+             analysis: str) -> str:
+    """A mixed-model analysis of one declared contrast, as R — generated, not run.
+
+    The permutation tests in contrasts.csv are the preregistered result. A mixed
+    model is the analysis a reviewer will ask for next (REPORT.md §4.4: random
+    intercepts for participant and item, GAMMs for the time course), and
+    fitting one well means choices about random slopes that should be made by
+    the person defending them. So this writes the model rather than running a
+    guess at it, with the hashes that say which data and which plan it is for.
+    """
+    lo, hi = contrast["window_ms"]
+    a, b = contrast["arms"]
+    items = spec.event_type == "stimulus"
+    item_term = " + (1 | stimulus_id)" if items else ""
+    item_by = " + stimulus_id" if items else ""
+    return f"""# GENERATED, NOT RUN — review every modelling choice before relying on it.
+# study {study_id} · protocol {protocol} · analysis plan {analysis}
+# contrast "{contrast['name']}": {a} vs {b} on {contrast['channel']} ({contrast['epochs']}), window {lo}..{hi} ms
+#
+# The preregistered result is the permutation test in csv/contrasts.csv
+# (seed {contrast['seed']}, {contrast['n_permutations']} permutations). These models are the
+# follow-up a reviewer will ask for; their random-effects structure is yours to defend.
+# Self-test sessions share participant_id "anonymous" but are not one person: an
+# export for analysis should not contain them (npm run export without --include-developer).
+
+library(lme4)
+library(mgcv)
+
+d <- read.csv("csv/epochs_{contrast['epochs']}.csv")
+d <- subset(d, channel == "{contrast['channel']}" & condition %in% c("{a}", "{b}"))
+d$condition <- factor(d$condition, levels = c("{b}", "{a}"))   # estimate: {a} minus {b}
+d$participant_id <- factor(d$participant_id)
+
+# 1. Window means, one per epoch, with random intercepts for participant{' and stimulus' if items else ''}.
+w <- aggregate(value_bc ~ participant_id + session_id + epoch{item_by} + condition,
+               data = subset(d, t_ms >= {lo} & t_ms <= {hi}), FUN = mean)
+m_window <- lmer(value_bc ~ condition + (1 | participant_id){item_term}, data = w)
+summary(m_window)
+
+# 2. The time course: a smooth per condition, and a random smooth per participant
+#    (factor smooths, van Rij et al. 2019). Compare with the cluster test in csv/clusters.csv.
+m_time <- bam(value_bc ~ condition + s(t_ms, by = condition, k = 20)
+              + s(t_ms, participant_id, bs = "fs", m = 1, k = 10),
+              data = d, discrete = TRUE)
+summary(m_time)
+"""
 
 
 def _bids(study: dict[str, Any], sessions: list[dict[str, Any]], events: list[dict[str, Any]],

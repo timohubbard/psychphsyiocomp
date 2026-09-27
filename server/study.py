@@ -154,7 +154,7 @@ def validate_study(study: Any) -> Verdict:
     elif isinstance(study.get("tasks"), list):
         reasons.extend(_stimuli_reasons(study["tasks"]))
     reasons.extend(_condition_reasons(study))
-    reasons.extend(_analysis_reasons(study.get("analysis")))
+    reasons.extend(_analysis_reasons(study.get("analysis"), study))
     rec = study.get("recruitment")
     if isinstance(rec, dict) and "completion_url" in rec and not _safe_completion_url(
             rec["completion_url"]):
@@ -256,7 +256,7 @@ def _num(v: Any) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
 
 
-def _analysis_reasons(a: Any) -> list[str]:
+def _analysis_reasons(a: Any, study: dict | None = None) -> list[str]:
     """Mirror of ``analysisReasons``: the pre-declared analysis plan (server/cohort.py)."""
     if a is None:
         return []
@@ -303,6 +303,81 @@ def _analysis_reasons(a: Any) -> list[str]:
         hz = e.get("resample_hz", 30)
         if not (_num(hz) and 0 < hz <= 1000):
             reasons.append(f"{where}: resample_hz must be between 0 and 1000")
+    reasons.extend(_contrast_reasons(a, study))
+    return reasons
+
+
+_CONTRAST_KEYS = {"name", "epochs", "channel", "arms", "window_ms", "n_permutations",
+                  "seed", "alpha", "tail", "cluster"}
+
+
+def _whole(v: Any) -> bool:
+    """Number.isInteger's meaning: 5000 and 5000.0 are whole, True is not a number."""
+    return (isinstance(v, int) and not isinstance(v, bool)) or (isinstance(v, float) and v.is_integer())
+
+
+def _contrast_reasons(a: dict, study: dict) -> list[str]:
+    """Mirror of ``contrastReasons``: declared contrasts (server/inference.py)."""
+    if "contrasts" not in a:          # absent; an explicit null is "must be a list", as in JS
+        return []
+    study = study or {}
+    cs = a.get("contrasts")
+    if not isinstance(cs, list):
+        return ["analysis.contrasts must be a list"]
+    sets = {e.get("name"): e for e in (a.get("epochs") if isinstance(a.get("epochs"), list) else [])
+            if isinstance(e, dict)}
+    arms = (study.get("conditions") or {}).get("arms") if isinstance(study.get("conditions"), dict) else None
+    arms = arms if isinstance(arms, list) else []
+    reasons: list[str] = []
+    names: set = set()
+    for i, c in enumerate(cs):
+        where = f"analysis.contrasts[{i}]"
+        if not isinstance(c, dict):
+            reasons.append(f"{where} must be an object")
+            continue
+        extra = sorted(set(c) - _CONTRAST_KEYS)
+        if extra:
+            reasons.append(f"{where} has unknown keys: {', '.join(extra)}")
+        if not _is_id(c.get("name")) or c.get("name") in names:
+            reasons.append(f"{where} needs a unique slug name")
+        names.add(c.get("name"))
+        s = sets.get(c.get("epochs"))
+        if s is None:
+            reasons.append(f"{where}: epochs must name an epoch set in analysis.epochs")
+        elif not isinstance(s.get("channels"), list) or c.get("channel") not in s["channels"]:
+            reasons.append(f"{where}: channel must be one of that epoch set's channels")
+        ca = c.get("arms")
+        if not arms:
+            reasons.append(f"{where}: a contrast compares arms, and the study defines no conditions")
+        elif not (isinstance(ca, list) and len(ca) == 2 and ca[0] != ca[1] and all(x in arms for x in ca)):
+            reasons.append(f"{where}: arms must be two different arms from conditions.arms")
+        w = c.get("window_ms")
+        if not (isinstance(w, list) and len(w) == 2 and all(_num(x) for x in w) and w[0] < w[1]
+                and s is not None and _num(s.get("pre_ms")) and _num(s.get("post_ms"))
+                and w[0] >= -s["pre_ms"] and w[1] <= s["post_ms"]):
+            reasons.append(f"{where}: window_ms must be [start, end] inside the epoch")
+        n = c.get("n_permutations")
+        if not (_whole(n) and 1000 <= n <= 100000):
+            reasons.append(f"{where}: n_permutations must be a whole number from 1000 to 100000")
+        if not _whole(c.get("seed")):
+            reasons.append(f"{where}: seed must be a whole number — the test is random, "
+                           "and the seed makes it repeatable")
+        alpha = c.get("alpha", 0.05)
+        if not (_num(alpha) and 0 < alpha <= 0.5):
+            reasons.append(f"{where}: alpha must be above 0 and at most 0.5")
+        if c.get("tail", "two") not in ("two", "greater", "less"):
+            reasons.append(f"{where}: tail must be two, greater or less")
+        k = c.get("cluster")
+        if k is not None:
+            if not isinstance(k, dict):
+                reasons.append(f"{where}.cluster must be an object")
+            else:
+                ex = sorted(set(k) - {"p_threshold"})
+                if ex:
+                    reasons.append(f"{where}.cluster has unknown keys: {', '.join(ex)}")
+                p = k.get("p_threshold", 0.05)
+                if not (_num(p) and 0 < p <= 0.5):
+                    reasons.append(f"{where}.cluster: p_threshold must be above 0 and at most 0.5")
     return reasons
 
 
