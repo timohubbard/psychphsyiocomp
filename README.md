@@ -99,6 +99,7 @@ session** (83% of fixations on target at 4.5°, need 90%; 3.2° to target vs
 | Cohort: declared exclusions, attrition funnel, baseline-corrected epochs | done — `npm run cohort -- <study>` |
 | Per-stimulus gaze/AOI/face results, degree-blurred heatmaps, audited export zip (CSV + BIDS-style) | done — `npm run export -- <study>` |
 | Cohort page in the researcher app (funnel, epoch curves, heatmaps) | done — `/cohort.html`; `npm run verify:cohort-view` |
+| Study builder: form, live validation + consent preview, stimulus upload, used studies fixed | done — `/builder.html`; `tools/verify_builder.mjs` |
 
 ### Picking this up
 
@@ -125,8 +126,9 @@ session** (83% of fixations on target at 4.5°, need 90%; 3.2° to target vs
   - the Art 6 lawful basis;
   - the Art 9 condition, when face, voice or respiration is recorded.
 
-  Copy an example study and fill it in. The ethics approval itself needs a
-  person.
+  The study builder (`npm run app` → *Study builder*) walks through every
+  field and shows the consent text as participants will read it. The ethics
+  approval itself needs a person.
 - **Sign off the consent wording** — written overnight and live on the consent
   screen, quoted in full under *Awaiting sign-off* below. The DPIA template
   (`docs/dpia-template.md`) and `npm run ropa -- <study>` (the Art 30 record,

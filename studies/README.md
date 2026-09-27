@@ -8,6 +8,38 @@ in `web/src/`.
 The capture page loads `studies/<id>.json` from `?study=<id>`. A definition
 that does not validate does not run — see `web/src/study.js`.
 
+## Building a study: the study builder
+
+`npm run app`, then **Study builder** (`/builder.html`). It is a form over
+everything in this file:
+
+- identity and who the study may be run on;
+- what participants are told, and what is measured;
+- the consent tiers offered;
+- tasks in order, including pictures and videos uploaded straight into
+  `stimuli/` with their hashes computed;
+- conditions and the completion link;
+- the analysis plan;
+- the raw JSON, for anything else.
+
+Beside the form, live:
+
+- whether the capture page will accept the study, with every reason if not;
+- its content hash;
+- the task sequence and its length, per condition;
+- **the consent text a participant will read**.
+
+These come from the capture page's own modules, so the builder cannot call a
+study valid that a participant's page would refuse.
+
+Saving writes `studies/<study_id>.json` and adds it to `index.json`.
+
+- A study that already has sessions is refused, and offered a new id.
+- An existing draft is overwritten only when you confirm.
+- A stimulus file cannot be replaced by different bytes.
+
+Commit the saved files to version them.
+
 ## Immutable once used
 
 **Do not edit a study that has collected a session.** Copy it to a new

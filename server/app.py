@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from functools import partial
@@ -35,6 +36,7 @@ sys.path.insert(0, str(ROOT / "server"))
 
 import annotation_store  # noqa: E402
 import aoi_store  # noqa: E402
+import study_store  # noqa: E402
 from aoi import AOI, AOISet, analyse  # noqa: E402
 from fixations import classify  # noqa: E402
 from retention import collect_sessions, expired, last_sweep, sweep_health  # noqa: E402
@@ -51,6 +53,8 @@ from store import (  # noqa: E402
 )
 
 WEB_DIR = ROOT / "web" / "researcher"
+#: The capture page's modules, served read-only at /src/ for the study builder.
+CAPTURE_SRC = ROOT / "web" / "src"
 
 #: Returned by a route that has already written the response itself.
 SENT = object()
@@ -171,6 +175,8 @@ class Handler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         path, query = parsed.path, parse_qs(parsed.query)
 
+        if path.startswith("/src/"):
+            return self._capture_module(path)
         if not path.startswith("/api/"):
             return super().do_GET()
 
@@ -298,17 +304,44 @@ class Handler(SimpleHTTPRequestHandler):
 
         return None
 
-    def do_POST(self):  # noqa: N802
-        """The write paths, and there are only three.
+    def _capture_module(self, path: str):
+        """The capture page's own study modules, read-only, for the study builder.
 
-        All three write CONFIGURATION or JUDGEMENT, never measurement. An AOI
+        The builder validates, hashes and previews a study with the SAME code
+        the capture page runs (web/src/study.js and what it imports), so it
+        cannot call a study valid that a participant's page would refuse, or
+        preview a consent screen that differs from the real one. Plain module
+        names only; nothing else under web/ is reachable this way.
+        """
+        name = path[len("/src/"):]
+        if not re.fullmatch(r"[a-z_]+\.js", name) or not (CAPTURE_SRC / name).is_file():
+            return self._json({"error": "not_found", "detail": path}, status=404)
+        body = (CAPTURE_SRC / name).read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/javascript; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+        return None
+
+    def do_POST(self):  # noqa: N802
+        """The write paths, and there are only five.
+
+        All five write CONFIGURATION or JUDGEMENT, never measurement. An AOI
         is a question asked of the data afterwards; a codebook is the same; an
-        annotation is a person's answer. Nothing here can alter a row the
-        pipeline wrote, because a UI that could edit a measurement could
-        quietly un-record a refusal.
+        annotation is a person's answer; a study definition and its stimuli
+        are the protocol, fixed once anyone is recorded under it
+        (server/study_store.py). Nothing here can alter a row the pipeline
+        wrote, because a UI that could edit a measurement could quietly
+        un-record a refusal.
         """
         parsed = urlparse(self.path)
 
+        if parsed.path == "/api/studies":
+            return self._post_study()
+        if parsed.path == "/api/stimuli":
+            return self._post_stimulus(parse_qs(parsed.query))
         if parsed.path == "/api/codebooks":
             return self._post_codebook()
         if parsed.path == "/api/annotations":
@@ -429,6 +462,36 @@ class Handler(SimpleHTTPRequestHandler):
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length") or 0)
         return json.loads(self.rfile.read(length) or b"{}")
+
+    def _post_study(self):
+        """Save a study from the builder. See server/study_store.py for the rules."""
+        try:
+            body = self._body()
+            if not isinstance(body.get("study"), dict):
+                raise ValueError("expected {\"study\": {...}}")
+            return self._json(study_store.save_study(
+                STUDIES_ROOT, self.data_root, body["study"],
+                overwrite=bool(body.get("overwrite"))))
+        except study_store.StoreRefused as exc:
+            return self._json({"error": "refused", "detail": str(exc), **exc.extra},
+                              status=exc.status)
+        except (ValueError, json.JSONDecodeError) as exc:
+            return self._json({"error": "bad_request", "detail": str(exc)}, status=400)
+
+    def _post_stimulus(self, query):
+        """Store an uploaded stimulus file; the body is the file's bytes."""
+        name = (query.get("name") or [""])[0]
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            if length > study_store.MAX_STIMULUS_BYTES:
+                self.close_connection = True
+                raise study_store.StoreRefused(
+                    413, f"stimuli are capped at {study_store.MAX_STIMULUS_BYTES // 2**20} MB")
+            data = self.rfile.read(length)
+            return self._json(study_store.save_stimulus(STUDIES_ROOT, name, data))
+        except study_store.StoreRefused as exc:
+            return self._json({"error": "refused", "detail": str(exc), **exc.extra},
+                              status=exc.status)
 
     def _post_codebook(self):
         try:

@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Study builder</title>
+<style>
+  :root {
+    --bg: #101216; --fg: #e8eaed; --muted: #9aa0a6; --accent: #4c8dff;
+    --ok: #5cb85c; --warn: #e0a800; --bad: #d9534f;
+    --panel: #181b21; --border: #262a31; --panel2: #1e222a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  body { display: flex; flex-direction: column; }
+  header { padding: 12px 20px; border-bottom: 1px solid var(--border);
+           display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header a { color: var(--accent); font-size: 12px; }
+  main { flex: 1; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); min-height: 0; }
+  #form { overflow-y: auto; padding: 16px 22px 60px; border-right: 1px solid var(--border); }
+  #side { overflow-y: auto; padding: 16px 22px 60px; }
+  fieldset { border: 1px solid var(--border); border-radius: 8px; margin: 0 0 14px; padding: 10px 14px 12px; }
+  legend { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .07em; padding: 0 6px; }
+  label.f { display: grid; grid-template-columns: 190px 1fr; gap: 10px; align-items: start; margin: 6px 0; }
+  label.f > span { color: var(--muted); font-size: 12.5px; padding-top: 5px; }
+  label.f > span.req::after { content: " *"; color: var(--warn); }
+  input, select, textarea {
+    background: var(--panel); color: var(--fg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 13px; width: 100%; }
+  input[type=checkbox] { width: auto; }
+  textarea { min-height: 54px; resize: vertical; }
+  .check { display: flex; gap: 8px; align-items: flex-start; margin: 4px 0; }
+  .check small { color: var(--muted); display: block; }
+  button { background: transparent; border: 1px solid var(--border); color: var(--fg);
+           padding: 5px 11px; border-radius: 6px; font-size: 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-size: 13px; padding: 7px 16px; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .task { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin: 8px 0; }
+  .task .head { display: flex; gap: 8px; align-items: center; }
+  .task .head b { flex: 1; font-size: 13px; }
+  .row { display: flex; gap: 8px; align-items: center; margin: 4px 0; }
+  .row > * { flex: 1; }
+  .row > button { flex: 0 0 auto; }
+  .muted { color: var(--muted); font-size: 12px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 18px 0 8px; font-weight: 600; }
+  h2:first-child { margin-top: 0; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); }
+  ul.reasons { margin: 4px 0; padding-left: 18px; color: #e3b1af; font-size: 12.5px; }
+  .preview { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-size: 13px; }
+  .preview p { margin: 6px 0; }
+  .preview .tier { border-top: 1px solid var(--border); padding-top: 6px; margin-top: 6px; }
+  .preview .tier ul { margin: 2px 0; padding-left: 18px; color: var(--muted); font-size: 12.5px; }
+  code, .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+  table.seq { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  table.seq td { padding: 3px 6px; border-bottom: 1px solid #1c2027; }
+  #json { min-height: 220px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+  #saveResult { margin-top: 8px; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Study builder</h1>
+  <label class="muted">start from
+    <select id="startFrom" style="width:auto"></select></label>
+  <a href="./index.html">sessions</a>
+  <a href="./cohort.html">cohort</a>
+</header>
+<main>
+  <div id="form"></div>
+  <div id="side"></div>
+</main>
+<script type="module" src="./builder.js"></script>
+</body>
+</html>
