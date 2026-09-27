@@ -246,6 +246,11 @@ def main() -> int:
     ap.add_argument("--resp", action="store_true",
                     help="also run the respiration engine (waveform only — it "
                          "does not emit a breathing rate, see its manifest)")
+    ap.add_argument("--rppg", action="store_true",
+                    help="also run the rPPG heart-rate engine. Runs anyway when the "
+                         "session's study declares the `cardiac` modality")
+    ap.add_argument("--no-blinks", action="store_true",
+                    help="skip blink detection (derived from the face engine's output)")
     args = ap.parse_args()
 
     bundle = SessionBundle.from_dir(args.bundle)
@@ -304,6 +309,14 @@ def main() -> int:
         engines.append((_resp.RespirationMotionProfiles(str(POSE_MODEL_PATH)),
                         {"analysis_fps": 10}))
 
+    # A pulse is health data (GDPR Art. 9), so it is measured when the study
+    # asked for it — its `cardiac` modality, disclosed on the consent screen —
+    # or when the researcher asks explicitly, never by default.
+    study_mods = (bundle.metadata.get("study") or {}).get("modalities") or []
+    if args.rppg or "cardiac" in study_mods:
+        _rppg = load_engine_module("cardiac.rppg_pos")
+        engines.append((_rppg.RppgPOS(str(MODEL_PATH)), {}))
+
     # Opt-in, because it is the slowest thing in the pipeline by a wide margin:
     # ~0.25s per analysed frame on CPU against a few milliseconds for the others.
     # Off by default so the common path stays fast, rather than silently skipped
@@ -329,6 +342,9 @@ def main() -> int:
         stages.append(("gaze", _gaze_stage))
     if not args.no_voice:
         stages.append(("voice", _voice_stage))
+    if not args.no_blinks:
+        from blinks import run_blinks
+        stages.append(("blinks", lambda writer, bundle, solution: run_blinks(writer)))
     if args.transcript:
         stages.append(("transcript", _transcript_stage_factory(
             WHISPER_DIR, {"model_size": args.whisper_model})))
@@ -432,6 +448,29 @@ def main() -> int:
                   f"   luma {resp_q.get('mean_luminance', 0):.0f}")
             print("    rate         withheld: no validation study exists "
                   "(see engine.manifest.json)")
+
+    b = summary.get("blinks")
+    if b:
+        print(f"\n  blinks         status={b['status']}")
+        if b["status"] == "ok":
+            print(f"    rate         {b.get('blink_rate_per_min', 0):.1f} per minute of face-present time "
+                  f"({int(b.get('blink_count', 0))} blinks, median {b.get('blink_duration_median_ms', 0):.0f} ms)")
+            print(f"    closures     {int(b.get('eye_closure_count', 0))} longer than a blink; "
+                  f"eyes closed {b.get('eyes_closed_fraction', 0):.1%} of the time")
+            print(f"    from         {b['from_source']}")
+        else:
+            print(f"    {b.get('refusal')}")
+
+    rppg_q = {r["metric"]: r["value"] for r in read_session(args.out, bundle.session_id, "quality").to_pylist()
+              if r["source"].startswith("cardiac.")}
+    if rppg_q:
+        print("\n  heart rate     rPPG (POS) — UNVALIDATED until compared with a reference")
+        print(f"    windows      {rppg_q.get('hr_window_pass_rate', 0):.0%} passed the SNR and "
+              f"luminance gates")
+        if "hr_median_bpm" in rppg_q:
+            print(f"    median       {rppg_q['hr_median_bpm']:.0f} bpm over passing windows")
+        print(f"    skin luma    {rppg_q.get('mean_luminance', 0):.0f}   face found "
+              f"{rppg_q.get('face_found_rate', 0):.0%}")
 
     if args.aus:
         from store import agreement_report

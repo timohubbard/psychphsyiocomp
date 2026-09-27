@@ -67,6 +67,16 @@ export const MODALITIES = [
       + 'others (§6.3).',
     measures: 'the movement of your chest and shoulders as you breathe',
   },
+  {
+    id: 'cardiac',
+    label: 'Heart rate (pulse from the face)',
+    needs: ['camera'],
+    note: 'Heart rate only, per 10 s window, and only where the signal clears '
+      + 'a quality gate. Unvalidated until checked against a chest strap; no '
+      + 'HRV. Health data under GDPR Art. 9, like respiration. Needs good light, '
+      + 'a still face and a high-bitrate recording.',
+    measures: 'your pulse, from small changes in the colour of your skin',
+  },
 ];
 
 export const MODALITY_IDS = MODALITIES.map((m) => m.id);
@@ -93,8 +103,9 @@ export function audienceOf(study) {
  * the controller's aim and the inference's accuracy irrelevant to whether data
  * "reveals" health, so respiration and affect-adjacent streams (facial action
  * units, vocal arousal features) default to Art 9. Gaze alone does not.
+ * Heart rate is health data on its face (Art. 4(15)), whatever it is used for.
  */
-export const SPECIAL_CATEGORY_MODALITIES = ['face', 'voice', 'respiration'];
+export const SPECIAL_CATEGORY_MODALITIES = ['face', 'voice', 'respiration', 'cardiac'];
 
 /**
  * A contact line that is still a template. The shipped studies' contact reads

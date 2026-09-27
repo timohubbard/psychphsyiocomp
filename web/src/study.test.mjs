@@ -13,7 +13,9 @@ import test from 'node:test';
 import { MAX_RETENTION_DAYS } from './consent.js';
 import {
   AUDIO_MODALITIES,
+  BROWSER_MODALITIES,
   MODALITIES,
+  SPECIAL_CATEGORY_MODALITIES,
   audienceOf,
   canonicalise,
   contentHash,
@@ -238,6 +240,16 @@ test('respiration declares its legal standing where it is ticked', () => {
   const resp = MODALITIES.find((m) => m.id === 'respiration');
   assert.match(resp.note, /4\(15\)/);
   assert.match(resp.note, /no breathing rate/i);
+});
+
+test('heart rate declares that it is health data, unvalidated and without HRV', () => {
+  const c = MODALITIES.find((m) => m.id === 'cardiac');
+  assert.match(c.note, /Art\. 9/);
+  assert.match(c.note, /unvalidated/i);
+  assert.match(c.note, /no HRV/);
+  assert.ok(SPECIAL_CATEGORY_MODALITIES.includes('cardiac'));
+  assert.ok(!BROWSER_MODALITIES.includes('cardiac'));
+  assert.equal(needsAudio(study({ modalities: ['cardiac'] })), false);
 });
 
 test('voice declares that no valence channel exists', () => {
@@ -511,7 +523,7 @@ test('the in-browser tier may be offered for gaze and face', () => {
 
 test('the in-browser tier is refused for modalities only a server can measure', () => {
   // The participant would consent to a measurement that then never happens.
-  for (const m of ['voice', 'respiration']) {
+  for (const m of ['voice', 'respiration', 'cardiac']) {
     const s = study({ consent_tiers: ['features_in_browser'], default_tier: 'features_in_browser',
       modalities: ['gaze', m] });
     assert.match(validateStudy(s).reasons.join(), new RegExp(`${m} can only be measured`));

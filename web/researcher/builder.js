@@ -29,7 +29,7 @@ const has = (arr, v) => Array.isArray(arr) && arr.includes(v);
 const pathAttr = (path) => esc(JSON.stringify(path));
 
 /** A measure's colour: the journey's colour for what it produces. */
-const MODALITY_COLOR = { gaze: KINDS.gaze.color, face: KINDS.face.color, voice: KINDS.voice.color, respiration: '#2bb3c0' };
+const MODALITY_COLOR = { gaze: KINDS.gaze.color, face: KINDS.face.color, voice: KINDS.voice.color, respiration: '#2bb3c0', cardiac: '#d6455d' };
 
 let study = blankStudy();
 let savedAs = JSON.stringify(study);   // what is on disk, to tell "unsaved changes"
@@ -138,7 +138,7 @@ function render() {
         ${field('Special category condition (Art 9)', ['disclosure', 'special_category_basis'], { required: participants && special.length > 0,
           placeholder: 'e.g. Art 9(2)(j) — scientific research',
           help: special.length ? `Needed because ${joinAnd(special)} ${special.length === 1 ? 'is' : 'are'} treated as special-category data.`
-            : 'Needed when face, voice or respiration is measured.' })}
+            : 'Needed when face, voice, respiration or heart rate is measured.' })}
       </div>`)}
 
     ${section('measures', `

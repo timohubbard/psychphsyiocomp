@@ -454,6 +454,14 @@ class CanonicalWriter:
     def signal_count(self) -> int:
         return len(self._signals)
 
+    def signal_rows(self, channels: set[str] | frozenset[str],
+                    source: str | None = None) -> list[dict[str, Any]]:
+        """Rows already added this run, for a stage that derives from an engine's
+        output (server/blinks.py) — read here, not re-read from disk, because the
+        tables are only written when the writer closes."""
+        return [r for r in self._signals
+                if r["channel"] in channels and (source is None or r["source"] == source)]
+
     def sources(self) -> set[str]:
         return {r["source"] for r in self._signals}
 

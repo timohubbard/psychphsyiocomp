@@ -61,7 +61,7 @@ it can run a study end to end:**
 What it still needs is a deployment, an ethics approval and people (see
 *Picking this up*).
 
-`npm run check` → licence inventory, 984 tests (280 JS + 704 Python), M0 gate
+`npm run check` → licence inventory, 1032 tests (291 JS + 741 Python), M0 gate
 PASS. `npm run verify:gaze` now gates on **held-out targets only** (2026-09-27):
 PASS on the pilot (5/5), **FAIL on the other three** (4/5, 4/5, 3/5). The old
 gate pooled in the 13 targets the model was fitted on. See *The gaze
@@ -87,6 +87,9 @@ benchmark*.
 | M3 — `voice.opensmile_egemaps` (88 eGeMAPSv02 functionals) | done |
 | M4 — `resp.motion_profiles`, waveform only | done |
 | M4 — respiration validation study against an RIP belt | not started |
+| Blinks: rate, duration and eye closures, derived from the face engine's stored output; per-person threshold | done — `server/blinks.py`, a pipeline stage by default; `npm run blinks` |
+| `cardiac.rppg_pos` — heart rate from skin colour (POS), gated per window on SNR and light, no HRV | done — **unvalidated**; `--rppg` or a study declaring `cardiac` |
+| Heart-rate reference: Bluetooth chest strap on the capture page, Bland–Altman by SNR | done — `?hrstrap=1`, `npm run verify:rppg`; **no strap session recorded yet** |
 | Study definitions — protocol as data, content-hashed | done |
 | `speech.faster_whisper` — transcripts, consent-gated | done — 13% word error on real read-aloud |
 | Clock alignment from both clappers, placed by expected position | done |
@@ -254,6 +257,16 @@ unless noted. Every one is also stored in the session's consent record.
 
    Also for review: questions about mood, health or similar may themselves be
    special-category data, which the study's Art 9 condition must then cover.
+10. **Heart rate** (added 2026-09-27, `measures` of the `cardiac` modality in
+    `web/src/study.js`), joining the list in item 1 for studies that measure it:
+    > your pulse, from small changes in the colour of your skin
+
+    Heart rate is health data (Art 4(15)), so `cardiac` is special-category by
+    default and a participant study needs an Art 9 condition. Also for review:
+    the chest strap (`?hrstrap=1`) is not mentioned in any consent text. It is
+    meant for validation sessions on consenting colleagues or yourself; before a
+    strap is used on participants, the consent screen should say one is worn and
+    what it records (heart rate and beat-to-beat intervals).
 
 Then, most valuable first. The first four need a person or hardware; the rest
 can be done at a keyboard.
@@ -284,6 +297,11 @@ can be done at a keyboard.
    - After that, a better estimator (L2CS-Net, item 5), not further tuning of
      this one.
 4. **Respiration validation** against an RIP belt, before any rate is emitted.
+   **Heart-rate validation** needs only a Bluetooth sport chest strap (any that
+   speaks the standard Heart Rate profile, e.g. Polar H10): run a study that
+   declares `cardiac` with `?hrstrap=1` in Chrome or Edge, connect the strap
+   after consent, record, process, then `npm run verify:rppg`. It suggests an
+   SNR gate only from 3+ sessions and 100+ windows.
 5. L2CS-Net fine-tune (not started; its gaze datasets carry research-only EULAs
    someone has to accept by hand).
 
@@ -336,6 +354,70 @@ Two related decisions this engine encodes:
   beat a single combined 1D profile, and `test_multiple_profiles_beat_a_single_combined_profile`
   measures it rather than asserting it. The reason is phase: chest rise and
   shoulder rotation are not in phase, so naive averaging cancels the signal.
+
+### Heart rate and blinks, from the same video
+
+Two more measures come out of the face video the platform already records. Both
+were added 2026-09-27.
+
+**Blinks** (`server/blinks.py`) are derived from the face engine's stored
+`eyeBlinkLeft`/`eyeBlinkRight` channels, so they cost no extra video decoding
+and re-run over old sessions. Both eyes must close together, which excludes
+winks. The threshold is set **per session**: the open-eye level (median) plus
+the larger of 0.15 or 6 MADs, with hysteresis. On the real sessions, open eyes
+score 0.20–0.22 but blink peaks range 0.50–0.74, and at 20 fps a 150 ms blink is
+three frames. A fixed 0.5 missed blinks.
+
+Closures longer than 500 ms are counted as eye closures, not blinks. The rate is
+per minute of face-present time. `eyes_closed_fraction` is deliberately not
+called PERCLOS, which needs a per-eye aperture calibration a blendshape score
+does not have.
+
+`npm run blinks` (read-only) on the stored sessions:
+
+| Session | Face pass | Blinks | Per minute | Median duration | Closures |
+|---|---|---|---|---|---|
+| s_mucntzzh | server | 20 | 5.3 | 264 ms | 2 |
+| s_mud6trnr | server | 31 | 7.4 | 192 ms | 3 |
+| s_muirbs2a (posed) | server | 35 | 7.3 | 256 ms | 4 |
+| s_mujrz6x7 | server | 24 | 11.1 | 201 ms | 0 |
+| s_mujs3eue | browser | 12 | 6.9 | 272 ms | 1 |
+
+Resting blink rates are usually quoted at 15–20 a minute, but reading and
+screen tasks suppress them. No human-counted blinks exist yet to score this
+against: 10–20 minutes of video counted by hand would settle it.
+
+**Heart rate** (`engines/cardiac.rppg_pos`) uses POS (Wang et al. 2017), our own
+implementation. rPPG-Toolbox's licence carries use restrictions, so it is not
+used. The skin signal comes from the forehead and both cheeks, found by the face
+landmarker and averaged per frame. A rate is given per 10 s window, every 2 s,
+**only** where the window's SNR ≥ 0 dB (de Haan & Jeanne) and skin luminance ≥
+30 (§2.5's fairness threshold). Every window's SNR is stored, so the gates can
+be judged afterwards. It gives no HRV: beat-to-beat timing is beyond webcam
+compression, and the manifest says so.
+
+The engine runs with `--rppg`, or automatically for a study that declares the
+`cardiac` modality, which is special-category like respiration. On three real
+recordings (`npm run rppg -- tempdata/<bundle>`, read-only):
+
+| Session | Recording | Windows passed | Median (IQR) |
+|---|---|---|---|
+| s_mud6trnr | 1280×720, 20.8 fps, 2.8 Mbit/s | 79/121 | 65 bpm (56–71) |
+| s_muirbs2a (posed) | 2.7 Mbit/s | 65/139 | 62 bpm |
+| s_mujrz6x7 | 31 fps, 4.1 Mbit/s | 21/61 | 52 bpm (47–62) |
+
+These are plausible resting rates, **and that is all they are**. With no
+reference, a steady 52 cannot be told apart from a steady wrong answer. The IQRs
+are wide for a seated person, which suggests some passing windows are still
+noise. Every rate is therefore tiered *unvalidated*.
+
+The capture page can read a Bluetooth chest strap (`web/src/hrstrap.js`,
+standard GATT Heart Rate profile, RR intervals from the ECG R-peak) alongside
+the camera, under its own source. `npm run verify:rppg` then gives Bland–Altman
+bias, limits of agreement, MAE and the share within 5 bpm, overall and by SNR
+bin, including windows the gate rejected. It suggests the lowest gate at which
+both the kept windows and the band just above the gate meet MAE ≤ 5 bpm with
+80% within 5. Pooled alone, good windows hid a band of junk in testing.
 
 ## The protocol is data
 
@@ -711,8 +793,10 @@ same webcam video where WebGazer reached 70%.
 
 **`probe()` before `run()`, and ineligibility is recorded.** Never a silent
 skip. This is how the report's traps become machine-enforced rather than tribal
-knowledge — rPPG refuses below a bitrate floor, voice-valence refuses when
-noise suppression was applied, gaze refuses below 5 Hz effective sampling.
+knowledge — rPPG refuses below 10 fps and then gates every 10-second window on
+its own measured SNR (a bitrate floor was planned; what compression did to *this*
+recording is measured instead of guessed from a number), voice-valence refuses
+when noise suppression was applied, gaze refuses below 5 Hz effective sampling.
 
 **Refuse rather than guess.** No anchor → `master_ts` NULL plus a recorded
 reason. A failed chinrest → null geometry plus a reason, and `errorInDegrees`
@@ -1251,6 +1335,8 @@ npm run process -- <dir> --out o/ # bundle -> canonical tables + gaze
 #   --aus    also run Action Units — BOTH engines, so §2.2's spread exists
 #   --au-engines pyfeat|opengraphau   one only (the app will say what is lost)
 #   --resp   also run respiration (waveform only, never a rate)
+#   --rppg   also run camera heart rate (automatic when the study declares cardiac)
+#   --no-blinks   skip blink detection (on by default; reads the face output)
 #   --no-gaze / --no-voice   skip those stages
 npm run app                       # researcher app
 #   --media <dir>   serve session recordings to the annotation page
@@ -1258,6 +1344,9 @@ npm run verify:playback -- <id>   # does that recording play in real Chrome? (ne
 npm run check                     # licences + all tests + M0 gate
 npm run verify:gaze               # do fixations land on the right target?
 npm run bench:gaze                # re-fit every session's gaze from stored features; judge variants
+npm run blinks                    # blink metrics for stored sessions (read-only)
+npm run rppg -- <bundle>          # camera heart rate on a raw recording, before processing (read-only)
+npm run verify:rppg               # camera heart rate against a chest strap: Bland-Altman, by SNR
 npm run verify:m0                 # M0 gate on a synthetic clip
 npm test / test:py / test:all     # JS / Python / both
 npm run licenses                  # licence inventory

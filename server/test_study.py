@@ -352,7 +352,7 @@ def test_the_in_browser_tier_may_be_offered_for_gaze_and_face():
 
 
 def test_the_in_browser_tier_is_refused_for_server_only_modalities():
-    for m in ("voice", "respiration"):
+    for m in ("voice", "respiration", "cardiac"):
         s = study(consent_tiers=["features_in_browser"], default_tier="features_in_browser",
                   modalities=["gaze", m])
         assert f"{m} can only be measured" in _reasons(s)
@@ -574,3 +574,20 @@ def test_a_transcript_tier_needs_a_microphone():
     assert any("no modality records audio" in r for r in v.reasons)
     s["modalities"] = ["face", "voice"]
     assert validate_study(s).ok
+
+
+def test_the_modality_lists_match_the_browser_word_for_word():
+    """The lists are copied by hand; a modality added on one side only would be
+    refused by the other (or, worse, not treated as special category)."""
+    import re
+    from study import (AUDIO_MODALITY_IDS, BROWSER_MODALITY_IDS, MODALITY_IDS,
+                       SPECIAL_CATEGORY_MODALITY_IDS)
+    js = (ROOT / "web" / "src" / "study.js").read_text(encoding="utf-8")
+    block = js[js.index("export const MODALITIES = ["):js.index("export const MODALITY_IDS")]
+    assert tuple(re.findall(r"^\s{4}id: '([a-z]+)'", block, re.M)) == MODALITY_IDS
+
+    def js_list(name):
+        return tuple(re.findall(r"'([a-z]+)'", re.search(rf"export const {name} = \[([^\]]*)\]", js)[1]))
+    assert js_list("SPECIAL_CATEGORY_MODALITIES") == SPECIAL_CATEGORY_MODALITY_IDS
+    assert js_list("BROWSER_MODALITIES") == BROWSER_MODALITY_IDS
+    assert "cardiac" in SPECIAL_CATEGORY_MODALITY_IDS and "cardiac" not in AUDIO_MODALITY_IDS

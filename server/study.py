@@ -36,7 +36,7 @@ CONSENT_TIER_IDS = ("features_in_browser", "features_only", "media_retained",
 BROWSER_MODALITY_IDS = ("gaze", "face")
 
 #: Mirrors MODALITIES in web/src/study.js.
-MODALITY_IDS = ("gaze", "face", "voice", "respiration")
+MODALITY_IDS = ("gaze", "face", "voice", "respiration", "cardiac")
 
 #: Mirrors AUDIO_MODALITIES in web/src/study.js: modalities that need the microphone.
 AUDIO_MODALITY_IDS = ("voice",)
@@ -49,7 +49,7 @@ AUDIENCES = ("developer", "participants")
 
 #: Mirrors SPECIAL_CATEGORY_MODALITIES: treated as Art 9 data by default
 #: (research/pass5-legal-gaps.md — CJEU C-21/23, C-252/21).
-SPECIAL_CATEGORY_MODALITY_IDS = ("face", "voice", "respiration")
+SPECIAL_CATEGORY_MODALITY_IDS = ("face", "voice", "respiration", "cardiac")
 
 #: Mirrors PLACEHOLDER and CONTACT_ROUTE in web/src/study.js.
 _PLACEHOLDER = re.compile(r"replace (this|with)|placeholder|\btodo\b|\btbd\b|example\.[a-z]+",

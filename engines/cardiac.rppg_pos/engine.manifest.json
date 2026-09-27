@@ -1,0 +1,81 @@
+{
+  "engine_id": "cardiac.rppg_pos",
+  "version": "0.1.0",
+  "modality": "cardiac",
+  "runtime": "python-cpu",
+  "placement": "server-batch",
+  "determinism": "deterministic",
+
+  "inputs": [
+    {
+      "kind": "video",
+      "min_fps": 10,
+      "min_resolution": { "width": 320, "height": 240 },
+      "min_roi_luminance": 30
+    }
+  ],
+
+  "params_schema": {
+    "type": "object",
+    "properties": {
+      "hr_window_s": { "type": "number", "default": 10,
+        "description": "Heart-rate window. Long enough for ~7 beats at the slow end of the band and a frequency resolution the SNR can be scored at; short enough to follow a change." },
+      "hr_step_s": { "type": "number", "default": 2,
+        "description": "Step between heart-rate windows." },
+      "min_snr_db": { "type": "number", "default": 0,
+        "description": "A window's rate is emitted only when the pulse peak and its harmonic carry more power than the rest of the band. White noise scores about -4 dB." },
+      "pos_window_s": { "type": "number", "default": 1.6,
+        "description": "POS's own normalisation window (Wang et al. 2017): about one cardiac cycle at the slow end." }
+    },
+    "additionalProperties": false
+  },
+
+  "outputs": {
+    "signals": [
+      { "channel": "cardiac.bvp", "unit": "normalised", "nominal_rate_hz": 30, "value_type": "float",
+        "reliability_tier": "unvalidated",
+        "description": "The POS blood-volume-pulse waveform, band-passed to 0.7-4 Hz, per unbroken stretch with a face. A shape, not a calibrated quantity." },
+      { "channel": "cardiac.hr_bpm", "unit": "bpm", "nominal_rate_hz": 0.5, "value_type": "float",
+        "reliability_tier": "unvalidated",
+        "description": "Heart rate per 10 s window, EMITTED ONLY where the window passes the SNR and skin-luminance gates. Unvalidated in this capture path until compared with a reference (tools: the capture page's Bluetooth heart-rate reference and server/verify_rppg.py)." },
+      { "channel": "cardiac.snr_db", "unit": "dB", "nominal_rate_hz": 0.5, "value_type": "float",
+        "reliability_tier": "high",
+        "description": "Every window's SNR, passing or not, so the gate can be audited and re-drawn." },
+      { "channel": "cardiac.skin_luma", "unit": "level", "nominal_rate_hz": 0.5, "value_type": "float",
+        "reliability_tier": "high",
+        "description": "Mean luminance of the skin region over each window — §2.5's fairness gate, measured where it matters rather than over the whole frame." }
+    ],
+    "events": [
+      { "event_type": "roi_lost", "description": "No face, so no skin region, for more than half a second", "has_offset": true }
+    ],
+    "quality": [
+      { "metric": "face_found_rate", "unit": "proportion", "warn_below": 0.8,
+        "description": "Frames with a located face and a skin region." },
+      { "metric": "hr_window_pass_rate", "unit": "proportion", "warn_below": 0.5,
+        "description": "Share of heart-rate windows that passed both gates. Low means the compression, the lighting or movement erased the pulse — which is reported, not smoothed over." },
+      { "metric": "hr_median_bpm", "unit": "bpm", "warn_below": null,
+        "description": "Median of the passing windows. Session-level summary only." },
+      { "metric": "mean_luminance", "unit": "level", "warn_below": 30,
+        "description": "Median skin-region luminance across the session." }
+    ]
+  },
+
+  "license": {
+    "spdx": "Apache-2.0",
+    "commercial_use": "yes",
+    "url": "https://github.com/google-ai-edge/mediapipe",
+    "notes": "Own implementation of POS (Wang, den Brinker, Stuijk & de Haan 2017, IEEE TBME 64(7)): an algorithm with no trained weights. MediaPipe FaceLandmarker (Apache-2.0) is used ONLY to place the forehead and cheek regions; the landmarks are not retained. The .task bundle's own licence line was NOT verified, same caveat as the other MediaPipe models. rPPG-Toolbox (Responsible AI License) is deliberately NOT used."
+  },
+
+  "provenance": {
+    "training_datasets": [],
+    "paper_doi": "10.1109/TBME.2016.2609282"
+  },
+
+  "capability_notes": {
+    "validation": "REPORT.md §2.4: POS measured MAE 1.67 bpm in the largest in-the-wild study it cites (Woelk et al. 2026, n=77). That is the METHOD's figure, not this capture path's: MediaRecorder VP8/VP9 at the browser's bitrate is not the footage it was measured on, and §2.4 found heavy compression makes unsupervised rPPG worse than guessing 75 bpm. Every rate is therefore tiered UNVALIDATED until server/verify_rppg.py has compared it with a reference in this pipeline.",
+    "no_hrv": "Heart-rate variability is NOT emitted. §2.4: rPPG HRV is usable for group-level comparisons at best, never per participant.",
+    "skin_tone": "§2.5: rPPG error is significantly worse on darker Fitzpatrick types (exp(beta)=1.17), and the gap closes from ~2.25 to ~0.21 bpm at luminance >= 30 — hence the per-window skin-luminance gate. Budget for a fairness audit before any claim across skin tones.",
+    "legal_risk": "A pulse is health data under GDPR Art. 9. Studies measure it only by declaring the `cardiac` modality, which requires the Art 9 condition on the consent screen."
+  }
+}

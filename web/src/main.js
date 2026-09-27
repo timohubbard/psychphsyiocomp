@@ -23,6 +23,7 @@ import { stimulusSizeErrorFraction } from './chinrest.js';
 import { recordsMedia, retainsMedia, runConsent } from './consent.js';
 import { fitRect, preloadStimuli, rectNorm } from './stimuli.js';
 import { uploadAvailable, uploadBundle } from './upload.js';
+import { HeartRateStrap } from './hrstrap.js';
 import {
   assignCondition, completionUrl, manifestParticipantId, panelIdentifiers,
 } from './recruitment.js';
@@ -46,6 +47,7 @@ const ui = {
   btnEnable: el('btnEnable'), btnStart: el('btnStart'), btnDownload: el('btnDownload'),
   chkStream: el('chkStream'), chkLight: el('chkLight'),
   chkFps: el('chkFps'), chkAudio: el('chkAudio'),
+  strapRow: el('strapRow'), btnStrap: el('btnStrap'), chkStrap: el('chkStrap'),
   progress: el('progress'), stimulusBox: el('stimulusBox'),
   hud: el('hud'), hudFps: el('hudFps'), hudFace: el('hudFace'),
   hudLuma: el('hudLuma'), hudStage: el('hudStage'),
@@ -153,6 +155,7 @@ ui.btnEnable.addEventListener('click', async () => {
 
     ui.btnStart.disabled = false;
     ui.btnStart.classList.remove('secondary');
+    offerStrap();
   } catch (err) {
     ui.chkStream.textContent = 'failed';
     ui.chkStream.style.color = 'var(--bad)';
@@ -281,6 +284,46 @@ function reportAudioConstraints(applied) {
       `${stillOn.join(', ')} could not be disabled on this device. ` +
       'Voice channels that rely on speech content may be unreliable.';
   }
+}
+
+/**
+ * The chest-strap reference (hrstrap.js), for validating camera heart rate.
+ * Offered only when the study measures heart rate AND the operator asked for
+ * it with `?hrstrap=1` — it is a validation instrument, not something every
+ * participant is asked to wear — and only after consent, so no reading is
+ * taken before the participant has agreed to their pulse being measured.
+ */
+function offerStrap() {
+  const wanted = new URLSearchParams(location.search).get('hrstrap') === '1'
+    && (state.study?.modalities ?? []).includes('cardiac');
+  if (!wanted || !ui.strapRow) return;
+  ui.strapRow.hidden = false;
+  if (!HeartRateStrap.supported()) {
+    ui.chkStrap.textContent = 'Web Bluetooth unavailable (use Chrome or Edge)';
+    ui.chkStrap.style.color = 'var(--warn)';
+    ui.btnStrap.disabled = true;
+    return;
+  }
+  ui.btnStrap.addEventListener('click', async () => {
+    ui.btnStrap.disabled = true;
+    ui.chkStrap.textContent = 'connecting…';
+    const strap = new HeartRateStrap({
+      onChunk: onEngineOutput,
+      onReading: (r) => {
+        ui.chkStrap.textContent = r.contact === false ? 'no skin contact' : `${r.hr_bpm} bpm`;
+        ui.chkStrap.style.color = r.contact === false ? 'var(--warn)' : 'var(--ok)';
+      },
+    });
+    try {
+      await strap.connect();
+      state.strap = strap;
+      ui.chkStrap.textContent = 'connected';
+    } catch (err) {
+      ui.chkStrap.textContent = `not connected (${err?.message ?? err})`;
+      ui.chkStrap.style.color = 'var(--bad)';
+      ui.btnStrap.disabled = false;
+    }
+  });
 }
 
 function onEngineOutput(chunk) {
@@ -1043,6 +1086,8 @@ function renderSummary() {
  * a download and an upload cannot disagree about what a session contains.
  */
 function bundleFiles() {
+  // The strap buffers readings; the last few seconds would otherwise be lost.
+  state.strap?.flush();
   const manifest = state.recorder.manifest();
   manifest.browser_source = `${state.engine.manifest.engine_id}@${state.engine.manifest.version}+browser-live`;
   manifest.browser_chunk_count = state.chunks.length;

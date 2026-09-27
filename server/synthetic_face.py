@@ -31,6 +31,7 @@ def draw_face(
     mouth_open: float = 0.0,
     gaze_dx: int = 0,
     brightness: int = 0,
+    skin_delta: tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> np.ndarray:
     """Render a detectable synthetic face as a BGR image.
 
@@ -42,8 +43,10 @@ def draw_face(
     img = np.full((height, width, 3), 200, dtype=np.uint8)
     cx, cy = width // 2, height // 2
 
-    # Face oval, in BGR skin tone.
-    cv2.ellipse(img, (cx, cy), (110, 145), 0, 0, 360, (165, 190, 215), -1)
+    # Face oval, in BGR skin tone. `skin_delta` (B, G, R) shifts it — a pulse
+    # for the rPPG test is a small per-frame change here, strongest in green.
+    skin = tuple(int(round(base + d)) for base, d in zip((165, 190, 215), skin_delta))
+    cv2.ellipse(img, (cx, cy), (110, 145), 0, 0, 360, skin, -1)
 
     for dx in (-42, 42):
         eye_x, eye_y = cx + dx, cy - 38

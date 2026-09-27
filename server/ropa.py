@@ -36,6 +36,7 @@ _CATEGORIES = {
     "face": "facial landmark and facial action unit time series (no identity matching)",
     "voice": "voice acoustic features (eGeMAPS functionals)",
     "respiration": "a breathing-movement waveform from chest and shoulder motion",
+    "cardiac": "heart rate estimated from skin-colour change in the face video (health data)",
 }
 
 _TIER_KEEPS = {
