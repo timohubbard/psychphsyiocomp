@@ -4,48 +4,61 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cohort</title>
+<link rel="stylesheet" href="./site.css">
 <style>
-  :root {
-    --bg: #101216; --fg: #e8eaed; --muted: #9aa0a6; --accent: #4c8dff;
-    --ok: #5cb85c; --warn: #e0a800; --bad: #d9534f;
-    --panel: #181b21; --border: #262a31;
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; background: var(--bg); color: var(--fg);
-    font: 14px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  header { padding: 14px 20px; border-bottom: 1px solid var(--border);
-           display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
-  header a { color: var(--accent); font-size: 12px; }
-  select, label { font: inherit; font-size: 12px; color: var(--fg); }
-  select { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 5px 9px; }
-  main { padding: 20px 24px; max-width: 1200px; }
-  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .07em;
-       color: var(--muted); margin: 26px 0 10px; font-weight: 600; }
-  .hash { color: var(--muted); font-size: 12px; font-family: ui-monospace, Menlo, Consolas, monospace; }
-  table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
-  th { text-align: left; color: var(--muted); font-weight: 600; padding: 6px 10px;
-       border-bottom: 1px solid var(--border); font-size: 11px; text-transform: uppercase; }
-  td { padding: 5px 10px; border-bottom: 1px solid #1c2027; vertical-align: top; }
-  td.n { font-family: ui-monospace, Menlo, Consolas, monospace; width: 70px; }
-  .why { color: var(--muted); font-size: 12px; }
+  .toolbar { display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap; padding: 12px 24px;
+    border-bottom: 1px solid var(--border); }
+  .toolbar .study { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
+  .toolbar select { min-width: 220px; }
+  main { padding: 22px 24px 60px; max-width: 1240px; }
+  .hash { color: var(--muted); font-size: 12px; font-family: var(--mono); }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600;
+    margin: 30px 0 12px; padding-top: 18px; border-top: 1px solid var(--border); }
+  h2 + .sub { color: var(--muted); font-size: 12.5px; margin: -6px 0 12px; }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 14px; }
+  .stat { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r); padding: 12px 14px; }
+  .stat .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+  .stat .v { font-size: 24px; font-family: var(--mono); font-weight: 500; margin-top: 3px; }
+  .stat.ok .v { color: var(--ok); } .stat.bad .v { color: var(--bad); }
+
+  /* the funnel: how many remain after each step, and who each step removed */
+  .funnel { display: grid; gap: 6px; }
+  .fstep { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 12px; align-items: start;
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--r); padding: 9px 12px; }
+  .fstep .n { font-family: var(--mono); font-size: 16px; text-align: right; }
+  .fstep .lbl { font-size: 13px; }
+  .bar { height: 6px; background: var(--panel3); border-radius: 3px; margin-top: 6px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+  .fstep.cut .bar i { background: var(--warn); }
+  .out { margin-top: 6px; font-size: 12px; color: #e3c27a; }
+  .out a { color: inherit; font-family: var(--mono); }
+  .out span { color: var(--muted); }
+
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; }
-  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
-  .panel .t { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
-  .note { font-size: 12.5px; color: var(--muted); border-left: 2px solid var(--border);
-          padding: 2px 0 2px 12px; margin: 10px 0; }
-  .warn { color: var(--warn); }
-  canvas { width: 100%; image-rendering: pixelated; border-radius: 4px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r); padding: 12px 14px; }
+  .panel .t { font-size: 13px; font-weight: 600; }
+  .panel .m { font-size: 12px; color: var(--muted); margin: 1px 0 8px; }
+  .heat { position: relative; border-radius: 6px; overflow: hidden; background: #000; }
+  .heat img { display: block; width: 100%; filter: saturate(.55) brightness(.8); }
+  .heat.video { aspect-ratio: 16 / 9; }
+  .heat canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .ramp { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--muted); margin: 0 0 12px; }
+  .ramp i { width: 120px; height: 8px; border-radius: 4px;
+    background: linear-gradient(90deg, rgba(64,0,90,.3), #b0106a, #f06020, #ffd23a); }
+  @media (max-width: 700px) { .toolbar, main { padding-left: 16px; padding-right: 16px; } .grid { grid-template-columns: minmax(0, 1fr); } }
 </style>
 </head>
 <body>
-<header>
-  <h1>Cohort</h1>
-  <select id="study"></select>
-  <label><input type="checkbox" id="dev"> include self-tests</label>
-  <label><input type="checkbox" id="mixed"> include edited protocols</label>
-  <a href="./index.html">sessions</a>
+<header class="top">
+  <a class="brand" href="./index.html"><i></i>Researcher</a>
+  <nav class="pages"><a href="./index.html">Sessions</a><a href="./cohort.html" aria-current="page">Cohort</a><a href="./builder.html">Study builder</a><a href="./annotate.html">Annotate</a></nav>
 </header>
+<div class="toolbar">
+  <label class="study">Study <select id="study"></select></label>
+  <label class="toggle"><input type="checkbox" id="dev"> Include self-tests</label>
+  <label class="toggle"><input type="checkbox" id="mixed"> Include edited protocols</label>
+</div>
 <main id="main"><div class="note">Choose a study.</div></main>
 <script type="module" src="./cohort.js"></script>
 </body>

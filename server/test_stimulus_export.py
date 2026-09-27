@@ -174,4 +174,6 @@ def test_the_cohort_page_sees_the_cohort_the_export_writes(out):
     assert [f["remaining"] for f in v["funnel"]] == [1, 1, 1]
     assert v["epochs"][0]["n_epochs"] == 1 and "blendshape.s" in v["epochs"][0]["curves"]
     assert v["heatmaps"][0]["stimulus_id"] == "pic" and v["heatmaps"][0]["grid"] is not None
+    # What the page needs to draw the density over the picture, as the export does.
+    assert (v["heatmaps"][0]["src"], v["heatmaps"][0]["kind"]) == ("stimuli/scene_left.png", "image")
     assert v["analysis_hash"] and v["content_hash"] == content_hash(STUDY)

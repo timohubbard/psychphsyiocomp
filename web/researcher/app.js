@@ -34,7 +34,7 @@ async function api(path) {
 async function loadList() {
   const { sessions: rows } = await api('/api/sessions');
   sessions = rows;
-  $('sub').textContent = `${rows.length} processed`;
+  $('sub').textContent = `${rows.length} session${rows.length === 1 ? '' : 's'} processed`;
 
   if (!rows.length) {
     $('list').innerHTML = '<div class="empty">No sessions</div>';
@@ -47,10 +47,41 @@ async function loadList() {
   [...document.querySelectorAll('.sess')].forEach((el) => {
     el.addEventListener('click', () => select(el.dataset.id));
   });
-  select(rows[0].session_id);
+  $('filter').addEventListener('input', filterList);
+  // ?session=<id> opens that session, so other pages can link to one.
+  const wanted = new URLSearchParams(location.search).get('session');
+  select(rows.some((s) => s.session_id === wanted) ? wanted : rows[0].session_id);
+}
+
+/** Show only the sessions whose id, study or participant contains the filter text. */
+function filterList() {
+  const q = $('filter').value.trim().toLowerCase();
+  let shown = 0;
+  for (const el of document.querySelectorAll('.sess')) {
+    const s = sessions.find((x) => x.session_id === el.dataset.id);
+    const hit = !q || [s.session_id, s.study_id, s.participant_id].some((v) => String(v ?? '').toLowerCase().includes(q));
+    el.hidden = !hit;
+    shown += hit ? 1 : 0;
+  }
+  $('list').querySelector('.nomatch')?.remove();
+  if (!shown) $('list').insertAdjacentHTML('beforeend', '<div class="empty nomatch">No session matches.</div>');
 }
 
 function sessionRow(s) {
+  return `<div class="sess" data-id="${s.session_id}">
+    <div class="id">${s.session_id}</div>
+    <div class="meta">${sessionMeta(s)}</div>
+    <div class="pills">${sessionPills(s).join('')}</div>
+  </div>`;
+}
+
+function sessionMeta(s) {
+  return `${s.participant_id ?? '—'} · ${s.study_id ?? '—'} ·
+      ${s.duration_s ? `${Math.round(s.duration_s)}s` : '—'} ·
+      ${s.n_sources} source${s.n_sources === 1 ? '' : 's'}`;
+}
+
+function sessionPills(s) {
   const pills = [];
 
   // Alignment first: unaligned rows cannot be compared against anything, so it
@@ -77,19 +108,14 @@ function sessionRow(s) {
     pills.push(pill(s.audience === 'developer' ? 'self-test' : 'audience not recorded', 'warn'));
   }
 
-  return `<div class="sess" data-id="${s.session_id}">
-    <div class="id">${s.session_id}</div>
-    <div class="meta">${s.participant_id ?? '—'} · ${s.study_id ?? '—'} ·
-      ${s.duration_s ? `${Math.round(s.duration_s)}s` : '—'} ·
-      ${s.n_sources} source${s.n_sources === 1 ? '' : 's'}</div>
-    <div class="pills">${pills.join('')}</div>
-  </div>`;
+  return pills;
 }
 
 const pill = (text, cls = '') => `<span class="pill ${cls}">${text}</span>`;
 
 function select(id) {
   active = id;
+  history.replaceState(null, '', `?session=${encodeURIComponent(id)}`);
   [...document.querySelectorAll('.sess')].forEach(
     (el) => el.classList.toggle('active', el.dataset.id === id));
   loadDetail(id);
@@ -164,8 +190,12 @@ async function loadDetail(id) {
       `§2.5 fairness floor ${MIN_LUMA}`, luma >= MIN_LUMA ? 'ok' : 'warn'));
   }
 
-  $('detail').innerHTML = `
-    <h2>${d.session_id}</h2>
+  const row = sessions.find((s) => s.session_id === id);
+  $('detail').innerHTML = `<div class="detailwrap">
+    <div class="dhead"><div>
+      <h1>${d.session_id}</h1>
+      ${row ? `<div class="meta">${sessionMeta(row)}</div><div class="pills">${sessionPills(row).join('')}</div>` : ''}
+    </div></div>
     <div class="cards">${cards.join('')}</div>
 
     ${sm.gaze_average_offset_deg != null ? `<div class="note">
@@ -211,7 +241,7 @@ async function loadDetail(id) {
     <div id="expressions"></div>
     <div id="scanpath"></div>
     <div id="aoi"></div>
-    <div id="plot"></div>`;
+    <div id="plot"></div></div>`;
 
   [...document.querySelectorAll('tr.clickable')].forEach((tr) => {
     tr.addEventListener('click', () => plotChannel(id, tr.dataset.channel, tr.dataset.source));
@@ -232,8 +262,10 @@ async function loadDetail(id) {
 }
 
 function card(k, v, note, cls = '') {
+  // A word ("refused", a study name) reads badly in the big monospace a number gets.
+  const txt = !/^[-−\d.±—]/.test(String(v));
   return `<div class="card ${cls}"><div class="k">${k}</div>
-    <div class="v">${v}</div>${note ? `<div class="n">${note}</div>` : ''}</div>`;
+    <div class="v${txt ? ' txt' : ''}">${v}</div>${note ? `<div class="n">${note}</div>` : ''}</div>`;
 }
 
 function lastQuality(rows, metric) {

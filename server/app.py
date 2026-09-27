@@ -134,7 +134,10 @@ def cohort_view(data_root: Path, study: dict, *, include_developer: bool,
     for t in study.get("tasks") or []:
         for it in t.get("items", []) if t.get("type") == "stimuli" else []:
             density, n, refused = heatmap(data_root, c.included, it["stimulus_id"], sigma_deg=sigma)
-            heatmaps.append({"stimulus_id": it["stimulus_id"], "participants": n,
+            # kind and src let the page lay the density over the picture itself,
+            # as export.heatmap_png does: the grid is in the picture's own frame.
+            heatmaps.append({"stimulus_id": it["stimulus_id"], "kind": it.get("kind"), "src": it.get("src"),
+                             "participants": n,
                              "refused": len(refused), "sigma_deg": sigma,
                              "grid": None if density is None else density.round(6).tolist()})
     return {
