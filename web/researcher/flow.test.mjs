@@ -49,3 +49,11 @@ test('conditions give one lane per arm, and the lanes differ where the arms do',
 test('the in-browser tier says nothing is recorded', () => {
   assert.match(flowModel(load('in-browser-example'), deps).records, /nothing recorded/);
 });
+
+test('a questions task is one block, sized by its questions', () => {
+  const f = flowModel(load('questions-example'), deps);
+  const q = f.blocks.find((b) => b.kind === 'questions');
+  assert.equal(q.title, '4 questions');
+  assert.equal(q.detail, 'likert, choice, slider, text');
+  assert.ok(q.taskIndex === 1);
+});

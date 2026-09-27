@@ -101,6 +101,7 @@ benchmark*.
 | Per-stimulus gaze/AOI/face results, degree-blurred heatmaps, audited export zip (CSV + BIDS-style) | done — `npm run export -- <study>` |
 | Cohort page in the researcher app (funnel, epoch curves, heatmaps) | done — `/cohort.html`; `npm run verify:cohort-view` |
 | Statistics between arms: declared contrasts, participant-first means, permutation + cluster tests, Holm, generated R (lme4/mgcv) | done — `server/inference.py`; on the cohort page and in the export |
+| Questions on the capture page: rating scales, choices, sliders, opt-in typed answers, with reaction times | done — `studies/questions-example.json`; `npm run smoke:capture -- --study questions-example` |
 | Study builder: form, live validation + consent preview, participant-journey diagram per condition, stimulus upload, used studies fixed | done — `/builder.html`; `tools/verify_builder.mjs` |
 | Codebook builder: defined categories, moments typed / gridded / sampled at random / picked from a recording, the rater's view, versions | done — `/codebook.html`; `npm run verify:codebook` |
 
@@ -240,6 +241,18 @@ unless noted. Every one is also stored in the session's consent record.
    > help identify you, so they are protected like any other personal data.
    > *Only the simpler measurements your browser can make are possible, and
    > they can never be re-checked against the recording.*
+8. **Answers to on-screen questions** (added 2026-09-27, `ANSWERS_SENTENCE` in
+   `tierCopy`). It is appended to every tier's list, including the in-browser
+   tier, for studies that ask questions:
+   > Your answers to the questions on screen.
+9. **Typed answers**, used in place of 8 when a study opts in with
+   `disclosure.free_text: true`:
+   > Your answers to the questions on screen, including anything you type.
+   > Typed answers could identify you if you write identifying details, such
+   > as your name.
+
+   Also for review: questions about mood, health or similar may themselves be
+   special-category data, which the study's Art 9 condition must then cover.
 
 Then, most valuable first. The first four need a person or hardware; the rest
 can be done at a keyboard.
@@ -516,6 +529,55 @@ loads, decodes and even plays, but reports duration `NaN` and cannot seek. That
 is the failure a coder would actually hit, since they could not jump to a
 moment. (The readyState-0 stall above was the 119 MB capture served without
 ranges.)
+
+### Questions
+
+A `questions` task asks the participant things on screen. There are four
+kinds:
+
+- a **rating scale**, with 2 to 11 points and two labelled ends;
+- a **choice**, with 2 to 12 options;
+- a **slider**, with a range and two labelled ends;
+- a **typed answer**.
+
+The study builder edits them, and the journey diagram shows them as their own
+block.
+
+Each question logs:
+
+- a `question` event when it is painted;
+- a `response` event carrying the answer, the reaction time from that paint
+  (on the master clock), how many times the answer changed, and whether it
+  was skipped.
+
+The export writes them to `csv/responses.csv`.
+
+Three choices are deliberate:
+
+- **Nothing is pre-selected, and a slider has no starting position.** Its
+  thumb stays hidden and its track undrawn until it is moved, because a
+  default is the answer a hurried participant gives, and it looks exactly like
+  a real one. Continue stays disabled until there is an answer. A skip, where
+  the study allows it, is recorded as a skip, never as a value.
+- **Typed answers are opt-in.** A text box is where people write their name or
+  a diagnosis, and it bypasses the pseudonymisation the rest of the data goes
+  through. So:
+  - both mirrors refuse a `text` question unless the study sets
+    `disclosure.free_text: true`;
+  - that flag is hashed, and the consent screen then says what typing means
+    (*Awaiting sign-off*, item 9);
+  - the export withholds typed answers from every file unless you ask with
+    `npm run export -- --include-free-text`;
+  - the audit refuses an archive where a withheld answer's text survives
+    anywhere.
+- **Answers are listed among what every tier keeps**, including the in-browser
+  tier, which otherwise says "only the numbers are saved".
+
+`npm run smoke:capture -- --study questions-example` answers every question
+through the input a person would use: a number key, a click, a real mouse drag
+on the slider, and typing. It then checks one response per question, each
+with a reaction time and the value given. `--shots <dir>` saves what each
+question looked like.
 
 ### Statistics between arms
 

@@ -47,7 +47,31 @@ export const TASK_TYPES = {
     hint: 'known movements, for checking AUs', make: () => ({ type: 'expression_prompts', expressions: 'default', repeats: 2 }) },
   stimuli: { label: 'Pictures and videos', kind: 'stimuli',
     hint: 'your own stimuli, shown in order', make: () => ({ type: 'stimuli', isi_ms: 1000, items: [] }) },
+  questions: { label: 'Questions', kind: 'questions',
+    hint: 'ratings, choices and sliders on screen',
+    make: (taken = []) => ({ type: 'questions', id: uniqueId('questions', taken), items: [
+      { id: 'rating', kind: 'likert', prompt: 'How did that make you feel?', points: 7,
+        anchors: ['Very negative', 'Very positive'] }] }) },
 };
+
+/** A new question of each kind, valid as it stands so the builder never starts broken. */
+export const QUESTION_TEMPLATES = {
+  likert: (id) => ({ id, kind: 'likert', prompt: 'How much do you agree?', points: 7,
+    anchors: ['Strongly disagree', 'Strongly agree'] }),
+  choice: (id) => ({ id, kind: 'choice', prompt: 'Which one?', options: [
+    { id: 'first', label: 'The first' }, { id: 'second', label: 'The second' }] }),
+  slider: (id) => ({ id, kind: 'slider', prompt: 'How much?', min: 0, max: 100, anchors: ['Not at all', 'Completely'] }),
+  // Valid only once the study opts in (disclosure.free_text) — the builder
+  // shows the refusal until then, which is the point.
+  text: (id) => ({ id, kind: 'text', prompt: 'Anything else?', allow_skip: true, max_chars: 500 }),
+};
+
+/** `base`, or base-2, base-3 … — whichever is not already taken. */
+export function uniqueId(base, taken = []) {
+  let id = base;
+  for (let n = 2; taken.includes(id); n += 1) id = `${base}-${n}`;
+  return id;
+}
 
 /** The builder's sections, in the order the form shows them. */
 export const SECTIONS = [

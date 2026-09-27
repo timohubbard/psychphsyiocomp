@@ -1,0 +1,60 @@
+{
+  "study_id": "questions-example",
+  "name": "Questions example — two pictures, then a rating, a choice, a slider and a typed answer",
+  "version": "1.0.0",
+
+  "notes": [
+    "Shows the questions task. After two pictures the participant answers four",
+    "questions on screen: a 7-point rating, a choice, a slider with no starting",
+    "position, and an optional typed answer. Each answer is logged as a",
+    "`response` event with its reaction time on the master clock.",
+    "The typed answer is opt-in (disclosure.free_text) because typed text can",
+    "carry a name or a diagnosis; the consent screen says so, and exports leave",
+    "typed answers out unless asked (npm run export -- --include-free-text).",
+    "A developer self-test (no audience)."
+  ],
+
+  "disclosure": {
+    "retention_days": 180,
+    "secondary_use": "Analysed by the named research team only. Not sold, and not shared outside the team without a further, separate agreement.",
+    "contact": "Replace this with the investigator and the route to the ethics board before running anyone other than the developer.",
+    "irb_reference": null,
+    "free_text": true
+  },
+
+  "consent_tiers": ["features_only", "media_retained"],
+  "default_tier": "features_only",
+
+  "modalities": ["face"],
+
+  "tasks": [
+    {
+      "type": "stimuli",
+      "items": [
+        { "stimulus_id": "scene_left", "kind": "image", "src": "stimuli/scene_left.png",
+          "sha256": "629b0f1ebc823f79ca8138bc1c7d61768a8fcc7e4edf20a41dba736b903b2dc1",
+          "duration_ms": 3000 },
+        { "stimulus_id": "scene_right", "kind": "image", "src": "stimuli/scene_right.png",
+          "sha256": "d7ef3a1b55c2028a612ba0b1f9b82f539d085130488d74c04286233be752f058",
+          "duration_ms": 3000 }
+      ]
+    },
+    {
+      "type": "questions", "id": "after_pictures", "title": "A few questions about what you saw",
+      "items": [
+        { "id": "pleasant", "kind": "likert", "prompt": "How pleasant did you find the pictures?",
+          "points": 7, "anchors": ["Not at all pleasant", "Very pleasant"] },
+        { "id": "preferred", "kind": "choice", "prompt": "Which picture did you prefer?",
+          "options": [
+            { "id": "left", "label": "The one with the circle on the left" },
+            { "id": "right", "label": "The one with the circle on the right" },
+            { "id": "neither", "label": "No preference" }
+          ] },
+        { "id": "alert", "kind": "slider", "prompt": "How alert do you feel right now?",
+          "min": 0, "max": 100, "anchors": ["Very sleepy", "Wide awake"], "allow_skip": true },
+        { "id": "anything_else", "kind": "text", "prompt": "Anything else you noticed? (optional)",
+          "max_chars": 300, "allow_skip": true }
+      ]
+    }
+  ]
+}

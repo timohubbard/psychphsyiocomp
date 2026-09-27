@@ -15,6 +15,8 @@ import {
   DEFAULT_EXPRESSIONS,
   EXPRESSION_TIMINGS,
   wantsChinrest,
+  activitiesFor,
+  QUESTION_MS,
 } from './sequence.js';
 
 // ---------------------------------------------------------------------------
@@ -717,4 +719,44 @@ test('each stage names the study task it came from, skipping tasks another arm r
   // Bracketing stages (overview, flashes) belong to no task.
   const untagged = buildSequence(study, 1, { condition: 'A' }).filter((s) => s.taskIndex === undefined);
   assert.ok(untagged.some((s) => s.type === 'sync_clapper'));
+});
+
+// ---------------------------------------------------------------------------
+// questions
+// ---------------------------------------------------------------------------
+
+const QSTUDY = {
+  modalities: ['face'],
+  tasks: [{ type: 'questions', id: 'qs', title: 'About that', items: [
+    { id: 'a', kind: 'likert', prompt: 'A?', points: 5, anchors: ['lo', 'hi'] },
+    { id: 'b', kind: 'choice', prompt: 'B?', options: [{ id: 'x', label: 'X' }, { id: 'y', label: 'Y' }] },
+    { id: 'c', kind: 'slider', prompt: 'C?', min: 0, max: 10, anchors: ['lo', 'hi'], allow_skip: true },
+  ] }],
+};
+
+test('a questions task becomes an instruction and one stage per item, in the declared order', () => {
+  const seq = buildSequence(QSTUDY, 42);
+  const qs = seq.filter((s) => s.type === 'question');
+  assert.deepEqual(qs.map((s) => s.itemId), ['a', 'b', 'c']);
+  assert.deepEqual(qs.map((s) => s.id), ['q_qs_a', 'q_qs_b', 'q_qs_c']);
+  assert.equal(qs[2].allowSkip, true);
+  assert.equal(qs[0].points, 5);
+  const intro = seq.find((s) => s.id === 'questions_intro_qs');
+  assert.equal(intro.title, 'About that');
+  assert.ok(intro.lines.some((l) => /Skip button/.test(l)));
+  assert.ok(seq[0].lines.some((l) => /answer 3 short questions/.test(l)));
+});
+
+test('questions are shuffled only when the study asks, and then reproducibly', () => {
+  const shuffled = { ...QSTUDY, tasks: [{ ...QSTUDY.tasks[0], randomise: true }] };
+  const order = (s) => buildSequence(shuffled, s).filter((x) => x.type === 'question').map((x) => x.itemId);
+  assert.deepEqual(order(7), order(7));
+  const seen = new Set([1, 2, 3, 4, 5, 6, 7, 8].map((s) => order(s).join()));
+  assert.ok(seen.size > 1, 'a seeded shuffle that never shuffles');
+});
+
+test('the consent screen and the time estimate know about the questions', () => {
+  assert.ok(activitiesFor(QSTUDY).includes('answer some short questions on screen'));
+  const q = buildSequence(QSTUDY, 1).filter((s) => s.type === 'question');
+  assert.equal(estimateDurationMs(q), 3 * QUESTION_MS);
 });

@@ -18,12 +18,14 @@ export const KINDS = {
   voice: { label: 'Voice', color: '#3fb27f' },
   rest: { label: 'Rest', color: '#7c8591' },
   stimuli: { label: 'Pictures and videos', color: '#e08a3c' },
+  questions: { label: 'Questions', color: '#d4608a' },
   finish: { label: 'After recording', color: '#5f6b7a' },
 };
 
 const STAGE_KIND = {
   calibration_point: 'gaze', validation_point: 'gaze', fixation: 'rest',
   speech_read: 'voice', speech_free: 'voice', expression: 'face', stimulus: 'stimuli',
+  question: 'questions',
 };
 
 function fmt(ms) {
@@ -55,6 +57,9 @@ function blockFor(stages, estimate) {
       return { ...base, kind: 'stimuli', title: `${n} picture${n === 1 ? '' : 's'} or video${n === 1 ? '' : 's'}`,
         detail: 'order shuffled per participant',
         items: work.map((s) => ({ id: s.stimulusId, kind: s.kind, src: s.src, ms: s.durationMs })) };
+    case 'question':
+      return { ...base, kind: 'questions', title: `${n} question${n === 1 ? '' : 's'}`,
+        detail: work.map((s) => s.kind).join(', ') };
     default:
       return { ...base, kind: STAGE_KIND[first.type] ?? 'instruction', title: first.title ?? first.type, detail: '' };
   }

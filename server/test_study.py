@@ -263,6 +263,56 @@ def test_analysis_refusals_mirror_the_browser():
     assert "resample_hz" in r({"epochs": [{**base, "resample_hz": 0}]})
 
 
+_LIKERT = {"id": "l", "kind": "likert", "prompt": "How?", "points": 7, "anchors": ["low", "high"]}
+
+
+def _q(items, **disclosure):
+    s = study(tasks=[{"type": "questions", "id": "qs", "items": items}])
+    s["disclosure"].update(disclosure)
+    return s
+
+
+def test_questions_validate_and_free_text_needs_the_study_to_opt_in():
+    choice = {"id": "c", "kind": "choice", "prompt": "Which?",
+              "options": [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}]}
+    slider = {"id": "s", "kind": "slider", "prompt": "How much?", "min": 0, "max": 100,
+              "anchors": ["none", "lots"], "allow_skip": True}
+    assert validate_study(_q([_LIKERT, choice, slider])).ok
+    text = {"id": "t", "kind": "text", "prompt": "Anything?"}
+    assert "must opt in with disclosure.free_text: true" in _reasons(_q([text]))
+    assert validate_study(_q([text], free_text=True)).ok
+
+
+def test_question_refusals_mirror_the_browser():
+    r = lambda items, **d: _reasons(_q(items, **d))  # noqa: E731
+    assert "unknown keys for a likert item: anchor" in r([{**_LIKERT, "anchor": ["x"]}])
+    assert "points must be a whole number from 2 to 11" in r([{**_LIKERT, "points": 12}])
+    assert "anchors must be two labels" in r([{**_LIKERT, "anchors": ["only one"]}])
+    assert "item 2 needs a unique slug id" in r([_LIKERT, _LIKERT])
+    assert "kind must be likert, choice, slider or text" in r([{**_LIKERT, "kind": "essay"}])
+    assert "options must be 2 to 12" in r([{"id": "c", "kind": "choice", "prompt": "x",
+                                            "options": [{"id": "a", "label": "A"}]}])
+    assert "min < max" in r([{"id": "s", "kind": "slider", "prompt": "x", "min": 5, "max": 5,
+                              "anchors": ["a", "b"]}])
+    assert "needs 1 to 50 items" in r([])
+    assert "prompt must be 1 to 500 characters" in r([{**_LIKERT, "prompt": ""}])
+    assert "free_text is true but no question asks for typed text" in r([_LIKERT], free_text=True)
+    assert "free_text must be true or false" in r([_LIKERT], free_text="yes")
+
+
+def test_free_text_is_hashed_only_when_present():
+    t = _q([{"id": "t", "kind": "text", "prompt": "x"}], free_text=True)
+    no_flag = _q([{"id": "t", "kind": "text", "prompt": "x"}])
+    assert content_hash(t) != content_hash(no_flag)
+    assert "free_text" not in [k for k, _ in _canon(study())]
+
+
+def test_the_questions_example_hashes_the_same_in_both_languages():
+    """Pinned from the browser's contentHash on studies/questions-example.json."""
+    from study import load_study
+    assert content_hash(load_study(ROOT / "studies", "questions-example")) == "794711c5c833f767"
+
+
 def _with_contrast(**over):
     epochs = [{"name": "e", "event_type": "stimulus", "channels": ["c"], "pre_ms": 500, "post_ms": 2000}]
     c = {"name": "k", "epochs": "e", "channel": "c", "arms": ["A", "B"], "window_ms": [200, 1000],

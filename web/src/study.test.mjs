@@ -423,6 +423,50 @@ test('analysis refusals mirror server/study.py', () => {
   assert.equal(r({ exclusions: [{ metric: 'achieved_fps', min: 5 }], epochs: [base] }), '');
 });
 
+const Q = (items, over = {}) => study({
+  tasks: [{ type: 'questions', id: 'qs', items }], ...over });
+const likert = { id: 'l', kind: 'likert', prompt: 'How?', points: 7, anchors: ['low', 'high'] };
+
+test('questions validate, and free text needs the study to opt in', () => {
+  const choice = { id: 'c', kind: 'choice', prompt: 'Which?', options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] };
+  const slider = { id: 's', kind: 'slider', prompt: 'How much?', min: 0, max: 100, anchors: ['none', 'lots'], allow_skip: true };
+  assert.deepEqual(validateStudy(Q([likert, choice, slider])).reasons, []);
+  const text = { id: 't', kind: 'text', prompt: 'Anything?' };
+  assert.match(validateStudy(Q([text])).reasons.join(), /must opt in with disclosure\.free_text: true/);
+  const optedIn = Q([text]);
+  optedIn.disclosure.free_text = true;
+  assert.deepEqual(validateStudy(optedIn).reasons, []);
+});
+
+test('question refusals mirror server/study.py', () => {
+  const r = (items, over) => validateStudy(Q(items, over)).reasons.join(' | ');
+  assert.match(r([{ ...likert, anchor: ['x'] }]), /unknown keys for a likert item: anchor/);
+  assert.match(r([{ ...likert, points: 12 }]), /points must be a whole number from 2 to 11/);
+  assert.match(r([{ ...likert, anchors: ['only one'] }]), /anchors must be two labels/);
+  assert.match(r([likert, likert]), /item 2 needs a unique slug id/);
+  assert.match(r([{ ...likert, kind: 'essay' }]), /kind must be likert, choice, slider or text/);
+  assert.match(r([{ id: 'c', kind: 'choice', prompt: 'x', options: [{ id: 'a', label: 'A' }] }]), /options must be 2 to 12/);
+  assert.match(r([{ id: 's', kind: 'slider', prompt: 'x', min: 5, max: 5, anchors: ['a', 'b'] }]), /min < max/);
+  assert.match(r([]), /needs 1 to 50 items/);
+  assert.match(r([{ ...likert, prompt: '' }]), /prompt must be 1 to 500 characters/);
+  const withFlag = Q([likert]);
+  withFlag.disclosure.free_text = true;
+  assert.match(validateStudy(withFlag).reasons.join(), /free_text is true but no question asks for typed text/);
+  const badFlag = Q([likert]);
+  badFlag.disclosure.free_text = 'yes';
+  assert.match(validateStudy(badFlag).reasons.join(), /free_text must be true or false/);
+});
+
+test('adding questions changes only the studies that have them; free_text is hashed when present', async () => {
+  const s = Q([likert]);
+  assert.notEqual(await contentHash(s), await contentHash(study()));
+  const t = Q([{ id: 't', kind: 'text', prompt: 'x' }]);
+  t.disclosure.free_text = true;
+  const noFlag = structuredClone(t);
+  delete noFlag.disclosure.free_text;
+  assert.notEqual(await contentHash(t), await contentHash(noFlag));
+});
+
 const withContrast = (over = {}) => {
   const epochs = [{ name: 'e', event_type: 'stimulus', channels: ['c'], pre_ms: 500, post_ms: 2000 }];
   const c = { name: 'k', epochs: 'e', channel: 'c', arms: ['A', 'B'], window_ms: [200, 1000],

@@ -19,7 +19,7 @@ import { MODALITIES, SPECIAL_CATEGORY_MODALITIES, BROWSER_MODALITIES, contentHas
   protocolFor, validateStudy } from '/src/study.js';
 import { CONSENT_TIERS, analysisNotice, joinAnd, withdrawalText } from '/src/consent.js';
 import { buildSequence, estimateDurationMs, wantsChinrest } from '/src/sequence.js';
-import { METRIC_SUGGESTIONS, SECTIONS, TASK_TYPES, blankStudy, fieldOf, getPath, parseList,
+import { METRIC_SUGGESTIONS, QUESTION_TEMPLATES, SECTIONS, TASK_TYPES, blankStudy, fieldOf, getPath, parseList, uniqueId,
   sectionOf, setPath, stimulusIdFrom } from './builder_model.js';
 import { KINDS, flowModels } from './flow.js';
 
@@ -40,9 +40,9 @@ let reasonsNow = [];
 // controls — each carries its path; see onInput / onChange
 // ---------------------------------------------------------------------------
 
-function field(label, path, { type = 'text', required = false, help = '', rows = 0, placeholder = '', suffix = '', cls = '' } = {}) {
+function field(label, path, { type = 'text', required = false, help = '', rows = 0, placeholder = '', suffix = '', cls = '', keepBlank = false } = {}) {
   const v = getPath(study, path);
-  const attrs = `data-path="${pathAttr(path)}" data-type="${type}"${placeholder ? ` placeholder="${esc(placeholder)}"` : ''}`;
+  const attrs = `data-path="${pathAttr(path)}" data-type="${type}"${keepBlank ? ' data-blank="keep"' : ''}${placeholder ? ` placeholder="${esc(placeholder)}"` : ''}`;
   const control = rows
     ? `<textarea ${attrs} rows="${rows}">${esc(v ?? '')}</textarea>`
     : `<input ${attrs} type="${type === 'number' ? 'number' : 'text'}" value="${esc(v ?? '')}">`;
@@ -209,6 +209,7 @@ function taskCard(t, i, arms) {
       ${field('Hold', at('hold_ms'), { type: 'number', suffix: 'ms' })}</div>`;
   }
   if (t.type === 'stimuli') body = stimuliBody(t, i);
+  if (t.type === 'questions') body = questionsBody(t, i);
   if (arms.length) body += `<div class="arms">Only for arms ${arms.map((a) => chip(at('arms'), a)).join('')}
     <span>${t.arms?.length ? '' : '— none ticked: every participant'}</span></div>`;
   const last = (study.tasks?.length ?? 0) - 1;
@@ -222,6 +223,57 @@ function taskCard(t, i, arms) {
         <button class="icon rm" data-remove='${pathAttr(at())}' title="Remove task" aria-label="Remove task">✕</button>
       </div></div>
     <div class="tbody">${body}</div></div>`;
+}
+
+const QUESTION_LABEL = { likert: 'Rating scale', choice: 'Multiple choice', slider: 'Slider', text: 'Typed answer' };
+
+function questionsBody(t, i) {
+  const at = (...rest) => ['tasks', i, ...rest];
+  const n = (t.items ?? []).length;
+  return `<div class="grid2">
+      ${field('Task id', at('id'), { help: 'Names these answers in the data (response events, responses.csv).' })}
+      ${field('Title shown first', at('title'), { placeholder: 'A few questions' })}
+    </div>
+    <label class="toggle"><input type="checkbox" data-bool-on='${pathAttr(at('randomise'))}' ${t.randomise === true ? 'checked' : ''}>
+      <span>Shuffle the order for each participant <small>— off by default: question order is often part of the instrument</small></span></label>
+    <div class="qlist">${(t.items ?? []).map((q, j) => questionCard(q, i, j, n)).join('')}</div>
+    <div class="qadd"><span class="muted">Add a question:</span>
+      ${Object.entries(QUESTION_LABEL).map(([k, l]) => `<button class="add" data-add-question="${i}" data-kind="${k}">+ ${l}</button>`).join('')}</div>`;
+}
+
+function questionCard(q, i, j, n) {
+  const at = (...rest) => ['tasks', i, 'items', j, ...rest];
+  let kindFields = '';
+  if (q.kind === 'likert') {
+    kindFields = `<div class="grid3">${field('Points', at('points'), { type: 'number', help: '2 to 11' })}
+      ${field('Lowest end', at('anchors', 0), { keepBlank: true })}${field('Highest end', at('anchors', 1), { keepBlank: true })}</div>`;
+  } else if (q.kind === 'slider') {
+    kindFields = `<div class="grid4q">${field('Min', at('min'), { type: 'number' })}${field('Max', at('max'), { type: 'number' })}
+      ${field('Low end', at('anchors', 0), { keepBlank: true })}${field('High end', at('anchors', 1), { keepBlank: true })}</div>
+      <div class="help">The slider starts with no position; it counts as answered only once moved.</div>`;
+  } else if (q.kind === 'choice') {
+    kindFields = `<div class="opts-edit">${(q.options ?? []).map((o, k) => `<div class="orow">
+        <span class="okey">${k + 1}</span>
+        ${field('', at('options', k, 'label'), { keepBlank: true, placeholder: 'What the participant sees' })}
+        ${field('', at('options', k, 'id'), { keepBlank: true, placeholder: 'id in the data' })}
+        <button class="icon rm" data-remove='${pathAttr(at('options', k))}' title="Remove option" aria-label="Remove option">✕</button></div>`).join('')}
+      <button class="add" data-add-option="${i},${j}">+ Add option</button></div>`;
+  } else if (q.kind === 'text') {
+    kindFields = `<div class="grid3">${field('Longest answer', at('max_chars'), { type: 'number', suffix: 'chars', help: 'up to 1000' })}</div>
+      <div class="help">Typed answers need <code>disclosure.free_text: true</code> (JSON tab). Participants are then told that what they
+        type could identify them, and exports leave typed answers out unless asked.</div>`;
+  }
+  return `<div class="qcard">
+    <div class="qhead"><span class="qnum">${j + 1}</span><b>${esc(QUESTION_LABEL[q.kind] ?? q.kind)}</b>
+      <span class="grow"></span>
+      <button class="icon" data-qmove="${i},${j},-1" title="Move up" aria-label="Move up" ${j === 0 ? 'disabled' : ''}>↑</button>
+      <button class="icon" data-qmove="${i},${j},1" title="Move down" aria-label="Move down" ${j === n - 1 ? 'disabled' : ''}>↓</button>
+      <button class="icon rm" data-remove='${pathAttr(at())}' title="Remove question" aria-label="Remove question">✕</button></div>
+    <div class="grid-qid">${field('Id', at('id'), { help: 'in the data' })}${field('Question', at('prompt'), { rows: 2 })}</div>
+    ${kindFields}
+    <label class="toggle"><input type="checkbox" data-bool-on='${pathAttr(at('allow_skip'))}' ${q.allow_skip === true ? 'checked' : ''}>
+      Participants may skip this one</label>
+  </div>`;
 }
 
 function stimuliBody(t, i) {
@@ -284,7 +336,9 @@ function onInput(ev) {
   if (el.dataset.path) {
     const path = JSON.parse(el.dataset.path);
     const raw = el.value;
-    const value = raw.trim() === '' ? undefined
+    // An emptied field is removed — except inside a fixed-shape array (anchors,
+    // option labels), where removing one would shift the next into its place.
+    const value = raw.trim() === '' ? (el.dataset.blank === 'keep' ? '' : undefined)
       : el.dataset.type === 'number' ? Number(raw) : raw;
     setPath(study, path, value);
     tidy();
@@ -312,6 +366,12 @@ function onChange(ev) {
     }
     edited();
     return render();
+  }
+  if (el.dataset.boolOn) {
+    // An opt-in flag: present and true when ticked, absent otherwise.
+    setPath(study, JSON.parse(el.dataset.boolOn), el.checked ? true : undefined);
+    edited();
+    return refresh();
   }
   if (el.dataset.bool) {
     setPath(study, JSON.parse(el.dataset.bool), el.checked ? undefined : false);
@@ -382,8 +442,30 @@ function onClick(ev) {
     edited();
     render();
     flashInto(document.querySelector(`.task[data-task="${j}"]`));
+  } else if (el.dataset.addQuestion !== undefined) {
+    const task = study.tasks[Number(el.dataset.addQuestion)];
+    const kind = el.dataset.kind;
+    task.items = [...(task.items ?? []), QUESTION_TEMPLATES[kind](uniqueId(kind, (task.items ?? []).map((q) => q.id)))];
+    edited();
+    render();
+  } else if (el.dataset.qmove !== undefined) {
+    const [ti, qi, dir] = el.dataset.qmove.split(',').map(Number);
+    const items = study.tasks[ti].items;
+    const j = qi + dir;
+    if (j < 0 || j >= items.length) return;
+    [items[qi], items[j]] = [items[j], items[qi]];
+    edited();
+    render();
+  } else if (el.dataset.addOption !== undefined) {
+    const [ti, qi] = el.dataset.addOption.split(',').map(Number);
+    const q = study.tasks[ti].items[qi];
+    const n = (q.options ?? []).length + 1;
+    q.options = [...(q.options ?? []), { id: uniqueId(`option-${n}`, (q.options ?? []).map((o) => o.id)), label: `Option ${n}` }];
+    edited();
+    render();
   } else if (el.dataset.addTask) {
-    study.tasks = [...(study.tasks ?? []), TASK_TYPES[el.dataset.addTask].make()];
+    const taken = (study.tasks ?? []).map((x) => x.id).filter(Boolean);
+    study.tasks = [...(study.tasks ?? []), TASK_TYPES[el.dataset.addTask].make(taken)];
     edited();
     render();
     flashInto(document.querySelector(`.task[data-task="${study.tasks.length - 1}"]`));

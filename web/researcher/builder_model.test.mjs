@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 
 import { validateStudy } from '../src/study.js';
 import {
-  SECTIONS, TASK_TYPES, blankStudy, fieldOf, getPath, parseList, sectionOf, setPath, stimulusIdFrom,
+  QUESTION_TEMPLATES, SECTIONS, TASK_TYPES, blankStudy, fieldOf, getPath, parseList, sectionOf, setPath,
+  stimulusIdFrom, uniqueId,
 } from './builder_model.js';
 
 test('a blank study is valid as it stands', () => {
@@ -77,4 +78,31 @@ test('every section a reason can be routed to is one the form draws', () => {
   const ids = new Set(SECTIONS.map((s) => s.id));
   for (const r of ['anything unforeseen', 'unknown audience: x']) assert.ok(ids.has(sectionOf(r)));
   for (const t of Object.values(TASK_TYPES)) assert.ok(t.kind && t.hint, t.label);
+});
+
+test('every question template is valid as it stands — text only once the study opts in', () => {
+  for (const [kind, make] of Object.entries(QUESTION_TEMPLATES)) {
+    const s = blankStudy();
+    s.tasks = [{ type: 'questions', id: 'qs', items: [make('q1')] }];
+    const reasons = validateStudy(s).reasons;
+    if (kind === 'text') {
+      assert.match(reasons.join(), /must opt in with disclosure\.free_text/);
+      s.disclosure.free_text = true;
+      assert.deepEqual(validateStudy(s).reasons, [], kind);
+    } else {
+      assert.deepEqual(reasons, [], kind);
+    }
+  }
+});
+
+test('a second questions task gets its own id', () => {
+  assert.equal(uniqueId('questions', ['questions']), 'questions-2');
+  assert.notEqual(TASK_TYPES.questions.make(['questions']).id, 'questions');
+});
+
+test('question refusals land under Tasks', () => {
+  const s = blankStudy();
+  s.tasks = [{ type: 'questions', id: 'qs', items: [{ id: 'x', kind: 'likert', prompt: 'p', points: 99, anchors: ['a', 'b'] }] }];
+  const [reason] = validateStudy(s).reasons;
+  assert.equal(sectionOf(reason), 'tasks');
 });

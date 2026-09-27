@@ -78,9 +78,46 @@ def _git_commit() -> str | None:
         return None
 
 
+def _withhold_typed(event: dict[str, Any], typed: set[str], include: bool) -> dict[str, Any]:
+    """A response event with its typed text removed (and remembered, for the audit)."""
+    if event.get("event_type") != "response" or not event.get("metadata"):
+        return event
+    meta = json.loads(event["metadata"])
+    text = meta.get("value_text")
+    if not text:
+        return event
+    if include:
+        return event
+    typed.add(text)
+    meta.pop("value_text")
+    meta["value_text_withheld"] = True
+    return {**event, "metadata": json.dumps(meta)}
+
+
+def response_rows(events: list[dict[str, Any]], sessions: list[dict[str, Any]],
+                  include_free_text: bool) -> list[dict[str, Any]]:
+    """One row per answered (or skipped) question: what questions.csv-style tools expect."""
+    cond = {s["session_id"]: s.get("condition") for s in sessions}
+    rows = []
+    for e in events:
+        if e.get("event_type") != "response" or not e.get("metadata"):
+            continue
+        m = json.loads(e["metadata"])
+        row = {"session_id": e["session_id"], "participant_id": e["participant_id"],
+               "condition": cond.get(e["session_id"]), "task_id": m.get("task_id"),
+               "item_id": m.get("item_id"), "kind": m.get("kind"), "value": m.get("value"),
+               "skipped": m.get("skipped"), "rt_ms": m.get("rt_ms"), "n_changes": m.get("n_changes"),
+               "answered_master_ts": e.get("onset_master_ts")}
+        if m.get("kind") == "text":
+            row["value_text"] = m.get("value_text") if include_free_text else None
+            row["value_text_withheld"] = bool(m.get("value_text_withheld")) and not include_free_text
+        rows.append(row)
+    return rows
+
+
 def build(out: Path, study: dict[str, Any], zip_path: Path, *,
           include_developer: bool = False, allow_mixed: bool = False,
-          studies_root: Path = ROOT / "studies") -> dict[str, Any]:
+          studies_root: Path = ROOT / "studies", include_free_text: bool = False) -> dict[str, Any]:
     cohort = select(out, study, include_developer=include_developer, allow_mixed=allow_mixed)
     analysis = study.get("analysis") or {}
     files: dict[str, bytes] = {}
@@ -98,8 +135,15 @@ def build(out: Path, study: dict[str, Any], zip_path: Path, *,
             ["session_id", "participant_id", "source", "stream", "channel", "master_ts",
              "value", "value_text", "reliability_tier"]).to_pylist()
         files[f"csv/signals/{sid}.csv.gz"] = gzip.compress(_csv_bytes(sig), mtime=0)
+
+    # Typed answers can carry a name or a diagnosis, so they leave the building
+    # only when asked for. Withheld from every file, and the audit below checks
+    # that no typed answer's text survives anywhere in the archive.
+    typed: set[str] = set()
+    all_events = [_withhold_typed(e, typed, include_free_text) for e in all_events]
     files["csv/events.csv"] = _csv_bytes([{k: v for k, v in e.items()
                                            if k not in ("native_clock_id",)} for e in all_events])
+    files["csv/responses.csv"] = _csv_bytes(response_rows(all_events, sessions, include_free_text))
 
     epoch_rows_by = {}
     refusals = []
@@ -186,11 +230,12 @@ def build(out: Path, study: dict[str, Any], zip_path: Path, *,
         "funnel": [{"step": f.label, "remaining": f.remaining} for f in cohort.funnel],
         "heatmaps": heat_summary,
         "contrasts": contrast_summary,
+        "typed_answers": "included" if include_free_text else "withheld (npm run export -- --include-free-text)",
         "participant_ids": "pseudonymous (server/pseudonym.py); no raw panel identifier "
                            "is in this archive — audited before it was written",
     }, indent=2).encode("utf-8")
 
-    _audit(files, out)
+    _audit(files, out, withheld=typed)
     zip_path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
         for name, data in sorted(files.items()):
@@ -296,8 +341,9 @@ def _bids(study: dict[str, Any], sessions: list[dict[str, Any]], events: list[di
     return files
 
 
-def _audit(files: dict[str, bytes], out: Path) -> None:
-    """Refuse an archive that carries media, identifiers, keys or a raw panel ID."""
+def _audit(files: dict[str, bytes], out: Path, withheld: set[str] = frozenset()) -> None:
+    """Refuse an archive that carries media, identifiers, keys, a raw panel ID,
+    or a typed answer that was meant to be withheld."""
     problems = []
     for name in files:
         low = name.lower()
@@ -311,6 +357,11 @@ def _audit(files: dict[str, bytes], out: Path) -> None:
         for raw in raws:
             if raw.encode("utf-8") in blob:
                 problems.append(f"{name}: contains a raw panel identifier")
+        # Short answers ("no", "ok") would match by chance; the identifying
+        # ones are longer. JSON-escaped too, since that is how events carry it.
+        for text in (t for t in withheld if len(t.strip()) >= 8):
+            if text.encode("utf-8") in blob or json.dumps(text)[1:-1].encode("utf-8") in blob:
+                problems.append(f"{name}: contains a typed answer that should have been withheld")
     if problems:
         raise ExportRefused("export refused — " + "; ".join(sorted(set(problems))))
 
@@ -323,6 +374,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--zip", type=Path, default=None)
     ap.add_argument("--include-developer", action="store_true")
     ap.add_argument("--allow-mixed", action="store_true")
+    ap.add_argument("--include-free-text", action="store_true",
+                    help="include typed answers (they can identify people; withheld by default)")
     args = ap.parse_args(argv)
 
     study = load_study(args.studies, args.study_id)
@@ -330,7 +383,8 @@ def main(argv: list[str] | None = None) -> int:
     zip_path = args.zip or args.out / "exports" / f"{args.study_id}-{stamp}.zip"
     try:
         summary = build(args.out, study, zip_path, include_developer=args.include_developer,
-                        allow_mixed=args.allow_mixed, studies_root=args.studies)
+                        allow_mixed=args.allow_mixed, studies_root=args.studies,
+                        include_free_text=args.include_free_text)
     except ExportRefused as exc:
         print(f"\n  {exc}\n")
         return 1

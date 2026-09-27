@@ -27,7 +27,7 @@
  * Needs `npm run serve` running.
  */
 
-import { mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -48,6 +48,48 @@ const TIMEOUT_MS = Number(args['timeout-s'] ?? 900) * 1000;
 
 
 function log(msg) { console.log(`  ${msg}`); }
+
+/** What the smoke test types into a free-text question — plainly not a person. */
+const SMOKE_TYPED = 'smoke test answer, not a participant';
+
+const key = async (page, k, code, vk) => {
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: k, code, windowsVirtualKeyCode: vk });
+  await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code, windowsVirtualKeyCode: vk });
+};
+
+/**
+ * Answer the question on screen through the input a person would use, one
+ * path per kind: a number key for a rating, a click for a choice, a real mouse
+ * drag for a slider (which is only answered once moved), typing for text.
+ */
+async function answerQuestion(page, js) {
+  await sleep(500);
+  const kind = await js(`document.querySelector('.q-scale') ? 'likert' : document.querySelector('.q-options') ? 'choice'
+    : document.querySelector('.q-slider') ? 'slider' : document.querySelector('.q-text') ? 'text' : null`);
+  const cont = () => js(`(() => { const b = document.querySelector('.q-next'); if (b.disabled) return false; b.click(); return true; })()`);
+  if (kind === 'likert') {
+    await key(page, '5', 'Digit5', 53);
+    await sleep(200);
+    await key(page, 'Enter', 'Enter', 13);
+    return;
+  }
+  if (kind === 'choice') {
+    await js(`document.querySelectorAll('.q-options button')[1].click()`);
+  } else if (kind === 'slider') {
+    const before = await js(`document.querySelector('.q-next').disabled`);
+    if (!before) throw new Error('the slider counted as answered before it was touched');
+    const r = JSON.parse(await js(`JSON.stringify(document.querySelector('.q-slider').getBoundingClientRect())`));
+    const y = r.y + r.height / 2;
+    await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: r.x + r.width * 0.3, y, button: 'left', clickCount: 1 });
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: r.x + r.width * 0.8, y, button: 'left' });
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r.x + r.width * 0.8, y, button: 'left', clickCount: 1 });
+  } else if (kind === 'text') {
+    await js(`document.querySelector('.q-text').focus()`);
+    await page.send('Input.insertText', { text: SMOKE_TYPED });
+  }
+  await sleep(300);
+  if (!(await cont())) throw new Error(`could not continue past a ${kind} question`);
+}
 
 async function main() {
   rmSync(OUT, { recursive: true, force: true });
@@ -120,6 +162,7 @@ async function main() {
     // with a known truth (smoke_chinrest.mjs) so the geometry can be checked.
     const started = Date.now();
     let lastStage = '';
+    let lastQuestion = null;
     let chinrest = null;
     while (Date.now() - started < TIMEOUT_MS) {
       const s = await js(`({
@@ -128,8 +171,23 @@ async function main() {
         waiting: document.getElementById('stageText').style.display === 'block'
           && /Press/.test(document.getElementById('stageText').innerText),
         chinrest: !!document.querySelector('.chinrest'),
+        question: document.getElementById('stageText').style.display === 'block'
+          ? (document.getElementById('stageText').dataset.question ?? null) : null,
       })`);
       if (s.done) break;
+      if (s.question && s.question !== lastQuestion) {
+        lastQuestion = s.question;
+        log(`answering ${s.question}`);
+        if (args.shots) {
+          // --shots <dir>: what the participant saw, before answering.
+          await sleep(400);
+          mkdirSync(args.shots, { recursive: true });
+          const { data } = await page.send('Page.captureScreenshot', { format: 'png' });
+          writeFileSync(join(args.shots, `${s.question}.png`), Buffer.from(data, 'base64'));
+        }
+        await answerQuestion(page, js);
+        continue;
+      }
       if (s.chinrest) {
         if (chinrest) throw new Error('the chinrest appeared a second time');
         chinrest = await driveChinrest(page, { log });
@@ -310,6 +368,24 @@ export function checkOutput(dir, studyId, { chinrest = null, rawPid = null } = {
     if (video && !['first_presented_frame', 'playing_event'].includes(video.metadata?.onset_basis)) {
       failures.push(`video onset basis ${video.metadata?.onset_basis}`);
     }
+  }
+
+  if (studyId === 'questions-example') {
+    // One response per question, each with the answer given below in
+    // answerQuestion and a reaction time from the question's paint.
+    const responses = events.filter((e) => e.event_type === 'response');
+    const asked = events.filter((e) => e.event_type === 'question');
+    const by = Object.fromEntries(responses.map((e) => [e.metadata?.item_id, e.metadata]));
+    facts.responses = responses.map((e) => `${e.metadata?.item_id}=${e.metadata?.value ?? (e.metadata?.value_text ? 'typed' : '—')}`
+      + `@${e.metadata?.rt_ms}ms`).join(' ');
+    if (responses.length !== 4 || asked.length !== 4) failures.push(`${asked.length} questions, ${responses.length} responses; expected 4 and 4`);
+    if (asked.some((e) => e.offset_native_ts == null)) failures.push('a question event was never closed');
+    if (responses.some((e) => !(e.metadata?.rt_ms > 0))) failures.push('a response has no reaction time');
+    if (by.pleasant?.value !== 5) failures.push(`rating ${by.pleasant?.value}, pressed 5`);
+    if (by.preferred?.value !== 'right') failures.push(`choice ${by.preferred?.value}, clicked the second option`);
+    if (!(by.alert?.value > 60 && by.alert?.value <= 100)) failures.push(`slider ${by.alert?.value}, dragged to ~80%`);
+    if (by.anything_else?.value_text !== SMOKE_TYPED) failures.push('the typed answer did not arrive as typed');
+    if (responses.some((e) => e.metadata?.skipped)) failures.push('a question was recorded as skipped');
   }
 
   if (['m0', 'in-browser-example', 'stimulus-example'].includes(studyId)) {

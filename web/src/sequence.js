@@ -542,10 +542,40 @@ function stagesForTask(task, { calPoints, valPoints, wantsGaze, wantsVoice, seed
       ];
     }
 
+    case 'questions': {
+      // In the declared order unless the study asks otherwise: question order
+      // is often part of the instrument (general before specific), so shuffling
+      // is a choice the researcher makes, not a default imposed on them.
+      const items = task.randomise === true
+        ? seededShuffle(task.items, (seed ^ 0x9A15C0) >>> 0) : [...task.items];
+      const anySkip = items.some((it) => it.allow_skip === true);
+      return [
+        { type: 'instruction', id: `questions_intro_${task.id}`,
+          title: task.title ?? 'A few questions',
+          lines: [
+            'Answer each question on screen. There are no right or wrong answers.',
+            'Click your answer, or press its number key, then press Continue.',
+            ...(anySkip ? ['Questions you may leave unanswered have a Skip button.'] : []),
+            `${items.length} question${items.length === 1 ? '' : 's'}, about ${describeDuration(
+              items.length * QUESTION_MS)}.`,
+          ] },
+        ...items.map((it, i) => ({
+          type: 'question', id: `q_${task.id}_${it.id}`, taskId: task.id, itemId: it.id,
+          kind: it.kind, prompt: it.prompt, allowSkip: it.allow_skip === true,
+          points: it.points, anchors: it.anchors, options: it.options,
+          min: it.min, max: it.max, maxChars: it.max_chars,
+          index: i + 1, total: items.length,
+        })),
+      ];
+    }
+
     default:
       return null;
   }
 }
+
+/** Planning figure per question, for the participant-facing time estimate. */
+export const QUESTION_MS = 8000;
 
 /**
  * What the participant will do, for the consent screen.
@@ -568,6 +598,7 @@ export function activitiesFor(study, condition = null) {
   if (has('speech_free')) doing.push('talk briefly about an everyday topic');
   if (has('expression')) doing.push('make some facial movements when asked');
   if (has('stimulus')) doing.push('look at some pictures or short videos');
+  if (has('question')) doing.push('answer some short questions on screen');
   return doing;
 }
 
@@ -583,6 +614,10 @@ function countParts(body, nCal, nVal) {
   if (has('expression')) parts.push('You make some facial movements when asked, one at a time.');
   if (has('stimulus')) {
     parts.push(`You look at ${body.filter((s) => s.type === 'stimulus').length} pictures or short videos.`);
+  }
+  if (has('question')) {
+    const n = body.filter((s) => s.type === 'question').length;
+    parts.push(`You answer ${n} short question${n === 1 ? '' : 's'} on screen.`);
   }
   return parts;
 }
@@ -665,6 +700,9 @@ export function estimateDurationMs(sequence) {
         break;
       case 'stimulus':
         total += (stage.isiMs ?? STIMULUS_TIMINGS.isiMs) + stage.durationMs;
+        break;
+      case 'question':
+        total += QUESTION_MS;
         break;
       case 'instruction':
         // Genuinely participant-paced now, so any number here is an allowance

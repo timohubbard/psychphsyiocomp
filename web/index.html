@@ -84,6 +84,38 @@
   .speech-body {
     font-size: 21px; line-height: 1.75; color: #111; margin: 18px 0;
   }
+  /* A question: the prompt, one way to answer, Continue. Answers are chosen,
+     not pre-filled — see runQuestion. */
+  .q-progress { color: #666; font-size: 13px; margin: 0 0 8px; }
+  .q-prompt { margin: 0 0 18px; font-size: 21px; color: #111; line-height: 1.35; }
+  .q-scale { display: flex; gap: 6px; justify-content: space-between; }
+  .q-scale button { flex: 1; min-width: 38px; padding: 10px 0; font-size: 16px; }
+  .q-anchors { display: flex; justify-content: space-between; gap: 16px; color: #555; font-size: 13px; margin-top: 6px; }
+  .q-options { display: grid; gap: 8px; }
+  .q-options button { text-align: left; padding: 10px 14px; font-size: 16px; }
+  .q-body button { background: #fff; color: #111; border: 1px solid #c5ccd5; border-radius: 8px; cursor: pointer; }
+  .q-body button:hover { border-color: #4c8dff; }
+  .q-body button.chosen { background: #4c8dff; border-color: #4c8dff; color: #fff; }
+  .q-body button .k { color: #888; font-size: 12px; margin-right: 8px; }
+  .q-body button.chosen .k { color: #dde8ff; }
+  /* A plain, even track: the browser's default fills the track up to the
+     thumb, which on an untouched slider draws the midpoint as if chosen. */
+  #stageText[data-question] { min-width: min(34em, 90vw); }
+  .q-slider { width: 100%; -webkit-appearance: none; appearance: none; height: 8px; border-radius: 4px;
+    background: #c9d0d9; outline: none; margin: 10px 0; cursor: pointer; }
+  .q-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 22px; height: 22px;
+    border-radius: 50%; background: #4c8dff; border: 2px solid #fff; box-shadow: 0 1px 3px #0005; }
+  .q-slider::-moz-range-thumb { width: 22px; height: 22px; border-radius: 50%; background: #4c8dff;
+    border: 2px solid #fff; box-shadow: 0 1px 3px #0005; }
+  .q-slider.untouched::-webkit-slider-thumb { opacity: 0; }
+  .q-slider.untouched::-moz-range-thumb { opacity: 0; }
+  .q-text { width: 100%; min-height: 90px; font: inherit; font-size: 16px; padding: 10px; border-radius: 8px;
+    border: 1px solid #c5ccd5; resize: vertical; }
+  .q-count { color: #777; font-size: 12px; text-align: right; }
+  .q-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
+  .q-actions button { font-size: 15px; padding: 9px 18px; border-radius: 8px; cursor: pointer; border: 1px solid #c5ccd5; background: #fff; color: #333; }
+  .q-actions .q-next { background: #4c8dff; border-color: #4c8dff; color: #fff; font-weight: 600; }
+  .q-actions .q-next:disabled { opacity: .4; cursor: not-allowed; }
   .instr-continue {
     margin: 22px 0 0; padding-top: 16px; border-top: 1px solid #d3d8df;
     text-align: center; color: #555; font-size: 15px;

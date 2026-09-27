@@ -221,6 +221,7 @@ export function validateStudy(study) {
   } else if (Array.isArray(study.tasks)) {
     reasons.push(...stimuliReasons(study.tasks));
   }
+  reasons.push(...questionsReasons(study));
   reasons.push(...conditionReasons(study));
   reasons.push(...analysisReasons(study.analysis, study));
   const url = study.recruitment?.completion_url;
@@ -333,6 +334,113 @@ function analysisReasons(a, study) {
   });
   reasons.push(...contrastReasons(a, study));
   return reasons;
+}
+
+export const QUESTION_KINDS = ['likert', 'choice', 'slider', 'text'];
+export const MAX_FREE_TEXT = 1000;
+const QUESTIONS_TASK_KEYS = new Set(['type', 'id', 'title', 'randomise', 'items', 'arms']);
+const QUESTION_ITEM_KEYS = { likert: ['points', 'anchors'], choice: ['options'],
+  slider: ['min', 'max', 'anchors'], text: ['max_chars'] };
+
+/**
+ * Questions a participant answers on screen (web/src/main.js runQuestion).
+ * Mirrored in server/study.py.
+ *
+ * Scales, choices and sliders by default. A free-text answer is refused unless
+ * the study opts in with `disclosure.free_text: true`, because typed text is
+ * where people write their name, their diagnosis, anything — it bypasses the
+ * pseudonymisation the rest of the data goes through, and the consent screen
+ * must say so (consent.js tierCopy) before anyone types a word. The same
+ * reasoning as the transcript tier: identifying words need their own consent.
+ * Unknown keys are refused, so a misspelt "anchor" is never silently ignored.
+ */
+function questionsReasons(study) {
+  const reasons = [];
+  const num = (v) => typeof v === 'number' && Number.isFinite(v);
+  const labels = (a) => Array.isArray(a) && a.length === 2 && a.every((s) => nonEmpty(s) && s.length <= 80);
+  const freeText = study.disclosure?.free_text;
+  const ids = new Set();
+  let asksText = false;
+  (Array.isArray(study.tasks) ? study.tasks : []).forEach((task, ti) => {
+    if (task?.type !== 'questions') return;
+    const where = `task ${isId(task.id) ? task.id : ti + 1} (questions)`;
+    const extra = Object.keys(task).filter((k) => !QUESTIONS_TASK_KEYS.has(k)).sort();
+    if (extra.length) reasons.push(`${where} has unknown keys: ${extra.join(', ')}`);
+    if (!isId(task.id) || ids.has(task.id)) reasons.push(`${where} needs a unique slug id`);
+    ids.add(task.id);
+    if (task.title !== undefined && !(nonEmpty(task.title) && task.title.length <= 200)) {
+      reasons.push(`${where}: title must be 1 to 200 characters`);
+    }
+    if (task.randomise !== undefined && typeof task.randomise !== 'boolean') {
+      reasons.push(`${where}: randomise must be true or false`);
+    }
+    if (!Array.isArray(task.items) || !task.items.length || task.items.length > 50) {
+      reasons.push(`${where} needs 1 to 50 items`);
+      return;
+    }
+    const itemIds = new Set();
+    task.items.forEach((it, i) => {
+      const w = `${where} item ${i + 1}`;
+      if (!it || typeof it !== 'object' || Array.isArray(it)) { reasons.push(`${w} must be an object`); return; }
+      if (!QUESTION_KINDS.includes(it.kind)) { reasons.push(`${w}: kind must be likert, choice, slider or text`); return; }
+      const allowed = new Set(['id', 'kind', 'prompt', 'allow_skip', ...QUESTION_ITEM_KEYS[it.kind]]);
+      const ex = Object.keys(it).filter((k) => !allowed.has(k)).sort();
+      if (ex.length) reasons.push(`${w} has unknown keys for a ${it.kind} item: ${ex.join(', ')}`);
+      if (!isId(it.id) || itemIds.has(it.id)) reasons.push(`${w} needs a unique slug id`);
+      itemIds.add(it.id);
+      if (!(nonEmpty(it.prompt) && it.prompt.length <= 500)) reasons.push(`${w}: prompt must be 1 to 500 characters`);
+      if (it.allow_skip !== undefined && typeof it.allow_skip !== 'boolean') {
+        reasons.push(`${w}: allow_skip must be true or false`);
+      }
+      if (it.kind === 'likert') {
+        if (!(Number.isInteger(it.points) && it.points >= 2 && it.points <= 11)) {
+          reasons.push(`${w}: points must be a whole number from 2 to 11`);
+        }
+        if (!labels(it.anchors)) reasons.push(`${w}: anchors must be two labels of up to 80 characters, for the two ends`);
+      } else if (it.kind === 'choice') {
+        const opts = it.options;
+        const seen = new Set();
+        const ok = Array.isArray(opts) && opts.length >= 2 && opts.length <= 12 && opts.every((o) => {
+          const good = o && typeof o === 'object' && isId(o.id) && !seen.has(o.id)
+            && nonEmpty(o.label) && o.label.length <= 120;
+          if (good) seen.add(o.id);
+          return good;
+        });
+        if (!ok) reasons.push(`${w}: options must be 2 to 12 choices, each with a unique slug id and a label of 1 to 120 characters`);
+      } else if (it.kind === 'slider') {
+        if (!(num(it.min) && num(it.max) && it.min < it.max)) reasons.push(`${w}: a slider needs numbers min < max`);
+        if (!labels(it.anchors)) reasons.push(`${w}: anchors must be two labels of up to 80 characters, for the two ends`);
+      } else if (it.kind === 'text') {
+        asksText = true;
+        if (freeText !== true) {
+          reasons.push(`${w}: a typed answer can carry names or health details, so the study must opt in `
+            + 'with disclosure.free_text: true — and participants are told before they type');
+        }
+        if (it.max_chars !== undefined && !(Number.isInteger(it.max_chars) && it.max_chars >= 1
+            && it.max_chars <= MAX_FREE_TEXT)) {
+          reasons.push(`${w}: max_chars must be a whole number from 1 to ${MAX_FREE_TEXT}`);
+        }
+      }
+    });
+  });
+  if (freeText !== undefined && freeText !== null && typeof freeText !== 'boolean') {
+    reasons.push('disclosure.free_text must be true or false');
+  } else if (freeText === true && !asksText) {
+    // Declared and read by nothing: participants would be warned about typing
+    // they are never asked to do.
+    reasons.push('disclosure.free_text is true but no question asks for typed text');
+  }
+  return reasons;
+}
+
+/**
+ * What the participant's answers will contain, for the consent screen:
+ * 'none', 'choices' (scales, choices, sliders), or 'free_text'.
+ */
+export function answersKind(study) {
+  const items = (study?.tasks ?? []).filter((t) => t?.type === 'questions').flatMap((t) => t.items ?? []);
+  if (!items.length) return 'none';
+  return items.some((it) => it.kind === 'text') ? 'free_text' : 'choices';
 }
 
 const CONTRAST_KEYS = new Set(['name', 'epochs', 'channel', 'arms', 'window_ms', 'n_permutations',
@@ -536,6 +644,8 @@ export function canonicalise(study) {
     // Which arms exist is protocol. `recruitment` is not hashed: a completion
     // code changes per panel posting without the protocol changing.
     ['conditions', study.conditions],
+    // Whether typed answers are collected changes what participants are told.
+    ['free_text', d.free_text],
   ];
   return [...fixed, ...optional.filter(([, v]) => v !== undefined && v !== null)];
 }
@@ -568,7 +678,8 @@ export function needsAudio(study) {
 export function offeredTiers(study) {
   const offered = new Set(study.consent_tiers ?? []);
   const audio = needsAudio(study);
-  return CONSENT_TIERS.filter((t) => offered.has(t.id)).map((t) => tierCopy(t, { audio }));
+  const answers = answersKind(study);
+  return CONSENT_TIERS.filter((t) => offered.has(t.id)).map((t) => tierCopy(t, { audio, answers }));
 }
 
 /**
@@ -698,6 +809,8 @@ export function protocolFor(study, { condition = null } = {}) {
     // than written beside it — see `activitiesFor`.
     activity: {
       audio,
+      // What their answers will contain — the tiers' wording depends on it.
+      answers: answersKind(study),
       devices: audio ? 'camera and microphone' : 'camera',
       records: audio ? 'video and audio' : 'video (no audio)',
       // This participant's arm: the consent describes what THEY will do.

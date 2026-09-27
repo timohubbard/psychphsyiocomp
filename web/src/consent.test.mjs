@@ -12,6 +12,8 @@ import {
   retainsMedia,
   validateConsent,
   withdrawalText,
+  tierCopy,
+  ANSWERS_SENTENCE,
 } from './consent.js';
 
 const VALID = {
@@ -215,4 +217,21 @@ test('a record built from the tiers validates', () => {
     secondaryUse: 'Shared with collaborators under agreement.',
   });
   assert.equal(validateConsent(rec).valid, true);
+});
+
+test('every tier says answers are kept, and typed answers get their own warning', () => {
+  for (const t of CONSENT_TIERS) {
+    assert.deepEqual(tierCopy(t).keeps, t.keeps, 'no questions, no extra sentence');
+    assert.equal(tierCopy(t, { answers: 'choices' }).keeps.at(-1), ANSWERS_SENTENCE.choices);
+    assert.match(tierCopy(t, { answers: 'free_text' }).keeps.at(-1), /anything you type.*identify you/);
+  }
+  // Including the in-browser tier, which otherwise says only numbers are saved.
+  const inBrowser = CONSENT_TIERS.find((t) => t.id === 'features_in_browser');
+  assert.ok(tierCopy(inBrowser, { answers: 'choices' }).keeps.includes(ANSWERS_SENTENCE.choices));
+});
+
+test('the consent record keeps the answers sentence that was on screen', () => {
+  const rec = consentRecord({ tier: 'features_only', retentionDays: 30, secondaryUse: 'x',
+    contact: 'y', studyId: 's', answers: 'free_text' });
+  assert.equal(rec.disclosed.keeps.at(-1), ANSWERS_SENTENCE.free_text);
 });

@@ -65,6 +65,7 @@ _OPTIONAL_HASHED = (
     ("lawful_basis", lambda s, d: d.get("lawful_basis")),
     ("special_category_basis", lambda s, d: d.get("special_category_basis")),
     ("conditions", lambda s, d: s.get("conditions")),
+    ("free_text", lambda s, d: d.get("free_text")),
 )
 
 MIN_CALIBRATION_POINTS = 5
@@ -153,6 +154,7 @@ def validate_study(study: Any) -> Verdict:
         reasons.append("tasks must be a list when present")
     elif isinstance(study.get("tasks"), list):
         reasons.extend(_stimuli_reasons(study["tasks"]))
+    reasons.extend(_questions_reasons(study))
     reasons.extend(_condition_reasons(study))
     reasons.extend(_analysis_reasons(study.get("analysis"), study))
     rec = study.get("recruitment")
@@ -304,6 +306,102 @@ def _analysis_reasons(a: Any, study: dict | None = None) -> list[str]:
         if not (_num(hz) and 0 < hz <= 1000):
             reasons.append(f"{where}: resample_hz must be between 0 and 1000")
     reasons.extend(_contrast_reasons(a, study))
+    return reasons
+
+
+QUESTION_KINDS = ("likert", "choice", "slider", "text")
+MAX_FREE_TEXT = 1000
+_QUESTIONS_TASK_KEYS = {"type", "id", "title", "randomise", "items", "arms"}
+_QUESTION_ITEM_KEYS = {"likert": {"points", "anchors"}, "choice": {"options"},
+                       "slider": {"min", "max", "anchors"}, "text": {"max_chars"}}
+
+
+def _questions_reasons(study: dict) -> list[str]:
+    """Mirror of ``questionsReasons``: on-screen questions, free text opt-in only."""
+    reasons: list[str] = []
+    d = study.get("disclosure") if isinstance(study.get("disclosure"), dict) else {}
+    free_text = d.get("free_text")
+
+    def labels(a):
+        return isinstance(a, list) and len(a) == 2 and all(_non_empty(s) and len(s) <= 80 for s in a)
+
+    ids: set = set()
+    asks_text = False
+    for ti, task in enumerate(study.get("tasks") if isinstance(study.get("tasks"), list) else []):
+        if not isinstance(task, dict) or task.get("type") != "questions":
+            continue
+        where = f"task {task['id'] if _is_id(task.get('id')) else ti + 1} (questions)"
+        extra = sorted(set(task) - _QUESTIONS_TASK_KEYS)
+        if extra:
+            reasons.append(f"{where} has unknown keys: {', '.join(extra)}")
+        if not _is_id(task.get("id")) or task.get("id") in ids:
+            reasons.append(f"{where} needs a unique slug id")
+        ids.add(task.get("id"))
+        if "title" in task and not (_non_empty(task["title"]) and len(task["title"]) <= 200):
+            reasons.append(f"{where}: title must be 1 to 200 characters")
+        if "randomise" in task and not isinstance(task["randomise"], bool):
+            reasons.append(f"{where}: randomise must be true or false")
+        items = task.get("items")
+        if not isinstance(items, list) or not items or len(items) > 50:
+            reasons.append(f"{where} needs 1 to 50 items")
+            continue
+        item_ids: set = set()
+        for i, it in enumerate(items):
+            w = f"{where} item {i + 1}"
+            if not isinstance(it, dict):
+                reasons.append(f"{w} must be an object")
+                continue
+            kind = it.get("kind")
+            if kind not in QUESTION_KINDS:
+                reasons.append(f"{w}: kind must be likert, choice, slider or text")
+                continue
+            ex = sorted(set(it) - ({"id", "kind", "prompt", "allow_skip"} | _QUESTION_ITEM_KEYS[kind]))
+            if ex:
+                reasons.append(f"{w} has unknown keys for a {kind} item: {', '.join(ex)}")
+            if not _is_id(it.get("id")) or it.get("id") in item_ids:
+                reasons.append(f"{w} needs a unique slug id")
+            item_ids.add(it.get("id"))
+            if not (_non_empty(it.get("prompt")) and len(it["prompt"]) <= 500):
+                reasons.append(f"{w}: prompt must be 1 to 500 characters")
+            if "allow_skip" in it and not isinstance(it["allow_skip"], bool):
+                reasons.append(f"{w}: allow_skip must be true or false")
+            if kind == "likert":
+                if not (_whole(it.get("points")) and 2 <= it["points"] <= 11):
+                    reasons.append(f"{w}: points must be a whole number from 2 to 11")
+                if not labels(it.get("anchors")):
+                    reasons.append(f"{w}: anchors must be two labels of up to 80 characters, for the two ends")
+            elif kind == "choice":
+                opts, seen, ok = it.get("options"), set(), True
+                if not (isinstance(opts, list) and 2 <= len(opts) <= 12):
+                    ok = False
+                else:
+                    for o in opts:
+                        good = (isinstance(o, dict) and _is_id(o.get("id")) and o.get("id") not in seen
+                                and _non_empty(o.get("label")) and len(o["label"]) <= 120)
+                        if not good:
+                            ok = False
+                            break
+                        seen.add(o["id"])
+                if not ok:
+                    reasons.append(f"{w}: options must be 2 to 12 choices, each with a unique slug id "
+                                   "and a label of 1 to 120 characters")
+            elif kind == "slider":
+                if not (_num(it.get("min")) and _num(it.get("max")) and it["min"] < it["max"]):
+                    reasons.append(f"{w}: a slider needs numbers min < max")
+                if not labels(it.get("anchors")):
+                    reasons.append(f"{w}: anchors must be two labels of up to 80 characters, for the two ends")
+            else:
+                asks_text = True
+                if free_text is not True:
+                    reasons.append(f"{w}: a typed answer can carry names or health details, so the study "
+                                   "must opt in with disclosure.free_text: true — and participants are "
+                                   "told before they type")
+                if "max_chars" in it and not (_whole(it["max_chars"]) and 1 <= it["max_chars"] <= MAX_FREE_TEXT):
+                    reasons.append(f"{w}: max_chars must be a whole number from 1 to {MAX_FREE_TEXT}")
+    if free_text is not None and not isinstance(free_text, bool):
+        reasons.append("disclosure.free_text must be true or false")
+    elif free_text is True and not asks_text:
+        reasons.append("disclosure.free_text is true but no question asks for typed text")
     return reasons
 
 

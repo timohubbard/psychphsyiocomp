@@ -86,6 +86,16 @@ async function main() {
     check('the journey shows it, and leads back to its task', g.flashed && g.type === 'stimuli',
       `${g.blocks} blocks; click → task card (${g.type})`);
 
+    // A questions task from the palette, a second question added in its editor,
+    // and the journey drawing it — the study stays valid throughout.
+    await js(`(() => { document.querySelector('[data-add-task=questions]').click(); return true; })()`);
+    await js(`(() => { document.querySelector('[data-add-question][data-kind=choice]').click(); return true; })()`);
+    await until(`JSON.parse(document.getElementById('json').value).tasks.some((t) => t.type === 'questions' && t.items.length === 2)`,
+      'the questions task');
+    await until(`/^Valid/.test(document.getElementById('validity')?.textContent ?? '')`, 'still valid');
+    const qBlock = await js(`[...document.querySelectorAll('.fb')].map((b) => b.innerText).find((t) => /question/.test(t)) ?? ''`);
+    check('a questions task is built, and drawn in the journey', /2 questions/.test(qBlock), qBlock.split('\n')[0]);
+
     await js(`document.querySelector('[data-tab=consent]').click()`);
     const consent = await js(`document.querySelector('.preview')?.innerText ?? ''`);
     check('the consent preview is the capture page’s wording',

@@ -186,11 +186,24 @@ export function validateConsent(record) {
  * shown the video-only wording would misstate their consent in the other
  * direction.
  */
-export function tierCopy(tier, { audio = true } = {}) {
+export function tierCopy(tier, { audio = true, answers = 'none' } = {}) {
   if (!tier) return tier;
   const { withoutAudio, ...base } = tier;
-  return audio || !withoutAudio ? base : { ...base, ...withoutAudio };
+  const copy = audio || !withoutAudio ? base : { ...base, ...withoutAudio };
+  // Answers to on-screen questions are kept under every tier — including the
+  // one that otherwise promises "only the numbers are saved" — so each tier
+  // says so. Typed answers get their own sentence: a participant can write
+  // anything into a text box, including their name. AWAITING SIGN-OFF (README).
+  const said = ANSWERS_SENTENCE[answers];
+  return said ? { ...copy, keeps: [...copy.keeps, said] } : copy;
 }
+
+/** The sentence each tier adds for what the participant answers on screen. */
+export const ANSWERS_SENTENCE = {
+  choices: 'Your answers to the questions on screen.',
+  free_text: 'Your answers to the questions on screen, including anything you type. '
+    + 'Typed answers could identify you if you write identifying details, such as your name.',
+};
 
 /**
  * The automated-analysis notice, built from what this study measures.
@@ -239,8 +252,8 @@ export function consentRecord({ tier, retentionDays, secondaryUse, contact,
                                 irbReference = null, controller = null, lawfulBasis = null,
                                 specialCategoryBasis = null, audience = 'developer',
                                 analysis = null, withdrawal = null,
-                                studyId, audio = true }) {
-  const chosen = tierCopy(CONSENT_TIERS.find((t) => t.id === tier), { audio });
+                                studyId, audio = true, answers = 'none' }) {
+  const chosen = tierCopy(CONSENT_TIERS.find((t) => t.id === tier), { audio, answers });
   return {
     tier,
     understood: true,
@@ -386,6 +399,7 @@ export function runConsent(host, protocol) {
         withdrawal,
         studyId,
         audio: activity.audio,
+        answers: activity.answers ?? 'none',
       });
       record.understood = understood;
 

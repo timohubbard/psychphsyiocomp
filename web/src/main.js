@@ -480,6 +480,7 @@ async function runStage(stage) {
     case 'speech_free':    return runSpeech(stage);
     case 'expression':     return runExpression(stage);
     case 'stimulus':       return runStimulus(stage);
+    case 'question':       return runQuestion(stage);
     default:
       console.warn('unknown stage', stage);
       return undefined;
@@ -555,6 +556,141 @@ async function runInstruction(stage) {
   }, stage.id);
 
   ui.stageText.style.display = 'none';
+}
+
+/**
+ * One question, answered on screen.
+ *
+ * Nothing is pre-selected and a slider has no starting position: a default is
+ * the answer a hurried participant gives, and it looks exactly like a real one
+ * in the data. Continue stays disabled until there is an answer, or the study
+ * allows skipping and the participant says so — a skip is recorded as a skip,
+ * never as a value.
+ *
+ * The `question` event opens when the question is painted and the `response`
+ * carries the reaction time from that paint on the master clock, plus how many
+ * times the answer changed (a hesitation measure iMotions reports as well).
+ * Everything is built with textContent: prompts and labels are study text.
+ */
+async function runQuestion(stage) {
+  ui.target.style.opacity = '0';
+  ui.fixation.style.display = 'none';
+  ui.progress.style.display = 'none';
+  const box = ui.stageText;
+  box.replaceChildren();
+  const el = (tag, cls, text) => {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  };
+
+  box.append(el('div', 'q-progress', `Question ${stage.index} of ${stage.total}`));
+  box.append(el('h2', 'q-prompt', stage.prompt));
+  const body = el('div', 'q-body');
+  box.append(body);
+  const actions = el('div', 'q-actions');
+  const skip = stage.allowSkip ? el('button', 'q-skip', 'Skip') : null;
+  const next = el('button', 'q-next', 'Continue');
+  next.disabled = true;
+  if (skip) actions.append(skip);
+  actions.append(next);
+  box.append(actions);
+  box.style.display = 'block';
+  box.dataset.question = stage.id;
+
+  let value = null;
+  let changes = 0;
+  const set = (v) => {
+    if (v !== value) changes += 1;
+    value = v;
+    next.disabled = value === null || value === '';
+  };
+  const choiceButtons = [];
+  const pick = (buttons, i, v) => {
+    buttons.forEach((b, k) => b.classList.toggle('chosen', k === i));
+    set(v);
+  };
+
+  if (stage.kind === 'likert') {
+    const row = el('div', 'q-scale');
+    for (let p = 1; p <= stage.points; p += 1) {
+      const b = el('button', null, String(p));
+      b.dataset.value = String(p);
+      b.addEventListener('click', () => pick(choiceButtons, p - 1, p));
+      choiceButtons.push(b);
+      row.append(b);
+    }
+    const anchors = el('div', 'q-anchors');
+    anchors.append(el('span', null, stage.anchors[0]), el('span', null, stage.anchors[1]));
+    body.append(row, anchors);
+  } else if (stage.kind === 'choice') {
+    const list = el('div', 'q-options');
+    stage.options.forEach((o, i) => {
+      const b = el('button');
+      b.dataset.value = o.id;
+      b.append(el('span', 'k', String(i + 1)), document.createTextNode(o.label));
+      b.addEventListener('click', () => pick(choiceButtons, i, o.id));
+      choiceButtons.push(b);
+      list.append(b);
+    });
+    body.append(list);
+  } else if (stage.kind === 'slider') {
+    const range = el('input', 'q-slider untouched');
+    Object.assign(range, { type: 'range', min: String(stage.min), max: String(stage.max), step: 'any' });
+    range.value = String((stage.min + stage.max) / 2);
+    // Answered only once moved: the thumb is hidden until then, so the middle
+    // is not a silent default.
+    range.addEventListener('input', () => { range.classList.remove('untouched'); set(Number(range.value)); });
+    const anchors = el('div', 'q-anchors');
+    anchors.append(el('span', null, stage.anchors[0]), el('span', null, stage.anchors[1]));
+    body.append(range, anchors);
+  } else if (stage.kind === 'text') {
+    const area = el('textarea', 'q-text');
+    area.maxLength = stage.maxChars ?? 1000;
+    const count = el('div', 'q-count', `0 / ${area.maxLength}`);
+    area.addEventListener('input', () => {
+      count.textContent = `${area.value.length} / ${area.maxLength}`;
+      set(area.value.trim() ? area.value : null);
+    });
+    body.append(area, count);
+    setTimeout(() => area.focus(), 0);
+  }
+
+  const shownAt = await new Promise((resolve) => requestAnimationFrame(() => {
+    const t = now();
+    state.recorder.logEvent('question', {
+      task_id: stage.taskId, item_id: stage.itemId, kind: stage.kind, index: stage.index, total: stage.total,
+    }, stage.id);
+    resolve(t);
+  }));
+
+  const skipped = await new Promise((resolve) => {
+    const onKey = (ev) => {
+      if (stage.kind === 'text') return;           // typing digits is typing, not choosing
+      const n = Number(ev.key);
+      if (Number.isInteger(n) && n >= 1 && n <= choiceButtons.length) {
+        ev.preventDefault();
+        choiceButtons[n - 1].click();
+      } else if (ev.key === 'Enter' && !next.disabled) {
+        ev.preventDefault();
+        next.click();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    const done = (wasSkip) => { window.removeEventListener('keydown', onKey); resolve(wasSkip); };
+    next.addEventListener('click', () => done(false));
+    skip?.addEventListener('click', () => done(true));
+  });
+
+  state.recorder.closeEvent('question', stage.id);
+  const answer = skipped ? {} : (stage.kind === 'text' ? { value_text: value } : { value });
+  state.recorder.logEvent('response', {
+    task_id: stage.taskId, item_id: stage.itemId, kind: stage.kind, ...answer,
+    rt_ms: Math.round(now() - shownAt), n_changes: changes, skipped,
+  }, stage.id);
+  box.style.display = 'none';
+  delete box.dataset.question;
 }
 
 /** Resolve on space or a click anywhere. */
