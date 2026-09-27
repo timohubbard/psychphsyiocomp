@@ -61,7 +61,7 @@ it can run a study end to end:**
 What it still needs is a deployment, an ethics approval and people (see
 *Picking this up*).
 
-`npm run check` → licence inventory, 917 tests (266 JS + 651 Python), M0 gate
+`npm run check` → licence inventory, 984 tests (280 JS + 704 Python), M0 gate
 PASS. `npm run verify:gaze` now gates on **held-out targets only** (2026-09-27):
 PASS on the pilot (5/5), **FAIL on the other three** (4/5, 4/5, 3/5). The old
 gate pooled in the 13 targets the model was fitted on. See *The gaze
