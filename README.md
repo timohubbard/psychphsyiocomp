@@ -61,7 +61,7 @@ it can run a study end to end:**
 What it still needs is a deployment, an ethics approval and people (see
 *Picking this up*).
 
-`npm run check` → licence inventory, 1032 tests (291 JS + 741 Python), M0 gate
+`npm run check` → licence inventory, 1068 tests (294 JS + 774 Python), M0 gate
 PASS. `npm run verify:gaze` now gates on **held-out targets only** (2026-09-27):
 PASS on the pilot (5/5), **FAIL on the other three** (4/5, 4/5, 3/5). The old
 gate pooled in the 13 targets the model was fitted on. See *The gaze
@@ -303,11 +303,12 @@ can be done at a keyboard.
      webcam only). That makes drift correction evaluable, and its 20 s
      stimuli also give per-stimulus heart rate.
 4. **Respiration validation** against an RIP belt, before any rate is emitted.
-   **Heart-rate validation** needs only a Bluetooth sport chest strap (any that
-   speaks the standard Heart Rate profile, e.g. Polar H10): run a study that
-   declares `cardiac` with `?hrstrap=1` in Chrome or Edge, connect the strap
-   after consent, record, process, then `npm run verify:rppg`. It suggests an
-   SNR gate only from 3+ sessions and 100+ windows.
+   **Heart-rate validation** would need a Bluetooth chest strap. None is
+   planned (decided 2026-09-28: webcams only), so camera heart rate stays
+   tiered *unvalidated*, and every table and page says so. The path is built
+   in case that changes: a study declaring `cardiac`, `?hrstrap=1` in Chrome
+   or Edge, the strap connected after consent, then `npm run verify:rppg`.
+   That suggests an SNR gate only from 3+ sessions and 100+ windows.
 5. L2CS-Net fine-tune (not started; its gaze datasets carry research-only EULAs
    someone has to accept by hand).
 
