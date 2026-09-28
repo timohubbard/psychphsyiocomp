@@ -37,6 +37,7 @@ sys.path.insert(0, str(ROOT / "server"))
 import annotation_store  # noqa: E402
 import aoi_store  # noqa: E402
 import scoring_rules  # noqa: E402
+import session_qc  # noqa: E402
 import study_store  # noqa: E402
 from aoi import AOI, AOISet, analyse  # noqa: E402
 from fixations import classify  # noqa: E402
@@ -244,6 +245,10 @@ class Handler(SimpleHTTPRequestHandler):
                 return float(v) if v is not None else None
             return {**scanpath(self.data_root, parts[2], num("start"), num("end")),
                     "phases": phases(self.data_root, parts[2])}
+
+        if len(parts) == 4 and parts[:2] == ["api", "sessions"] and parts[3] == "qc":
+            # Is this session usable — every check with where its threshold came from.
+            return session_qc.report(self.data_root, parts[2])
 
         if len(parts) == 4 and parts[:2] == ["api", "sessions"] and parts[3] == "media":
             return self._media(parts[2])

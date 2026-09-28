@@ -137,7 +137,7 @@ def test_the_export_zip_holds_the_cohort_and_nothing_it_must_not(out, tmp_path):
     names = set(zipfile.ZipFile(z).namelist())
     for expected in ("provenance.json", "csv/sessions.csv", "csv/attrition.csv", "csv/events.csv",
                      "csv/signals/s1.csv.gz", "csv/epochs_smile.csv", "csv/stimulus_gaze.csv",
-                     "csv/stimulus_aoi.csv", "csv/stimulus_face.csv", "heatmaps/pic.csv",
+                     "csv/stimulus_aoi.csv", "csv/stimulus_face.csv", "csv/session_qc.csv", "heatmaps/pic.csv",
                      "heatmaps/pic.png", "bids/dataset_description.json", "bids/participants.tsv"):
         assert expected in names, expected
     assert any(n.endswith("_events.tsv") for n in names)
@@ -177,3 +177,15 @@ def test_the_cohort_page_sees_the_cohort_the_export_writes(out):
     # What the page needs to draw the density over the picture, as the export does.
     assert (v["heatmaps"][0]["src"], v["heatmaps"][0]["kind"]) == ("stimuli/scene_left.png", "image")
     assert v["analysis_hash"] and v["content_hash"] == content_hash(STUDY)
+
+
+def test_the_export_carries_each_sessions_quality_checks_and_their_basis(out, tmp_path):
+    write(out, "s1")
+    z = tmp_path / "x.zip"
+    export.build(out, STUDY, z)
+    import csv as _csv
+    import io as _io
+    rows = list(_csv.DictReader(_io.StringIO(zipfile.ZipFile(z).read("csv/session_qc.csv").decode())))
+    assert rows and {r["session_id"] for r in rows} == {"s1"}
+    assert {"group", "name", "status", "basis", "threshold", "analysis_hash"} <= set(rows[0])
+    assert {r["basis"] for r in rows} <= {"declared", "default", "info"}

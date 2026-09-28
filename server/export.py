@@ -41,6 +41,7 @@ sys.path.insert(0, str(ROOT / "server"))
 from cohort import EpochSpec, attrition_rows, epochs, select  # noqa: E402
 from inference import as_rows, participant_curves, participant_rows, run_contrasts  # noqa: E402
 from pseudonym import links  # noqa: E402
+from session_qc import rows_for_export  # noqa: E402
 from stimulus_summary import (DEFAULT_HEATMAP_SIGMA_DEG, heatmap, heatmap_png,  # noqa: E402
                               session_summary)
 from study import load_study  # noqa: E402
@@ -125,6 +126,10 @@ def build(out: Path, study: dict[str, Any], zip_path: Path, *,
 
     files["csv/sessions.csv"] = _csv_bytes(sessions)
     files["csv/attrition.csv"] = _csv_bytes(attrition_rows(cohort))
+    # Every check behind "usable", with where each threshold came from — for
+    # the included sessions only, like every other file here.
+    files["csv/session_qc.csv"] = _csv_bytes(
+        rows_for_export(out, sessions, study, cohort.analysis_hash, studies_root))
 
     all_events = []
     for s in sessions:

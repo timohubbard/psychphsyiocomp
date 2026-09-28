@@ -107,6 +107,7 @@ benchmark*.
 | Engines scored against human labels: versioned scoring rules, coverage-honest scoring, the recording's time origin checked, a Reliability page | done — `server/scoring_rules.py`, `/reliability.html`; `npm run verify:reliability`, `npm run verify:pts-origin` |
 | Questions on the capture page: rating scales, choices, sliders, opt-in typed answers, with reaction times | done — `studies/questions-example.json`; `npm run smoke:capture -- --study questions-example` |
 | Study builder: form, live validation + consent preview, participant-journey diagram per condition, stimulus upload, used studies fixed | done — `/builder.html`; `tools/verify_builder.mjs` |
+| Session quality report: every check with the source of its threshold (declared / engine default / info), cohort verdict kept separate | done — `npm run qc`, `/index.html` panel, `csv/session_qc.csv`; `npm run verify:qc` |
 | Codebook builder: defined categories, moments typed / gridded / sampled at random / picked from a recording, the rater's view, versions | done — `/codebook.html`; `npm run verify:codebook` |
 
 ### Picking this up
@@ -1279,6 +1280,33 @@ pass/fail cutoff is published for it, so the figure is shown beside §4.2's AOI
 budget as context rather than graded. A green badge here would silently become
 the project's inclusion criterion without anyone preregistering it.
 
+### Is this session usable?
+
+The session page opens with a quality report (`server/session_qc.py`; also
+`npm run qc -- --study <id>`, and `csv/session_qc.csv` in every export).
+Each listed session gets a badge. Every check says where its threshold came
+from:
+
+- **declared**: the study's own `analysis.exclusions`, evaluated exactly as
+  the cohort evaluates them. A `fail` means the cohort will drop the session.
+- **default**: an engine's own manifest threshold (`warn_below`, sourced in
+  each manifest to §5.3 or §2.5), or `verify:gaze`'s held-out gate. These
+  only ever **warn**. A default that could fail a session would become an
+  inclusion criterion nobody preregistered; a study that wants one declares it.
+- **info**: blink rate, heart rate and clock uncertainty are reported with no
+  threshold, because none has evidence behind it.
+
+Whether the cohort includes the session is shown separately from data quality.
+A developer self-test is left out of analysis by design, not because its data
+is bad, so mixing the two would paint every self-test red.
+
+Several engines write a quality metric of the same name. `face_detect_rate`
+comes from the browser and the server pass; `mean_luminance` from face,
+gaze and respiration. An exclusion rule reads the median across all of them
+unless it names a `source`, which it now can. The report warns only when the
+choice of source would change the verdict. On the stored sessions all sources
+agree, so nothing warns.
+
 ## Layout
 
 ```
@@ -1345,6 +1373,7 @@ npm run check                     # licences + all tests + M0 gate
 npm run verify:gaze               # do fixations land on the right target?
 npm run bench:gaze                # re-fit every session's gaze from stored features; judge variants
 npm run blinks                    # blink metrics for stored sessions (read-only)
+npm run qc -- --study <id>        # is each session usable? every check with its threshold's source (read-only)
 npm run rppg -- <bundle>          # camera heart rate on a raw recording, before processing (read-only)
 npm run verify:rppg               # camera heart rate against a chest strap: Bland-Altman, by SNR
 npm run verify:m0                 # M0 gate on a synthetic clip

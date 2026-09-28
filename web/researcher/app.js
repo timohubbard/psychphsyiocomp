@@ -47,6 +47,7 @@ async function loadList() {
   [...document.querySelectorAll('.sess')].forEach((el) => {
     el.addEventListener('click', () => select(el.dataset.id));
   });
+  listQcBadges(rows.map((s) => s.session_id));
   $('filter').addEventListener('input', filterList);
   // ?session=<id> opens that session, so other pages can link to one.
   const wanted = new URLSearchParams(location.search).get('session');
@@ -112,6 +113,73 @@ function sessionPills(s) {
 }
 
 const pill = (text, cls = '') => `<span class="pill ${cls}">${text}</span>`;
+
+// ---------------------------------------------------------------------------
+// session quality (server/session_qc.py)
+// ---------------------------------------------------------------------------
+
+const QC_CLASS = { fail: 'bad', warn: 'warn', not_measured: 'warn', pass: 'ok', info: '' };
+const QC_WORD = { fail: 'fails a rule', warn: 'warnings', not_measured: 'unmeasured', pass: 'usable', info: 'no checks' };
+const qcCache = new Map();
+
+async function qcFor(id) {
+  if (!qcCache.has(id)) qcCache.set(id, api(`/api/sessions/${encodeURIComponent(id)}/qc`));
+  return qcCache.get(id);
+}
+
+/** A worst-status pill per listed session, two at a time — the gaze gate re-reads each session's gaze. */
+async function listQcBadges(ids) {
+  const queue = [...ids];
+  const worker = async () => {
+    while (queue.length) {
+      const id = queue.shift();
+      try {
+        const r = await qcFor(id);
+        document.querySelector(`.sess[data-id="${CSS.escape(id)}"] .pills`)
+          ?.insertAdjacentHTML('afterbegin', pill(`QC: ${QC_WORD[r.worst]}`, QC_CLASS[r.worst]));
+      } catch { /* the detail view says why */ }
+    }
+  };
+  await Promise.all([worker(), worker()]);
+}
+
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+function qcValue(c) {
+  if (c.value === null || c.value === undefined) return '';
+  if (typeof c.value === 'string') return esc(c.value);
+  if (c.unit === 'proportion') return `${(c.value * 100).toFixed(0)}%`;
+  const v = Math.abs(c.value) >= 100 ? c.value.toFixed(0) : Number(c.value.toPrecision(3));
+  return `${v}${c.unit ? ` ${esc(c.unit)}` : ''}`;
+}
+
+function qcRow(c) {
+  const src = c.source ? `<span class="src">${esc(c.source.split('@')[0])}${c.source.includes('+') ? `+${esc(c.source.split('+').pop())}` : ''}</span>` : '';
+  const thr = c.threshold ? `<span class="thr">need ${esc(c.threshold)} · ${c.basis}</span>` : '';
+  return `<tr class="qc-${c.status}"><td class="dot"><i></i></td>
+    <td class="txt">${esc(c.name)}${src}${c.why && c.status !== 'pass' ? `<div class="why">${esc(c.why)}</div>` : ''}</td>
+    <td>${qcValue(c)}</td><td class="txt">${thr}</td></tr>`;
+}
+
+/** The panel: problems first and open; what passed, folded underneath. */
+async function showQc(id) {
+  const el = $('qc');
+  if (!el) return;
+  const r = await qcFor(id);
+  const problems = r.checks.filter((c) => ['fail', 'warn', 'not_measured'].includes(c.status));
+  const rest = r.checks.filter((c) => !problems.includes(c));
+  const co = r.cohort ?? {};
+  const cohort = co.included === true ? pill('in the cohort', 'ok')
+    : co.included === false ? pill(`left out: ${esc(co.reason)}`, 'warn') : pill(esc(co.reason ?? 'no study'), 'warn');
+  el.innerHTML = `<h2>Usable? ${pill(QC_WORD[r.worst], QC_CLASS[r.worst])} ${cohort}</h2>
+    ${problems.length ? `<table class="qc">${problems.map(qcRow).join('')}</table>`
+      : '<div class="note">No check failed or warned.</div>'}
+    <details class="qcmore"><summary>${rest.length} more checks — passed or for information</summary>
+      <table class="qc">${rest.map(qcRow).join('')}</table></details>
+    <div class="note">Thresholds are the study's own exclusions (<em>declared</em> — these are what
+      the cohort applies), or an engine's published starting point (<em>default</em> — advice only,
+      never a failure). Nothing here is graded against a number without a source.</div>`;
+}
 
 function select(id) {
   active = id;
@@ -197,6 +265,7 @@ async function loadDetail(id) {
       ${row ? `<div class="meta">${sessionMeta(row)}</div><div class="pills">${sessionPills(row).join('')}</div>` : ''}
     </div></div>
     <div class="cards">${cards.join('')}</div>
+    <div id="qc"></div>
 
     ${sm.gaze_average_offset_deg != null ? `<div class="note">
       Gaze error is measured on validation targets the model was never fitted on,
@@ -247,6 +316,7 @@ async function loadDetail(id) {
     tr.addEventListener('click', () => plotChannel(id, tr.dataset.channel, tr.dataset.source));
   });
 
+  showQc(id).catch((e) => { const el = $('qc'); if (el) el.innerHTML = `<div class="note">Quality report failed: ${esc(e.message)}</div>`; });
   showAgreement(id).catch(() => {});
   showExpressions(id).catch(() => {});
 

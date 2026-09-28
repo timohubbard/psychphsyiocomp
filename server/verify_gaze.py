@@ -102,6 +102,31 @@ def load_gaze(out: str, session_id: str):
     return ts, x, y, d, (dpp, viewport)
 
 
+def held_out_gate(out: str, session_id: str) -> dict:
+    """The gate's verdict as data, for the session quality report.
+
+    Same inputs and arithmetic as `main` — held-out validation targets only,
+    HMM fixations on on-screen samples, GATE_PAD_DEG padding — without the
+    printing. Returns {"status": "pass"|"fail"|"refused", ...}.
+    """
+    ts, x, y, d, geom = load_gaze(out, session_id)
+    if geom is None:
+        return {"status": "refused", "reason": "no geometry or no gaze estimate"}
+    dpp, viewport = geom
+    on = (x > -0.1) & (x < 1.1) & (y > -0.1) & (y < 1.1)
+    fixations = [e for e in classify(ts[on], x[on], y[on], viewport_px=viewport,
+                                     degrees_per_px=dpp).events if e.kind == "fixation"]
+    held_out = dwell_targets(d["events"])["validation"]
+    if not held_out:
+        return {"status": "refused", "reason": "no validation dwell windows"}
+    _, hits, checked, err = next(r for r in hit_table(fixations, held_out, dpp=dpp, viewport=viewport,
+                                                      pads=(GATE_PAD_DEG,)))
+    rate = hits / max(checked, 1)
+    return {"status": "pass" if rate >= GATE_HIT_RATE else "fail", "hit_rate": rate,
+            "hits": hits, "checked": checked, "mean_error_deg": err,
+            "pad_deg": GATE_PAD_DEG, "need": GATE_HIT_RATE}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--data", type=Path, default=ROOT / "out")
