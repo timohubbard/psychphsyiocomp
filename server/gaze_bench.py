@@ -22,6 +22,10 @@ people, a rule written after seeing the numbers would find a winner in noise.
 The benchmark refuses to report unless the shipped configuration reproduces
 every stored figure to 0.01 deg — otherwise it is measuring something other
 than the pipeline, and its verdicts would be about that.
+
+Drift correction (gaze_drift.py) is judged here too, on a different metric:
+error on a LATE validation block that the correction never sees, under the
+same RULE. Sessions without a late block cannot be scored on it and say so.
 """
 
 from __future__ import annotations
@@ -41,6 +45,7 @@ import numpy as np  # noqa: E402
 import pyarrow.compute as pc  # noqa: E402
 
 from fixations import classify  # noqa: E402
+from gaze_drift import anchor_windows, is_late, late_error_deg, measure  # noqa: E402
 from gaze_stage import (EstimatorConfig, TargetSpan, effective_rate, feature_matrix,  # noqa: E402
                         fit_session, onscreen_mask, target_spans)
 from store import list_sessions, session_detail  # noqa: E402
@@ -143,6 +148,7 @@ class Unit:
     dpp: float
     fps: float
     stored_deg: float | None = None  # the pipeline's own figure, if this unit is the one it fitted
+    anchors: list = field(default_factory=list)   # gaze_drift.AnchorWindow: crosses looked at
 
     @property
     def label(self) -> str:
@@ -182,7 +188,8 @@ def load_units(out: str | Path) -> tuple[list[Unit], list[str]]:
             ts, X = feature_matrix(rows, channels)
             if not len(ts):
                 continue
-            units.append(Unit(sid, source, seeded, ts, X, channels, spans, viewport, dpp, effective_rate(ts)))
+            units.append(Unit(sid, source, seeded, ts, X, channels, spans, viewport, dpp, effective_rate(ts),
+                              anchors=anchor_windows(ev)))
         q = read_session(out, sid, "quality")
         stored = q.filter(pc.and_(pc.equal(q["metric"], "gaze_average_offset_deg"),
                                   pc.equal(q["source"], ESTIMATOR_SOURCE)))["value"].to_pylist()
@@ -340,6 +347,98 @@ def decide(lever: Lever, units: list[Unit], base: dict[str, Score], mine: dict[s
 # running it
 # ---------------------------------------------------------------------------
 
+def drift_score(unit: Unit, config: EstimatorConfig = EstimatorConfig()) -> dict[str, Any]:
+    """Late-block error before and after drift correction, for one unit.
+
+    The model is fitted on calibration exactly as shipped; the late block is
+    kept out of the fit's own validation so nothing in the fit has seen it.
+    """
+    late = [s for s in unit.spans if is_late(s)]
+    cal_end = max((s.end_ts for s in unit.spans if s.kind == "calibration_point"), default=None)
+    if not late:
+        return {"evaluable": False, "reason": "no late validation block"}
+    if cal_end is None:
+        return {"evaluable": False, "reason": "no calibration"}
+    fit = _fit(unit, [s for s in unit.spans if not is_late(s)], config)
+    if fit.refusal:
+        return {"evaluable": False, "reason": fit.refusal}
+    pred = fit.predict(unit.X)
+    drift = measure(unit.ts, pred, unit.anchors, t0=cal_end, viewport=unit.viewport, dpp=unit.dpp)
+    if not drift.used:
+        return {"evaluable": False, "reason": "no usable anchor (no logged cross looked at steadily)",
+                "abstained": [a.abstain for a in drift.anchors]}
+    corrected = drift.apply(unit.ts, pred)
+
+    def gate(p):
+        ok = np.all(np.isfinite(p), axis=1)
+        on = onscreen_mask(p[ok])
+        fx = [e for e in classify(unit.ts[ok][on], p[ok][on, 0], p[ok][on, 1], viewport_px=unit.viewport,
+                                  degrees_per_px=unit.dpp).events if e.kind == "fixation"]
+        _, hits, checked, _ = next(r for r in hit_table(fx, [(s.x, s.y, s.start_ts, s.end_ts) for s in late],
+                                                         dpp=unit.dpp, viewport=unit.viewport,
+                                                         pads=(GATE_PAD_DEG,)))
+        return hits / checked if checked else None
+
+    kw = {"viewport": unit.viewport, "dpp": unit.dpp, "trim": config.trim_fraction}
+    return {"evaluable": True, "before_deg": late_error_deg(unit.ts, pred, late, **kw),
+            "after_deg": late_error_deg(unit.ts, corrected, late, **kw),
+            "gate_before": gate(pred), "gate_after": gate(corrected),
+            "anchors_used": len(drift.used), "anchors_abstained": len(drift.anchors) - len(drift.used),
+            "slope_deg_per_min": drift.slope_deg_per_min}
+
+
+def drift_decision(units: list[Unit], scores: dict[str, dict[str, Any]], rule: Rule = RULE) -> Decision:
+    """The same RULE, on late-block error. One vote per seeded session."""
+    ev = [u for u in units if scores[u.label].get("evaluable")]
+    delta = _by_session(ev, {u.label: scores[u.label]["after_deg"] - scores[u.label]["before_deg"]
+                             for u in ev if scores[u.label]["after_deg"] is not None
+                             and scores[u.label]["before_deg"] is not None})
+    before = _by_session(ev, {u.label: scores[u.label]["before_deg"] for u in ev})
+    d_gate = _by_session(ev, {u.label: scores[u.label]["gate_after"] - scores[u.label]["gate_before"]
+                              for u in ev if scores[u.label]["gate_after"] is not None
+                              and scores[u.label]["gate_before"] is not None})
+    out = Decision("drift_correction", "reject", per_session_delta=delta)
+    if len(delta) < rule.min_sessions_per_source:
+        out.verdict = "not_evaluable"
+        out.reasons = [f"{len(delta)} seeded session(s) have a late validation block and a usable anchor; "
+                       f"the rule needs {rule.min_sessions_per_source}. Record sessions under "
+                       "studies/drift-example.json to make it evaluable."]
+        return out
+    gain = -float(np.mean(list(delta.values())))
+    out.mean_gain_deg = gain
+    reasons = []
+    worse = [s for s, v in delta.items() if v > 0]
+    if len(worse) > rule.max_worse_units or any(delta[s] > rule.max_worse_deg for s in worse):
+        reasons.append(f"worse on {', '.join(f'{s} (+{delta[s]:.2f} deg)' for s in worse)}")
+    bar = max(rule.min_gain_deg, rule.min_gain_fraction * float(np.mean(list(before.values()))))
+    if gain < bar:
+        reasons.append(f"mean gain {gain:+.2f} deg is under the bar of {bar:.2f} deg")
+    fell = [s for s, v in d_gate.items() if v < 0]
+    if fell:
+        reasons.append(f"late-block gate hit rate fell on {', '.join(fell)}")
+    out.verdict = "reject" if reasons else "adopt"
+    out.reasons = reasons or ["passes every condition"]
+    return out
+
+
+def rest_drift(unit: Unit, config: EstimatorConfig = EstimatorConfig()) -> dict[str, Any] | None:
+    """Diagnostic only: drift across the rest cross, the one late-ish anchor stored sessions have."""
+    rest = [w for w in unit.anchors if w.kind == "rest_fixation"]
+    cal_end = max((s.end_ts for s in unit.spans if s.kind == "calibration_point"), default=None)
+    if not rest or cal_end is None:
+        return None
+    fit = _fit(unit, unit.spans, config)
+    if fit.refusal:
+        return None
+    d = measure(unit.ts, fit.predict(unit.X), rest, t0=cal_end, viewport=unit.viewport, dpp=unit.dpp)
+    if not d.used:
+        return {"used": 0, "abstained": len(d.anchors)}
+    return {"used": len(d.used), "abstained": len(d.anchors) - len(d.used),
+            "minutes": [round((a.t - cal_end) / 60000, 2) for a in d.used],
+            "error_deg": [round(a.error_deg, 2) for a in d.used],
+            "slope_deg_per_min": d.slope_deg_per_min}
+
+
 def self_check(units: list[Unit], base: dict[str, Score]) -> list[str]:
     """The shipped config must reproduce every stored figure, or nothing here counts."""
     problems = []
@@ -391,9 +490,16 @@ def run(out: str | Path, levers=LEVERS) -> dict[str, Any]:
         "levers": {name: {k: asdict(v) for k, v in r.items() if v is not None} for name, r in results.items()},
         "decisions": [asdict(d) for d in decisions],
         "combination": asdict(combination) if combination else None,
+        "drift": _drift_section(units),
         "not_tested": NOT_TESTED,
         "rule": asdict(RULE),
     }
+
+
+def _drift_section(units: list[Unit]) -> dict[str, Any]:
+    scores = {u.label: drift_score(u) for u in units}
+    return {"scores": scores, "decision": asdict(drift_decision(units, scores)),
+            "rest": {u.label: r for u in units if (r := rest_drift(u)) is not None}}
 
 
 def _fmt(v, spec=".2f"):
@@ -432,6 +538,27 @@ def main() -> int:
               + "; ".join(d["reasons"]))
     for k, why in r["not_tested"].items():
         print(f"  {'NOT RUN':<10} {k:<22} {why}")
+
+    dr = r["drift"]
+    print("\n  DRIFT — late validation block, before and after correcting from the crosses")
+    for u, s in dr["scores"].items():
+        if s.get("evaluable"):
+            print(f"  {u:<26} {s['before_deg']:.2f} -> {s['after_deg']:.2f} deg   gate "
+                  f"{_fmt(s['gate_before'], '.0%')} -> {_fmt(s['gate_after'], '.0%')}   "
+                  f"{s['anchors_used']} anchors ({s['anchors_abstained']} abstained)")
+        else:
+            print(f"  {u:<26} not evaluable: {s['reason']}")
+    d = dr["decision"]
+    print(f"  {d['verdict'].upper():<10} drift_correction       " + "; ".join(d["reasons"]))
+    if dr["rest"]:
+        print("\n  Diagnostic only — error to the rest cross (straight after validation), per 5 s piece:")
+        for u, x in dr["rest"].items():
+            if x.get("used"):
+                slope = x["slope_deg_per_min"]
+                print(f"  {u:<26} " + " ".join(f"{e:.2f}" for e in x["error_deg"])
+                      + f" deg   slope {_fmt(slope, '+.2f')} deg/min   ({x['abstained']} abstained)")
+            else:
+                print(f"  {u:<26} every piece abstained ({x['abstained']})")
     print()
     return 0
 

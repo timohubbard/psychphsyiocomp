@@ -1,0 +1,59 @@
+{
+  "study_id": "drift-example",
+  "name": "Drift example — gaze checked again at the end",
+  "version": "1.0.0",
+
+  "notes": [
+    "Makes gaze drift measurable. The crosses between stimuli and the rest",
+    "cross are logged, and validation runs twice: straight after calibration,",
+    "and again at the end. server/gaze_drift.py corrects drift from the",
+    "crosses and is scored on the LATE block only, which it never sees.",
+    "Stimuli last 20 s, which also clears camera heart rate's 10 s window.",
+    "A developer self-test (no audience)."
+  ],
+
+  "disclosure": {
+    "retention_days": 180,
+    "secondary_use": "Analysed by the named research team only. Not sold, and not shared outside the team without a further, separate agreement.",
+    "contact": "Replace this with the investigator and the route to the ethics board before running anyone other than the developer.",
+    "irb_reference": null
+  },
+
+  "consent_tiers": ["features_only", "media_retained"],
+  "default_tier": "features_only",
+
+  "modalities": ["gaze", "face"],
+
+  "calibration": {
+    "n_points": 13,
+    "randomise_order": true
+  },
+
+  "analysis": {
+    "aoi_pad_deg": 1.5,
+    "heatmap_sigma_deg": 1.0
+  },
+
+  "tasks": [
+    { "type": "chinrest" },
+    { "type": "calibration" },
+    { "type": "validation" },
+    {
+      "type": "stimuli",
+      "isi_ms": 2000,
+      "items": [
+        { "stimulus_id": "scene_left", "kind": "image", "src": "stimuli/scene_left.png",
+          "sha256": "629b0f1ebc823f79ca8138bc1c7d61768a8fcc7e4edf20a41dba736b903b2dc1",
+          "duration_ms": 20000 },
+        { "stimulus_id": "scene_right", "kind": "image", "src": "stimuli/scene_right.png",
+          "sha256": "d7ef3a1b55c2028a612ba0b1f9b82f539d085130488d74c04286233be752f058",
+          "duration_ms": 20000 },
+        { "stimulus_id": "pattern", "kind": "video", "src": "stimuli/pattern.webm",
+          "sha256": "402c10e89effe2998eb62463a23a6c9629db2ed2bd76a87266d707e9e6b77b49",
+          "duration_ms": 20000 }
+      ]
+    },
+    { "type": "rest_fixation", "duration_ms": 30000 },
+    { "type": "validation" }
+  ]
+}

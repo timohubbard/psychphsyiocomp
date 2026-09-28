@@ -605,3 +605,12 @@ def test_stimulus_example_keeps_the_hash_its_real_sessions_were_recorded_under()
     (the blink epoch, 2026-09-28) must not change it; editing its tasks would."""
     s = json.loads((ROOT / "studies" / "stimulus-example.json").read_text(encoding="utf-8"))
     assert content_hash(s) == "88e095e348765fc9"
+
+
+def test_validation_may_run_twice_as_a_late_drift_check_mirroring_the_browser():
+    def tasks(n):
+        return [{"type": "calibration"}] + [{"type": "validation"}] * n
+    assert validate_study(study(modalities=["gaze"], tasks=tasks(2))).ok
+    assert "at most twice" in _reasons(study(modalities=["gaze"], tasks=tasks(3)))
+    early = [{"type": "validation"}, {"type": "calibration"}, {"type": "validation"}]
+    assert "needs calibration" in _reasons(study(modalities=["gaze"], tasks=early))

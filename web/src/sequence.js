@@ -289,8 +289,10 @@ export function buildSequence(study, seed = (Date.now() >>> 0), { condition = nu
     .filter(([t]) => t.arms === undefined || (condition !== null && t.arms.includes(condition)));
 
   const body = [];
+  let validationBlock = 0;
   for (const [task, taskIndex] of tasks) {
-    const stages = stagesForTask(task, { calPoints, valPoints, wantsGaze, wantsVoice, seed });
+    const stages = stagesForTask(task, { calPoints, valPoints, wantsGaze, wantsVoice, seed, validationBlock });
+    if (task.type === 'validation') validationBlock += 1;
     if (stages === null) {
       throw new Error(`study asks for an unknown task type: ${task.type}`);
     }
@@ -378,7 +380,7 @@ function taskIsWanted(task, mods) {
  * speak into a microphone nobody requested. Returns `null` for a type this
  * build does not know, which is an error rather than an omission.
  */
-function stagesForTask(task, { calPoints, valPoints, wantsGaze, wantsVoice, seed }) {
+function stagesForTask(task, { calPoints, valPoints, wantsGaze, wantsVoice, seed, validationBlock = 0 }) {
   switch (task.type) {
     case 'chinrest':
       // Handled by the setup flow before the sequence runs; listed in studies
@@ -406,6 +408,26 @@ function stagesForTask(task, { calPoints, valPoints, wantsGaze, wantsVoice, seed
 
     case 'validation':
       if (!wantsGaze) return [];
+      // A second validation block, later in the session, measures drift: the
+      // same held-out places, long after calibration. Its ids differ so the
+      // two blocks stay apart everywhere downstream (server/gaze_drift.py
+      // scores drift correction on this block alone).
+      if (validationBlock > 0) {
+        return [
+          { type: 'instruction', id: 'valid_late_intro',
+            title: 'One last check',
+            lines: [
+              `The dots once more, in ${valPoints.length} places, as at the start.`,
+              'This measures whether anything drifted since then, so it is worth the same care.',
+              `${valPoints.length} dots, about ${describeDuration(
+                valPoints.length * (TIMINGS.saccadeMs + TIMINGS.validationDwellMs))}.`,
+            ] },
+          ...valPoints.map((p, i) => ({
+            type: 'validation_point', id: `valid_late_${i}`, x: p[0], y: p[1], block: 'late',
+            index: i + 1, total: valPoints.length,
+          })),
+        ];
+      }
       return [
         { type: 'instruction', id: 'valid_intro',
           title: 'Once more, to check it worked',
@@ -619,6 +641,8 @@ function countParts(body, nCal, nVal) {
     const n = body.filter((s) => s.type === 'question').length;
     parts.push(`You answer ${n} short question${n === 1 ? '' : 's'} on screen.`);
   }
+  // Last, because it comes last: the drift check closes the session.
+  if (body.some((s) => s.block === 'late')) parts.push('At the end, the dots once more, to check nothing drifted.');
   return parts;
 }
 

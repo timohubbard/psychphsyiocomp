@@ -760,3 +760,25 @@ test('the consent screen and the time estimate know about the questions', () => 
   const q = buildSequence(QSTUDY, 1).filter((s) => s.type === 'question');
   assert.equal(estimateDurationMs(q), 3 * QUESTION_MS);
 });
+test('a second validation task is a late drift check with its own ids', () => {
+  const study = { modalities: ['gaze'], calibration: { n_points: 13 },
+    tasks: [{ type: 'calibration' }, { type: 'validation' }, { type: 'rest_fixation', duration_ms: 5000 },
+      { type: 'validation' }] };
+  const seq = buildSequence(study, 7);
+  const early = seq.filter((s) => s.type === 'validation_point' && !s.block);
+  const late = seq.filter((s) => s.block === 'late');
+  assert.equal(early.length, VALIDATION_POINTS.length);
+  assert.equal(late.length, VALIDATION_POINTS.length);
+  assert.ok(late.every((s) => s.type === 'validation_point' && s.id.startsWith('valid_late_')));
+  // The same held-out places, so the two blocks compare like with like.
+  assert.deepEqual(late.map((s) => [s.x, s.y]), early.map((s) => [s.x, s.y]));
+  const ids = seq.map((s) => s.id);
+  assert.equal(new Set(ids).size, ids.length);
+  assert.ok(seq.findIndex((s) => s.block === 'late') > seq.findIndex((s) => s.type === 'fixation'));
+  const intro = seq.find((s) => s.id === 'intro').lines;
+  assert.match(intro.at(-2), /At the end, the dots once more/);
+});
+
+test('a study with one validation has no late block', () => {
+  assert.ok(!buildM0Sequence(3).some((s) => s.block === 'late'));
+});

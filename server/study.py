@@ -154,6 +154,14 @@ def validate_study(study: Any) -> Verdict:
         reasons.append("tasks must be a list when present")
     elif isinstance(study.get("tasks"), list):
         reasons.extend(_stimuli_reasons(study["tasks"]))
+        # Mirrors study.js: twice at most, the second being the late drift check.
+        kinds = [t.get("type") if isinstance(t, dict) else None for t in study["tasks"]]
+        n_val = kinds.count("validation")
+        if n_val > 2:
+            reasons.append("tasks: validation may appear at most twice (the second is a late drift check)")
+        if n_val == 2 and ("calibration" not in kinds
+                           or kinds.index("calibration") > kinds.index("validation")):
+            reasons.append("tasks: a second validation needs calibration and a first validation before it")
     reasons.extend(_questions_reasons(study))
     reasons.extend(_condition_reasons(study))
     reasons.extend(_analysis_reasons(study.get("analysis"), study))

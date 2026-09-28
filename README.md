@@ -107,6 +107,7 @@ benchmark*.
 | Statistics between arms: declared contrasts, participant-first means, permutation + cluster tests, Holm, generated R (lme4/mgcv) | done — `server/inference.py`; on the cohort page and in the export |
 | Engines scored against human labels: versioned scoring rules, coverage-honest scoring, the recording's time origin checked, a Reliability page | done — `server/scoring_rules.py`, `/reliability.html`; `npm run verify:reliability`, `npm run verify:pts-origin` |
 | Questions on the capture page: rating scales, choices, sliders, opt-in typed answers, with reaction times | done — `studies/questions-example.json`; `npm run smoke:capture -- --study questions-example` |
+| Gaze drift: crosses logged, a late validation block, correction from the crosses judged on that block only | done — machinery; `studies/drift-example.json`; **not evaluable until 3 sessions are recorded** |
 | Study builder: form, live validation + consent preview, participant-journey diagram per condition, stimulus upload, used studies fixed | done — `/builder.html`; `tools/verify_builder.mjs` |
 | Session quality report: every check with the source of its threshold (declared / engine default / info), cohort verdict kept separate | done — `npm run qc`, `/index.html` panel, `csv/session_qc.csv`; `npm run verify:qc` |
 | Codebook builder: defined categories, moments typed / gridded / sampled at random / picked from a recording, the rater's view, versions | done — `/codebook.html`; `npm run verify:codebook` |
@@ -298,6 +299,9 @@ can be done at a keyboard.
      sessions by 0.82° on average, but the rule needs three.
    - After that, a better estimator (L2CS-Net, item 5), not further tuning of
      this one.
+   - **Record three sessions under `drift-example`** (about 3.3 min each,
+     webcam only). That makes drift correction evaluable, and its 20 s
+     stimuli also give per-stimulus heart rate.
 4. **Respiration validation** against an RIP belt, before any rate is emitted.
    **Heart-rate validation** needs only a Bluetooth sport chest strap (any that
    speaks the standard Heart Rate profile, e.g. Polar H10): run a study that
@@ -1074,6 +1078,51 @@ trap* above). Its column is shown for continuity.
 
 The honest reading is that this estimator is near what these features can
 give. The next gain is a better estimator, not a better-tuned ridge.
+
+### Gaze drift (2026-09-28)
+
+The gaze map is fitted once, at calibration, then trusted while the participant
+slumps and leans. Nothing measured drift before: every stored study runs
+validation straight after calibration, so its error is the map's error at
+minute one. Now:
+
+- **The capture page logs its anchors.** Each cross between stimuli is a
+  `fixation_cross` event at the stage centre. A study may also run
+  `validation` a second time, at the end: ids `valid_late_*`, same places,
+  `block: "late"`. Both sides allow at most two, the second after calibration.
+  `studies/drift-example.json` does both: three 20 s pictures, 2 s crosses, a
+  30 s rest cross, then the late block, about 3.3 minutes.
+- **`server/gaze_drift.py` corrects from the crosses.** It takes the offset
+  between each cross and the median prediction, zero at the end of
+  calibration, interpolates linearly in time, and holds it after the last
+  cross. It never reads a validation point. A cross abstains when the look was
+  not steady (60% within 2°), or when it sits more than 9° away (twice the
+  gate's padding).
+- **`npm run bench:gaze` judges it** on the late block alone, under the same
+  pre-registered rule. It needs 3 seeded sessions with a late block. **Today:
+  not evaluable, 0 sessions.**
+
+Why the 9° limit exists. On `s_mucntzzh` the gaze sat at (0.63, 0.85) for the
+whole rest minute, while the same map put the centre calibration point at
+(0.49, 0.49). That is 10–12° of apparent "drift" which was really the
+participant looking elsewhere. The limit was set before any late block
+existed, so it was not tuned to a result.
+
+The rest cross is the only later anchor stored sessions have. As a diagnostic
+only, here is the error to it in 5 s pieces:
+
+| Session | Error to the rest cross, per 5 s piece | Slope |
+|---|---|---|
+| `s_mud6trnr` | 7.06 2.95 0.54 2.02 3.41 4.35 3.67 5.69 4.19 5.13 4.59° | +1.6°/min |
+| `s_mujs3eue` (20 s rest) | 0.86 2.07 2.71° | not meaningful over 20 s |
+| `s_mucntzzh` | every piece abstained (looking elsewhere) | — |
+
+That is noisy, but it is not flat. It is also why the correction is not
+switched on: it is adopted only when late-block error says so.
+
+The correction is a separate stage after the fit, not an `EstimatorConfig`
+flag. The pipeline applies nothing until the rule adopts it, and a flag the
+pipeline ignored would be a switch that silently does nothing.
 
 ### Never single-engine on facial
 

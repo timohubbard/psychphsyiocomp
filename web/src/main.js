@@ -773,18 +773,16 @@ async function runPoint(stage) {
   ui.target.style.top = `${stage.y * 100}%`;
   ui.target.style.opacity = '1';
 
-  state.recorder.logEvent(
-    stage.type, { x: stage.x, y: stage.y }, stage.id,
-  );
+  // `block: 'late'` marks the end-of-session validation that measures drift.
+  const where = { x: stage.x, y: stage.y, ...(stage.block ? { block: stage.block } : {}) };
+  state.recorder.logEvent(stage.type, where, stage.id);
 
   await wait(TIMINGS.saccadeMs);
 
   const dwell = stage.type === 'calibration_point'
     ? TIMINGS.calibrationDwellMs : TIMINGS.validationDwellMs;
 
-  state.recorder.logEvent(
-    `${stage.type}_sampling`, { x: stage.x, y: stage.y }, stage.id,
-  );
+  state.recorder.logEvent(`${stage.type}_sampling`, where, stage.id);
   await wait(dwell);
 
   state.recorder.closeEvent(`${stage.type}_sampling`, stage.id);
@@ -941,7 +939,13 @@ async function runStimulus(stage) {
   ui.stageText.style.display = 'none';
 
   ui.fixation.style.display = 'block';
+  // Logged, because the participant is looking at a known place: the cross at
+  // the stage centre. Between every pair of stimuli, that is a free check of
+  // where the gaze estimate has drifted to (server/gaze_drift.py). No
+  // stimulus_id, so nothing downstream mistakes it for part of a presentation.
+  state.recorder.logEvent('fixation_cross', { x: 0.5, y: 0.5, before: stage.id });
   await wait(stage.isiMs);
+  state.recorder.closeEvent('fixation_cross');
   ui.fixation.style.display = 'none';
 
   const loaded = state.stimuli.get(stage.stimulusId);

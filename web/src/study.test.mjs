@@ -658,3 +658,12 @@ test('a study without audio is not told its audio is kept', async () => {
   const kept = protocolFor(m0).tiers.find((t) => t.id === 'media_retained');
   assert.match(kept.summary, /video and audio/);
 });
+
+
+test('validation may run twice, the second as a late drift check, and not three times', () => {
+  const tasks = (n) => [{ type: 'calibration' }, ...Array(n).fill({ type: 'validation' })];
+  assert.deepEqual(validateStudy(study({ modalities: ['gaze'], tasks: tasks(2) })).reasons, []);
+  assert.match(validateStudy(study({ modalities: ['gaze'], tasks: tasks(3) })).reasons.join(), /at most twice/);
+  const early = [{ type: 'validation' }, { type: 'calibration' }, { type: 'validation' }];
+  assert.match(validateStudy(study({ modalities: ['gaze'], tasks: early })).reasons.join(), /needs calibration/);
+});

@@ -1,4 +1,5 @@
 {
   "studies": ["m0", "au-expressions", "voice-only-example", "in-browser-example", "stimulus-example",
-              "panel-example", "questions-example"]
+              "panel-example", "questions-example",
+              "drift-example"]
 }

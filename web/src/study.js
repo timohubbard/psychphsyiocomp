@@ -231,6 +231,14 @@ export function validateStudy(study) {
     reasons.push('tasks must be a list when present');
   } else if (Array.isArray(study.tasks)) {
     reasons.push(...stimuliReasons(study.tasks));
+    // Twice at most: the second is the late check that measures drift.
+    const nVal = study.tasks.filter((t) => t?.type === 'validation').length;
+    if (nVal > 2) reasons.push('tasks: validation may appear at most twice (the second is a late drift check)');
+    const firstVal = study.tasks.findIndex((t) => t?.type === 'validation');
+    const firstCal = study.tasks.findIndex((t) => t?.type === 'calibration');
+    if (nVal === 2 && (firstCal < 0 || firstCal > firstVal)) {
+      reasons.push('tasks: a second validation needs calibration and a first validation before it');
+    }
   }
   reasons.push(...questionsReasons(study));
   reasons.push(...conditionReasons(study));
