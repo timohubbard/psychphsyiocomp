@@ -38,6 +38,7 @@
     "blinks": "node tools/py.mjs server/blinks.py --data out",
     "qc": "node tools/py.mjs server/session_qc.py",
     "verify:qc": "node tools/verify_qc.mjs",
+    "verify:physio-view": "node tools/verify_physio_view.mjs",
     "rppg": "node tools/py.mjs server/run_rppg.py",
     "verify:rppg": "node tools/py.mjs server/verify_rppg.py --data out",
     "smoke:capture": "node tools/smoke_capture.mjs",

@@ -89,6 +89,7 @@ benchmark*.
 | M4 — respiration validation study against an RIP belt | not started |
 | Blinks: rate, duration and eye closures, derived from the face engine's stored output; per-person threshold | done — `server/blinks.py`, a pipeline stage by default; `npm run blinks` |
 | `cardiac.rppg_pos` — heart rate from skin colour (POS), gated per window on SNR and light, no HRV | done — **unvalidated**; `--rppg` or a study declaring `cardiac` |
+| Blinks and heart rate per stimulus (face-present blink rate, first-blink latency; HR only from windows wholly inside), heart-rate epochs refused by name | done — `csv/stimulus_blinks.csv`, `csv/stimulus_heart.csv`, cohort *Per stimulus*; `npm run verify:physio-view` |
 | Heart-rate reference: Bluetooth chest strap on the capture page, Bland–Altman by SNR | done — `?hrstrap=1`, `npm run verify:rppg`; **no strap session recorded yet** |
 | Study definitions — protocol as data, content-hashed | done |
 | `speech.faster_whisper` — transcripts, consent-gated | done — 13% word error on real read-aloud |
@@ -419,6 +420,42 @@ bias, limits of agreement, MAE and the share within 5 bpm, overall and by SNR
 bin, including windows the gate rejected. It suggests the lowest gate at which
 both the kept windows and the band just above the gate meet MAE ≤ 5 bpm with
 80% within 5. Pooled alone, good windows hid a band of junk in testing.
+
+**Per stimulus** (2026-09-28). `stimulus_summary.py` gives each presentation:
+
+- **Blinks:** count, rate per minute of face-present time, share of time with
+  eyes closed, and the latency of the first blink after onset. Blinks are held
+  back while attention is engaged and released after, which makes the latency
+  the most informative of the four. A presentation where the face was present
+  for less than half the time is refused.
+- **Heart rate:** only from 10 s windows lying *wholly* inside the
+  presentation, with the change measured against the session's rest cross. A
+  window straddling onset would carry the pre-stimulus period into the
+  "response". So a stimulus shorter than one window is refused
+  (`stimulus_shorter_than_hr_window`), not given a number that is mostly
+  something else.
+
+Both go to `csv/stimulus_blinks.csv`, `csv/stimulus_heart.csv` and the cohort
+page's *Per stimulus* table (mean of participant means, heart rate headed
+unvalidated).
+
+Epochs can now declare `max_gap_ms` and `min_coverage`. An epoch on
+`cardiac.hr_bpm` is refused by name when it is shorter than the heart-rate
+window, or when its gap limit can't bridge the 2 s step. Before, it simply
+failed as low coverage.
+
+On `s_mujrz6x7`, reprocessed in scratch:
+
+| Stimulus | Blinks | First blink after onset | Heart rate |
+|---|---|---|---|
+| `scene_left` | 1 | 1621 ms | refused: shown 4 s |
+| `scene_right` | 0 | — | refused: shown 4 s |
+| `pattern` | 1 | 1525 ms | refused: shown 4 s |
+
+`stimulus-example`'s plan gained a `blink.active` epoch. This is analysis
+only: the content hash is still `88e095e348765fc9`, now pinned by a test.
+`npm run verify:physio-view` checks the session page's blink strip, that
+heart-rate gaps are drawn as gaps, and the cohort table.
 
 ## The protocol is data
 

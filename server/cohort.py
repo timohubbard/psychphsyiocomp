@@ -187,7 +187,9 @@ class EpochSpec:
                    pre_ms=float(d["pre_ms"]), post_ms=float(d["post_ms"]),
                    baseline_ms=None if b is None else (float(b[0]), float(b[1])),
                    resample_hz=float(d.get("resample_hz", 30)), source=d.get("source"),
-                   stimulus_id=d.get("stimulus_id"))
+                   stimulus_id=d.get("stimulus_id"),
+                   max_gap_ms=float(d.get("max_gap_ms", 250.0)),
+                   min_coverage=float(d.get("min_coverage", 0.5)))
 
 
 def _series(signals, source, channel):
@@ -218,6 +220,30 @@ def resample(ts: np.ndarray, vs: np.ndarray, grid: np.ndarray, max_gap_ms: float
             continue
         out[i] = vs[r - 1] + (vs[r] - vs[r - 1]) * (g - t0) / (t1 - t0)
     return out
+
+
+HR_CHANNEL = "cardiac.hr_bpm"
+
+
+def hr_window_ms(out: str | Path, session_id: str, source: str) -> tuple[float, float]:
+    """(window, step) in ms of the rPPG run that wrote `source` in this session:
+    its recorded params, else the engine manifest's defaults."""
+    win, step = 10.0, 2.0
+    manifest = Path(__file__).resolve().parents[1] / "engines" / "cardiac.rppg_pos" / "engine.manifest.json"
+    if manifest.exists():
+        p = json.loads(manifest.read_text(encoding="utf-8")).get("params", {})
+        win = float((p.get("hr_window_s") or {}).get("default", win))
+        step = float((p.get("hr_step_s") or {}).get("default", step))
+    try:
+        runs = read_session(out, session_id, "runs").to_pylist()
+    except FileNotFoundError:
+        runs = []
+    for r in runs:
+        if r.get("source") == source:
+            params = json.loads(r.get("params") or "{}")
+            win = float(params.get("hr_window_s", win))
+            step = float(params.get("hr_step_s", step))
+    return win * 1000.0, step * 1000.0
 
 
 def epochs(out: str | Path, sessions: Iterable[dict[str, Any]],
@@ -255,6 +281,21 @@ def epochs(out: str | Path, sessions: Iterable[dict[str, Any]],
             if sources[ch] is None:
                 refusals.append({**base, "channel": ch, "reason": "no_signal",
                                  "detail": f"no {ch} from {spec.source or 'any source'}"})
+        # Camera heart rate is one value per window (10 s by default, every
+        # 2 s), each an average over the whole window. An epoch shorter than
+        # the window would put pre-stimulus time into the "response", and a gap
+        # limit under the step leaves nothing to interpolate. Both are refused
+        # by name rather than surfacing as a wall of low_coverage.
+        if HR_CHANNEL in sources and sources[HR_CHANNEL]:
+            win, stp = hr_window_ms(out, sid, sources[HR_CHANNEL])
+            why = (f"each heart-rate value averages {win / 1000:g} s; post_ms {spec.post_ms:g} is shorter"
+                   if spec.post_ms < win else
+                   f"heart rate is sampled every {stp / 1000:g} s; max_gap_ms {spec.max_gap_ms:g} bridges none"
+                   if spec.max_gap_ms < stp else None)
+            if why:
+                refusals.append({**base, "channel": HR_CHANNEL, "reason": "hr_window_longer_than_epoch"
+                                 if spec.post_ms < win else "gap_limit_below_hr_step", "detail": why})
+                sources[HR_CHANNEL] = None
         series = {ch: _series(signals, src, ch) for ch, src in sources.items() if src}
 
         matched = [e for e in events if e["event_type"] == spec.event_type

@@ -598,3 +598,10 @@ def test_an_exclusion_source_must_be_a_non_empty_string():
     assert validate_study(ok).ok
     bad = study(analysis={"exclusions": [{"metric": "face_detect_rate", "min": 0.5, "source": " "}]})
     assert "source must be a non-empty string" in _reasons(bad)
+
+
+def test_stimulus_example_keeps_the_hash_its_real_sessions_were_recorded_under():
+    """s_mujrz6x7 was recorded under this protocol. Editing its analysis plan
+    (the blink epoch, 2026-09-28) must not change it; editing its tasks would."""
+    s = json.loads((ROOT / "studies" / "stimulus-example.json").read_text(encoding="utf-8"))
+    assert content_hash(s) == "88e095e348765fc9"

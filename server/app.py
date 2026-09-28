@@ -113,7 +113,7 @@ def cohort_view(data_root: Path, study: dict, *, include_developer: bool,
     cohort from the one `npm run export` writes.
     """
     from cohort import EpochSpec, epochs, select
-    from stimulus_summary import DEFAULT_HEATMAP_SIGMA_DEG, heatmap
+    from stimulus_summary import DEFAULT_HEATMAP_SIGMA_DEG, heatmap, per_stimulus_table
 
     from inference import participant_curves, pooled_mean, run_contrasts
 
@@ -154,6 +154,7 @@ def cohort_view(data_root: Path, study: dict, *, include_developer: bool,
                     "excluded": [{"session_id": s, "reason": r} for s, r in f.excluded]}
                    for f in c.funnel],
         "epochs": epoch_sets, "heatmaps": heatmaps, "contrasts": contrasts,
+        "per_stimulus": per_stimulus_table(data_root, c.included, pad_deg=analysis.get("aoi_pad_deg")),
     }
 
 

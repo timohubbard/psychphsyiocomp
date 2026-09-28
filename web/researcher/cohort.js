@@ -155,6 +155,28 @@ function armsSvg(r, w = 1000, h = 240) {
   </svg>`;
 }
 
+/**
+ * Per stimulus, participant-first: gaze share, blinks, and camera heart rate.
+ * Heart rate is headed unvalidated wherever it appears; refusals are counted
+ * beside the numbers so a blank cell says why it is blank.
+ */
+function perStimulusHtml(rows) {
+  if (!rows?.length) return '<div class="note">No stimulus presentations in the included sessions.</div>';
+  const cell = (r, f, fmt) => (r[f] == null ? '<td class="muted">—</td>'
+    : `<td>${fmt(r[f])} <span class="muted">n=${r[`${f}_n`]}</span></td>`);
+  const pct = (v) => `${(v * 100).toFixed(0)}%`;
+  const num = (d) => (v) => v.toFixed(d);
+  const refs = (r) => Object.entries(r.refusals).map(([k, n]) => `${esc(k)} ×${n}`).join('<br>') || '';
+  return `<div class="scrollx"><table class="perstim"><thead><tr><th>Stimulus</th><th>Gaze on it</th>
+    <th>Blinks /min</th><th>First blink after onset</th><th>Eyes closed</th>
+    <th>Heart rate <span class="warn">unvalidated</span></th><th>vs rest</th><th>Refused</th></tr></thead><tbody>
+    ${rows.map((r) => `<tr><td>${esc(r.stimulus_id)}</td>${cell(r, 'share_on_stimulus', pct)}
+      ${cell(r, 'blink_rate_per_min', num(1))}${cell(r, 'first_blink_latency_ms', (v) => `${Math.round(v)} ms`)}
+      ${cell(r, 'eyes_closed_fraction', pct)}${cell(r, 'hr_bpm_mean', num(0))}
+      ${cell(r, 'hr_delta_vs_rest_bpm', (v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}`)}
+      <td class="muted small">${refs(r)}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
 async function render() {
   const id = $('study').value;
   if (!id) return;
@@ -195,6 +217,10 @@ async function render() {
     ${contrasts ? `<div class="sub">Declared in the analysis plan before the data was seen. Participants, not epochs, are the unit;
       p-values are by permutation from the plan's seed, Holm-corrected across the plan.</div>${contrasts}`
       : '<div class="note">The study declares no contrasts (analysis.contrasts).</div>'}
+    <h2>Per stimulus</h2>
+    <div class="sub">Mean of participant means. Blink rate is per minute the face was present; heart rate uses only
+      10-second windows wholly inside the presentation, so shorter stimuli are refused rather than estimated.</div>
+    ${perStimulusHtml(c.per_stimulus)}
     <h2>Heatmaps</h2>
     ${heat.length ? `<div class="ramp">less looking <i></i> more · each participant weighs the same</div><div class="grid">${heat.join('')}</div>`
       : '<div class="note">The study shows no stimuli.</div>'}`;

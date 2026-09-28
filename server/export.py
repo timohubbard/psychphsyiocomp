@@ -196,14 +196,19 @@ def build(out: Path, study: dict[str, Any], zip_path: Path, *,
          "n_samples": len(v)} for k, v in sorted(face.items())])
 
     pad = analysis.get("aoi_pad_deg")
-    gaze_rows, aoi_rows, stim_refusals = [], [], []
+    gaze_rows, aoi_rows, blink_rows, heart_rows, stim_refusals = [], [], [], [], []
     for s in sessions:
         r = session_summary(out, s, pad_deg=pad)
         gaze_rows += r["gaze"]
         aoi_rows += r["aoi"]
+        blink_rows += r["blinks"]
+        heart_rows += r["heart"]
         stim_refusals += r["refusals"]
     files["csv/stimulus_gaze.csv"] = _csv_bytes(gaze_rows)
     files["csv/stimulus_aoi.csv"] = _csv_bytes(aoi_rows)
+    files["csv/stimulus_blinks.csv"] = _csv_bytes(blink_rows)
+    # Every row tiered unvalidated: camera heart rate has no reference yet.
+    files["csv/stimulus_heart.csv"] = _csv_bytes(heart_rows)
     files["csv/stimulus_refusals.csv"] = _csv_bytes(stim_refusals)
 
     sigma = analysis.get("heatmap_sigma_deg", DEFAULT_HEATMAP_SIGMA_DEG)

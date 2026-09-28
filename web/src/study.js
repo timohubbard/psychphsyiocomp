@@ -337,6 +337,15 @@ function analysisReasons(a, study) {
       reasons.push(`${where} needs a list of channels`);
     }
     const { pre_ms: pre, post_ms: post } = e;
+    // How far apart two samples may be and still be interpolated across, and
+    // how much of the window must be covered. Sparse channels need both: camera
+    // heart rate is one value every 2 s, which the 250 ms default never bridges.
+    if (e.max_gap_ms !== undefined && !(num(e.max_gap_ms) && e.max_gap_ms > 0 && e.max_gap_ms <= 10000)) {
+      reasons.push(`${where}: max_gap_ms must be a number of ms above 0 and at most 10000`);
+    }
+    if (e.min_coverage !== undefined && !(num(e.min_coverage) && e.min_coverage > 0 && e.min_coverage <= 1)) {
+      reasons.push(`${where}: min_coverage must be a fraction above 0 and at most 1`);
+    }
     if (!(num(pre) && pre >= 0 && num(post) && post > 0)) {
       reasons.push(`${where}: pre_ms >= 0 and post_ms > 0 are required`);
     }

@@ -41,6 +41,8 @@
       { "name": "smile_on_stimulus", "event_type": "stimulus",
         "channels": ["blendshape.mouthSmileLeft", "blendshape.mouthSmileRight"],
         "source": "face.mediapipe_blendshapes@0.1.0+browser-live",
+        "pre_ms": 500, "post_ms": 3500, "baseline_ms": [-500, 0], "resample_hz": 30 },
+      { "name": "blinks_on_stimulus", "event_type": "stimulus", "channels": ["blink.active"],
         "pre_ms": 500, "post_ms": 3500, "baseline_ms": [-500, 0], "resample_hz": 30 }
     ]
   },

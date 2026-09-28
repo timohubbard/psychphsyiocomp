@@ -293,6 +293,7 @@ async function loadDetail(id) {
     ${voicePanel(d.engine_quality)}
     ${transcriptPanel(d.engine_quality)}
     ${respirationPanel(d.engine_quality)}
+    ${blinkPanel(d.events)}
 
     <h2>Engine runs</h2>
     ${runsTable(d.runs)}
@@ -434,7 +435,18 @@ function sparkline(points, floor = null, w = 620, h = 70) {
 
   const px = (x) => ((x - x0) / (x1 - x0 || 1)) * (w - 8) + 4;
   const py = (y) => h - 8 - ((y - y0) / (y1 - y0)) * (h - 16);
-  const d = points.map((p, i) => `${i ? 'L' : 'M'}${px(p[0]).toFixed(1)},${py(p[1]).toFixed(1)}`).join('');
+  // A gap stays a gap. Camera heart rate exists only where a window passed its
+  // quality gates, and a line drawn straight across the missing minutes would
+  // show a heart rate nobody measured.
+  const steps = xs.slice(1).map((x, i) => x - xs[i]).sort((a, b) => a - b);
+  const typical = steps.length ? steps[Math.floor(steps.length / 2)] : 0;
+  const breaks = points.map((p, i) => i === 0 || (typical > 0 && p[0] - points[i - 1][0] > 2 * typical));
+  const d = points.map((p, i) => {
+    const at = `${px(p[0]).toFixed(1)},${py(p[1]).toFixed(1)}`;
+    // A point alone between two gaps is a zero-length line; with round caps it draws as a dot.
+    const alone = breaks[i] && (i === points.length - 1 || breaks[i + 1]);
+    return breaks[i] ? `M${at}${alone ? 'l0.01,0' : ''}` : `L${at}`;
+  }).join('');
 
   const breach = floor != null && ys.some((y) => y < floor);
   return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" style="margin-top:6px">
@@ -442,7 +454,7 @@ function sparkline(points, floor = null, w = 620, h = 70) {
       stroke="${breach ? '#d9534f' : '#3a4048'}" stroke-dasharray="3 3" stroke-width="1"/>
       <text x="${w - 6}" y="${py(floor) - 4}" fill="#9aa0a6" font-size="10"
         text-anchor="end">${floor}</text>` : ''}
-    <path d="${d}" fill="none" stroke="${breach ? '#d9534f' : '#4c8dff'}" stroke-width="1.5"/>
+    <path d="${d}" fill="none" stroke="${breach ? '#d9534f' : '#4c8dff'}" stroke-width="1.5" stroke-linecap="round"/>
     <text x="4" y="12" fill="#9aa0a6" font-size="10">${ys[ys.length - 1].toFixed(1)}</text>
   </svg>`;
 }
@@ -1034,6 +1046,27 @@ function voicePanel(eq) {
       Browser noise suppression was applied to this recording. It is designed to
       remove exactly the spectral content eGeMAPS measures, so these features are
       not comparable with sessions captured without it.</div>` : ''}`;
+}
+
+/** Blinks across the session as ticks; closures longer than a blink in amber. */
+function blinkPanel(events) {
+  const marks = events.filter((e) => (e.event_type === 'blink' || e.event_type === 'eye_closure') && e.onset != null);
+  if (!marks.length) return '';
+  const times = events.flatMap((e) => [e.onset, e.offset]).filter((t) => t != null);
+  const t0 = Math.min(...times), t1 = Math.max(...times);
+  const w = 900, h = 34;
+  const x = (t) => 4 + ((t - t0) / (t1 - t0 || 1)) * (w - 8);
+  const n = (k) => marks.filter((e) => e.event_type === k).length;
+  const minutes = (t1 - t0) / 60000;
+  return `<h2>Blinks <span class="pill">${n('blink')}</span>${n('eye_closure') ? ` <span class="pill warn">${n('eye_closure')} closures</span>` : ''}</h2>
+    <div class="card"><svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" role="img"
+      aria-label="${n('blink')} blinks over ${minutes.toFixed(1)} minutes">
+      <line x1="4" x2="${w - 4}" y1="${h - 4}" y2="${h - 4}" stroke="#3a4048"/>
+      ${marks.map((e) => `<rect x="${x(e.onset).toFixed(1)}" y="4" width="${Math.max(1.5, x(e.offset ?? e.onset) - x(e.onset)).toFixed(1)}"
+        height="${h - 10}" fill="${e.event_type === 'blink' ? '#4c8dff' : '#e0a33a'}"/>`).join('')}
+    </svg><div class="n">Both eyes closing together, from the face engine's eyeBlink scores
+      (server/blinks.py); the threshold is set per session. Over the session's ${minutes.toFixed(1)} minutes,
+      including time the face was absent.</div></div>`;
 }
 
 function respirationPanel(eq) {

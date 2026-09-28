@@ -17,6 +17,19 @@ stimulus itself rather than on one participant's screen:
   normalised before averaging), so one long-looking participant cannot paint
   the map. A participant without geometry is refused, not blurred in pixels.
 
+- **Blinks** — per presentation: count, rate per minute of FACE-PRESENT time
+  in the window (not of the window: a participant who looked away did not
+  stop blinking), share of time with eyes closed, and the latency of the first
+  blink after onset. Blinks are inhibited while attention is engaged and
+  released after, so the latency is the measure the literature leans on.
+  Refused where the face was present for under half the window.
+- **Heart rate** — per presentation, only from rPPG windows lying WHOLLY
+  inside it. Each value averages 10 s, so a window straddling onset carries
+  the pre-stimulus period into the "response"; a stimulus shorter than one
+  window is refused rather than given a number that is mostly something else.
+  The change is against the session's rest-fixation span when it has one.
+  Every value is tiered unvalidated, as the engine's are.
+
 Nothing here reads the recording: fixations, gaze samples and events are the
 canonical tables' own rows.
 """
@@ -37,7 +50,13 @@ from aoi import AOISet, analyse, to_stage
 from tables import read_session
 
 GAZE_SOURCE_PREFIX = "gaze.ridge@"
+BLINK_SOURCE_PREFIX = "blinks.derived@"
+CARDIAC_SOURCE_PREFIX = "cardiac.rppg_pos@"
 DEFAULT_HEATMAP_SIGMA_DEG = 1.0
+#: A presentation with the face present for less of it than this gets no blink figures.
+MIN_FACE_SHARE = 0.5
+#: Samples further apart than this are face-absent time (blinks.BlinkParams.max_gap_ms).
+FACE_GAP_MS = 250.0
 
 
 def degrees_per_px(session: dict[str, Any]) -> float | None:
@@ -94,6 +113,120 @@ def _gaze(signals) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return tx, x, y
 
 
+def _one_source(signals, prefix: str, channel: str):
+    """(ts, values, source) for a channel from the one source with this prefix;
+    None when there is none, ("ambiguous", sources) when there are several.
+    Two versions of one stage in a session are two answers to one question, so
+    neither is picked silently."""
+    t = signals.filter(pc.and_(pc.starts_with(signals["source"], prefix),
+                               pc.equal(signals["channel"], channel)))
+    srcs = sorted(set(t["source"].to_pylist()))
+    if len(srcs) != 1:
+        return None if not srcs else ("ambiguous", srcs)
+    ts = np.asarray(t["master_ts"].to_pylist(), float)
+    vs = np.asarray(t["value"].to_pylist(), float)
+    ok = ~(np.isnan(ts) | np.isnan(vs))
+    order = np.argsort(ts[ok])
+    return ts[ok][order], vs[ok][order], srcs[0]
+
+
+def blink_rows(p: dict, base: dict, active, blink_onsets: np.ndarray) -> tuple[dict | None, dict | None]:
+    """(row, refusal) for one presentation."""
+    common = {**base, "stimulus_id": p["stimulus_id"], "presentation": p["presentation"],
+              "duration_ms": p["offset"] - p["onset"]}
+    ts, vs, _ = active
+    inside = (ts >= p["onset"]) & (ts <= p["offset"])
+    gaps = np.diff(ts[inside])
+    face_ms = float(gaps[gaps <= FACE_GAP_MS].sum()) if len(gaps) else 0.0
+    if face_ms < MIN_FACE_SHARE * common["duration_ms"]:
+        return None, {**common, "measure": "blinks", "reason": "face_absent",
+                      "detail": f"face present {face_ms / max(common['duration_ms'], 1):.0%} of the window"}
+    onsets = blink_onsets[(blink_onsets >= p["onset"]) & (blink_onsets <= p["offset"])]
+    return {**common, "face_present_ms": face_ms, "blink_count": int(len(onsets)),
+            "blink_rate_per_min": len(onsets) / (face_ms / 60000.0),
+            "eyes_closed_fraction": float(vs[inside].mean()),
+            "first_blink_latency_ms": float(onsets.min() - p["onset"]) if len(onsets) else None}, None
+
+
+def heart_rows(p: dict, base: dict, hr, window_ms: float, rest_bpm: float | None,
+               rest_reason: str | None) -> tuple[dict | None, dict | None]:
+    """(row, refusal) for one presentation."""
+    common = {**base, "stimulus_id": p["stimulus_id"], "presentation": p["presentation"],
+              "duration_ms": p["offset"] - p["onset"]}
+    if common["duration_ms"] < window_ms:
+        return None, {**common, "measure": "heart", "reason": "stimulus_shorter_than_hr_window",
+                      "detail": f"shown {common['duration_ms'] / 1000:.1f} s; each heart-rate value "
+                                f"averages {window_ms / 1000:g} s"}
+    ts, vs, src = hr
+    half = window_ms / 2
+    whole = (ts - half >= p["onset"]) & (ts + half <= p["offset"])
+    if not whole.any():
+        return None, {**common, "measure": "heart", "reason": "no_passing_windows",
+                      "detail": "no heart-rate window inside the presentation passed the quality gates"}
+    mean = float(vs[whole].mean())
+    return {**common, "source": src, "reliability_tier": "unvalidated", "hr_bpm_mean": mean,
+            "hr_windows": int(whole.sum()), "hr_rest_bpm": rest_bpm,
+            "hr_delta_vs_rest_bpm": None if rest_bpm is None else mean - rest_bpm,
+            "rest_refusal": rest_reason}, None
+
+
+def rest_heart_rate(events: list[dict], hr, window_ms: float) -> tuple[float | None, str | None]:
+    """Median passing heart rate inside the session's rest-fixation spans."""
+    spans = [(e["onset_master_ts"], e["offset_master_ts"]) for e in events
+             if e.get("event_type") == "fixation" and e.get("onset_master_ts") is not None
+             and e.get("offset_master_ts") is not None]
+    if not spans:
+        return None, "no_rest_fixation"
+    ts, vs, _ = hr
+    half = window_ms / 2
+    inside = np.zeros(len(ts), bool)
+    for a, b in spans:
+        inside |= (ts - half >= a) & (ts + half <= b)
+    if not inside.any():
+        return None, "no_passing_windows_at_rest"
+    return float(np.median(vs[inside])), None
+
+
+def per_stimulus_table(out: str | Path, sessions: list[dict[str, Any]], *,
+                       pad_deg: float | None) -> list[dict[str, Any]]:
+    """One row per stimulus for the cohort page: participant-first means.
+
+    Each participant's presentations of a stimulus are averaged first, then
+    participants are averaged, so someone who saw it three times counts once
+    (as the epoch curves do). n is participants with a value, per measure.
+    """
+    by_stim: dict[str, dict[str, Any]] = {}
+
+    def slot(stim):
+        return by_stim.setdefault(stim, {"stimulus_id": stim, "vals": {}, "refusals": {}})
+
+    measures = (("gaze", "share_on_stimulus"), ("blinks", "blink_rate_per_min"),
+                ("blinks", "first_blink_latency_ms"), ("blinks", "eyes_closed_fraction"),
+                ("heart", "hr_bpm_mean"), ("heart", "hr_delta_vs_rest_bpm"))
+    for s in sessions:
+        r = session_summary(out, s, pad_deg=pad_deg)
+        pid = s.get("participant_id") or s["session_id"]
+        for kind, field in measures:
+            for row in r[kind]:
+                v = row.get(field)
+                if v is not None:
+                    slot(row["stimulus_id"])["vals"].setdefault(field, {}).setdefault(pid, []).append(float(v))
+        for ref in r["refusals"]:
+            if ref.get("stimulus_id"):
+                key = f"{ref.get('measure', 'gaze')}: {ref['reason']}"
+                refs = slot(ref["stimulus_id"])["refusals"]
+                refs[key] = refs.get(key, 0) + 1
+    out_rows = []
+    for stim, d in sorted(by_stim.items()):
+        row = {"stimulus_id": stim, "refusals": d["refusals"]}
+        for _, field in measures:
+            per = [float(np.mean(v)) for v in d["vals"].get(field, {}).values()]
+            row[field] = float(np.mean(per)) if per else None
+            row[f"{field}_n"] = len(per)
+        out_rows.append(row)
+    return out_rows
+
+
 def _in_rect(x, y, r) -> np.ndarray:
     return (x >= r["x0"]) & (x <= r["x1"]) & (y >= r["y0"]) & (y <= r["y1"])
 
@@ -118,8 +251,30 @@ def session_summary(out: str | Path, session: dict[str, Any], *, pad_deg: float 
 
     dpp = degrees_per_px(session)
     sets = _stimulus_sets(aoi_root or out)
-    gaze_rows, aoi_rows = [], []
+    gaze_rows, aoi_rows, blinks, heart = [], [], [], []
     refusals = [{**base, **r} for r in refused]
+
+    # Blinks and heart rate: only for sessions whose pipeline ran those stages;
+    # a study that never measured heart rate gets no heart-rate refusals.
+    try:
+        signals = read_session(out, sid, "signals")
+    except FileNotFoundError:
+        signals = None
+    active = _one_source(signals, BLINK_SOURCE_PREFIX, "blink.active") if signals is not None else None
+    hr = _one_source(signals, CARDIAC_SOURCE_PREFIX, "cardiac.hr_bpm") if signals is not None else None
+    for name, got in (("blinks", active), ("heart", hr)):
+        if got and isinstance(got[0], str):
+            refusals.append({**base, "measure": name, "reason": "ambiguous_source",
+                             "detail": f"more than one {name} source: {got[1]}"})
+    active = None if not active or isinstance(active[0], str) else active
+    hr = None if not hr or isinstance(hr[0], str) else hr
+    blink_onsets = np.asarray([e["onset_master_ts"] for e in events if e.get("event_type") == "blink"
+                               and e.get("onset_master_ts") is not None], float)
+    window_ms, rest_bpm, rest_reason = 0.0, None, None
+    if hr:
+        from cohort import hr_window_ms
+        window_ms, _ = hr_window_ms(out, sid, hr[2])
+        rest_bpm, rest_reason = rest_heart_rate(events, hr, window_ms)
 
     for p in shown:
         win = (t >= p["onset"]) & (t <= p["offset"])
@@ -133,6 +288,12 @@ def session_summary(out: str | Path, session: dict[str, Any], *, pad_deg: float 
                           "n_fixations": len(fx)})
         if n == 0:
             refusals.append({**base, "stimulus_id": p["stimulus_id"], "reason": "no_gaze"})
+        if active:
+            row, ref = blink_rows(p, base, active, blink_onsets)
+            blinks.append(row) if row else refusals.append(ref)
+        if hr:
+            row, ref = heart_rows(p, base, hr, window_ms, rest_bpm, rest_reason)
+            heart.append(row) if row else refusals.append(ref)
 
         for aset in sets.get(p["stimulus_id"], []):
             stage_set = AOISet(aset.name, aset.version,
@@ -157,7 +318,7 @@ def session_summary(out: str | Path, session: dict[str, Any], *, pad_deg: float 
                                  "total_dwell_ms": m.total_dwell_ms,
                                  "time_to_first_fixation_ms": m.entry_time_ms,
                                  "first_fixation_duration_ms": m.first_fixation_duration_ms})
-    return {"gaze": gaze_rows, "aoi": aoi_rows, "refusals": refusals}
+    return {"gaze": gaze_rows, "aoi": aoi_rows, "blinks": blinks, "heart": heart, "refusals": refusals}
 
 
 def _stimulus_sets(root: str | Path) -> dict[str, list[AOISet]]:

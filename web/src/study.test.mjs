@@ -434,6 +434,9 @@ test('analysis refusals mirror server/study.py', () => {
   assert.match(r({ epochs: [{ ...base, channels: [] }] }), /list of channels/);
   assert.match(r({ epochs: [{ ...base, baseline_ms: [-500, 0] }] }), /inside the window/);
   assert.match(r({ epochs: [{ ...base, resample_hz: 0 }] }), /resample_hz/);
+  assert.match(r({ epochs: [{ ...base, max_gap_ms: 0 }] }), /max_gap_ms must be/);
+  assert.match(r({ epochs: [{ ...base, min_coverage: 1.5 }] }), /min_coverage must be/);
+  assert.equal(r({ epochs: [{ ...base, max_gap_ms: 2500, min_coverage: 0.8 }] }), '');
   assert.equal(r({ exclusions: [{ metric: 'achieved_fps', min: 5 }], epochs: [base] }), '');
 });
 

@@ -297,6 +297,10 @@ def _analysis_reasons(a: Any, study: dict | None = None) -> list[str]:
         if not isinstance(ch, list) or not ch or not all(_non_empty(c) for c in ch):
             reasons.append(f"{where} needs a list of channels")
         pre, post = e.get("pre_ms"), e.get("post_ms")
+        if "max_gap_ms" in e and not (_num(e["max_gap_ms"]) and 0 < e["max_gap_ms"] <= 10000):
+            reasons.append(f"{where}: max_gap_ms must be a number of ms above 0 and at most 10000")
+        if "min_coverage" in e and not (_num(e["min_coverage"]) and 0 < e["min_coverage"] <= 1):
+            reasons.append(f"{where}: min_coverage must be a fraction above 0 and at most 1")
         if not (_num(pre) and pre >= 0 and _num(post) and post > 0):
             reasons.append(f"{where}: pre_ms >= 0 and post_ms > 0 are required")
         b = e.get("baseline_ms", [-200, 0])
