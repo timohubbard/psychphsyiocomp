@@ -55,7 +55,7 @@
         "description": "Share of heart-rate windows that passed both gates. Low means the compression, the lighting or movement erased the pulse — which is reported, not smoothed over." },
       { "metric": "hr_median_bpm", "unit": "bpm", "warn_below": null,
         "description": "Median of the passing windows. Session-level summary only." },
-      { "metric": "mean_luminance", "unit": "level", "warn_below": 30,
+      { "metric": "skin_luminance", "unit": "level", "warn_below": 30,
         "description": "Median skin-region luminance across the session." }
     ]
   },

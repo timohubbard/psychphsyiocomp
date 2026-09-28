@@ -427,6 +427,8 @@ test('analysis refusals mirror server/study.py', () => {
   assert.match(r({ exclusions: [{ min: 1 }] }), /needs a metric/);
   assert.match(r({ exclusions: [{ metric: 'x' }] }), /needs a min or a max/);
   assert.match(r({ exclusions: [{ metric: 'x', min: 2, max: 1 }] }), /min is above max/);
+  assert.match(r({ exclusions: [{ metric: 'x', min: 1, source: ' ' }] }), /source must be a non-empty string/);
+  assert.equal(r({ exclusions: [{ metric: 'x', min: 1, source: 'face@1+server-batch' }] }), '');
   const base = { name: 'e', event_type: 'stimulus', channels: ['c'], pre_ms: 200, post_ms: 500 };
   assert.match(r({ epochs: [base, base] }), /unique slug name/);
   assert.match(r({ epochs: [{ ...base, channels: [] }] }), /list of channels/);

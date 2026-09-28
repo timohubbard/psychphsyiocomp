@@ -591,3 +591,10 @@ def test_the_modality_lists_match_the_browser_word_for_word():
     assert js_list("SPECIAL_CATEGORY_MODALITIES") == SPECIAL_CATEGORY_MODALITY_IDS
     assert js_list("BROWSER_MODALITIES") == BROWSER_MODALITY_IDS
     assert "cardiac" in SPECIAL_CATEGORY_MODALITY_IDS and "cardiac" not in AUDIO_MODALITY_IDS
+
+
+def test_an_exclusion_source_must_be_a_non_empty_string():
+    ok = study(analysis={"exclusions": [{"metric": "face_detect_rate", "min": 0.5, "source": "x@1"}]})
+    assert validate_study(ok).ok
+    bad = study(analysis={"exclusions": [{"metric": "face_detect_rate", "min": 0.5, "source": " "}]})
+    assert "source must be a non-empty string" in _reasons(bad)

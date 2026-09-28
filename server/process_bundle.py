@@ -469,7 +469,7 @@ def main() -> int:
               f"luminance gates")
         if "hr_median_bpm" in rppg_q:
             print(f"    median       {rppg_q['hr_median_bpm']:.0f} bpm over passing windows")
-        print(f"    skin luma    {rppg_q.get('mean_luminance', 0):.0f}   face found "
+        print(f"    skin luma    {rppg_q.get('skin_luminance', 0):.0f}   face found "
               f"{rppg_q.get('face_found_rate', 0):.0%}")
 
     if args.aus:

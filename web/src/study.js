@@ -320,6 +320,11 @@ function analysisReasons(a, study) {
     if ((lo !== null && !num(lo)) || (hi !== null && !num(hi))) {
       reasons.push(`${where}: min and max must be numbers`);
     } else if (lo !== null && hi !== null && lo > hi) reasons.push(`${where}: min is above max`);
+    // Optional: which engine's value the rule reads. Several engines write a
+    // metric of the same name (face_detect_rate from the browser and the server
+    // pass; mean_luminance from face and respiration), and without it the rule
+    // reads the median across all of them.
+    if ('source' in rule && !nonEmpty(rule.source)) reasons.push(`${where}: source must be a non-empty string`);
   });
   const names = new Set();
   (a.epochs ?? []).forEach((e, i) => {

@@ -94,7 +94,7 @@ def _build_manifest() -> EngineManifest:
                             description="Heart-rate windows passing the SNR and luminance gates."),
                 QualitySpec(metric="hr_median_bpm", unit="bpm", warn_below=None,
                             description="Median of passing windows."),
-                QualitySpec(metric="mean_luminance", unit="level", warn_below=30.0,
+                QualitySpec(metric="skin_luminance", unit="level", warn_below=30.0,
                             description="Median skin-region luminance."),
             ],
         ),
@@ -248,7 +248,7 @@ class RppgPOS:
         metrics = {
             "face_found_rate": float(found.mean()) if len(found) else 0.0,
             "hr_window_pass_rate": len(passed) / len(windows) if windows else 0.0,
-            "mean_luminance": float(np.nanmedian(luma)) if found.any() else 0.0,
+            "skin_luminance": float(np.nanmedian(luma)) if found.any() else 0.0,
         }
         if passed:
             metrics["hr_median_bpm"] = float(np.median([w.hr_bpm for w in passed]))

@@ -169,3 +169,24 @@ def test_the_condition_travels_with_each_epoch_row(tmp_path):
     spec = EpochSpec(name="e", event_type="stimulus", channels=["blendshape.a"], pre_ms=200, post_ms=500)
     rows, _ = epochs(tmp_path, select(tmp_path, STUDY).included, spec)
     assert {r["condition"] for r in rows} == {"B"}
+
+
+def test_an_exclusion_may_name_the_source_it_reads(tmp_path):
+    """face_detect_rate is written by the browser pass and the server pass; a
+    rule without a source reads the median across both (unchanged behaviour),
+    one with a source reads only that engine's value."""
+    w = CanonicalWriter(tmp_path, SessionContext("two", "p_two", "c1"))
+    w.set_session_metadata({"study": {"study_id": "c1", "study_content_hash": H,
+                                      "audience": "participants"}, "achieved_fps": 30.0})
+    for src, rate in (("face@1+browser-live", 0.2), ("face@1+server-batch", 0.9)):
+        w.add_chunks([Chunk(quality=(QualityRow(stream="face", metric="face_detect_rate",
+                                                window_start_native_ts=0.0, window_end_native_ts=1.0,
+                                                value=rate),))], source=src, params={}, solution=MASTER)
+    w.close()
+    pooled = {**STUDY, "analysis": {"exclusions": [{"metric": "face_detect_rate", "min": 0.5}]}}
+    assert [r["session_id"] for r in select(tmp_path, pooled).included] == ["two"]   # median 0.55
+    browser = {**STUDY, "analysis": {"exclusions": [
+        {"metric": "face_detect_rate", "min": 0.5, "source": "face@1+browser-live"}]}}
+    c = select(tmp_path, browser)
+    assert not c.included
+    assert c.funnel[-1].label.endswith("(from face@1+browser-live)")

@@ -280,6 +280,8 @@ def _analysis_reasons(a: Any, study: dict | None = None) -> list[str]:
             reasons.append(f"{where}: min and max must be numbers")
         elif lo is not None and hi is not None and lo > hi:
             reasons.append(f"{where}: min is above max")
+        if "source" in rule and not _non_empty(rule.get("source")):
+            reasons.append(f"{where}: source must be a non-empty string")
     names: set[str] = set()
     for i, e in enumerate(a.get("epochs") or []):
         where = f"analysis.epochs[{i}]"

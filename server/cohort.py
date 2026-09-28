@@ -91,8 +91,15 @@ def study_sessions(out: str | Path, study_id: str) -> list[dict[str, Any]]:
     return rows
 
 
-def session_metric(out: str | Path, row: dict[str, Any], metric: str) -> float | None:
-    """A sessions-table column, or the median of that quality metric."""
+def session_metric(out: str | Path, row: dict[str, Any], metric: str,
+                   source: str | None = None) -> float | None:
+    """A sessions-table column, or the median of that quality metric.
+
+    Without `source`, the median runs across every source that wrote the
+    metric — kept, because changing it would move existing funnels; the
+    session quality report flags when that pooling happens. With it, only that
+    source's rows count.
+    """
     if metric in SESSION_COLUMNS:
         v = row.get(metric)
         return None if v is None else float(v)
@@ -100,7 +107,10 @@ def session_metric(out: str | Path, row: dict[str, Any], metric: str) -> float |
         q = read_session(out, row["session_id"], "quality")
     except FileNotFoundError:
         return None
-    vals = [r["value"] for r in q.filter(pc.equal(q["metric"], metric)).to_pylist()
+    q = q.filter(pc.equal(q["metric"], metric))
+    if source is not None:
+        q = q.filter(pc.equal(q["source"], source))
+    vals = [r["value"] for r in q.to_pylist()
             if r["value"] is not None and not math.isnan(r["value"])]
     return float(np.median(vals)) if vals else None
 
@@ -131,10 +141,10 @@ def select(out: str | Path, study: dict[str, Any], *, include_developer: bool = 
              else f"protocol {r.get('study_content_hash') or 'not recorded'}")
 
     for rule in (study.get("analysis") or {}).get("exclusions", []):
-        metric, lo, hi = rule["metric"], rule.get("min"), rule.get("max")
+        metric, lo, hi, src = rule["metric"], rule.get("min"), rule.get("max"), rule.get("source")
 
-        def keep(r, metric=metric, lo=lo, hi=hi):
-            v = session_metric(out, r, metric)
+        def keep(r, metric=metric, lo=lo, hi=hi, src=src):
+            v = session_metric(out, r, metric, src)
             if v is None:
                 return f"not_measured: {metric}"
             if lo is not None and v < lo:
@@ -145,7 +155,7 @@ def select(out: str | Path, study: dict[str, Any], *, include_developer: bool = 
 
         bounds = " and ".join(p for p in (f">= {lo}" if lo is not None else "",
                                           f"<= {hi}" if hi is not None else "") if p)
-        step(f"{metric} {bounds}", keep)
+        step(f"{metric} {bounds}" + (f" (from {src})" if src else ""), keep)
 
     return Cohort(sid, current, analysis_hash(study), rows, funnel)
 
